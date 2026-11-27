@@ -328,7 +328,7 @@ pub async fn assemble_inprocess(
             archive.clone(),
             layout.clone(),
             reader_config,
-            artifacts.clone(),
+            (artifacts.clone(), feed.clone()),
         )
         .map_err(assembly_err)?,
     );

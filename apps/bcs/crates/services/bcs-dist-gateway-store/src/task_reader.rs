@@ -17,6 +17,7 @@ use bcs_dist_store::capability;
 use bcs_dist_store::codec::{decode_ev_entry, decode_json, ev_entry_tid, stream_id};
 use bcs_dist_store::error::from_read;
 use bcs_dist_store::layout::KeyLayout;
+use bcs_dist_store::task_feed::StoreTaskFeed;
 use bcs_service_api::application::dist_gateway::CreationSource;
 use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
 use bcs_service_api::port::repo::distributed::group_round::{StrictLicense, decode_strict_license};
@@ -35,6 +36,9 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
+
+#[path = "strict_follow.rs"]
+mod strict_follow;
 
 /// Code of the error a subscriber gets when it reads too slowly; it resumes
 /// from its last cursor.
@@ -92,6 +96,7 @@ pub(crate) struct Shared {
     pub(crate) stream: Arc<dyn StreamStorePlugin>,
     pub(crate) results: Arc<dyn ResultStorePort>,
     pub(crate) group_archives: Option<Arc<dyn TaskArchiveRepo>>,
+    group_feed: Option<Arc<StoreTaskFeed>>,
     pub(crate) layout: KeyLayout,
     pub(crate) config: GatewayStoreConfig,
     pub(crate) readers: SessionReaders,
@@ -115,8 +120,9 @@ impl StoreTaskReader {
         Self::build(documents, zset, stream, results, layout, config, None)
     }
 
-    /// The mounted group gateway opts into the strict authority cut. Legacy
-    /// gateway assemblies that have no strict-round repository keep their reader.
+    /// The mounted group gateway reads snapshots from the strict authority
+    /// cut and follows the canonical committed TaskFeed. Legacy assemblies
+    /// with no strict-round repository keep their original reader.
     pub fn with_group_archives(
         documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
@@ -124,9 +130,9 @@ impl StoreTaskReader {
         results: Arc<dyn ResultStorePort>,
         layout: KeyLayout,
         config: GatewayStoreConfig,
-        group_archives: Arc<dyn TaskArchiveRepo>,
+        group: (Arc<dyn TaskArchiveRepo>, Arc<StoreTaskFeed>),
     ) -> Result<Self, StoreError> {
-        Self::build(documents, zset, stream, results, layout, config, Some(group_archives))
+        Self::build(documents, zset, stream, results, layout, config, Some(group))
     }
 
     fn build(
@@ -136,7 +142,7 @@ impl StoreTaskReader {
         results: Arc<dyn ResultStorePort>,
         layout: KeyLayout,
         config: GatewayStoreConfig,
-        group_archives: Option<Arc<dyn TaskArchiveRepo>>,
+        group: Option<(Arc<dyn TaskArchiveRepo>, Arc<StoreTaskFeed>)>,
     ) -> Result<Self, StoreError> {
         capability::require(&[
             (documents.as_ref(), StoreCapability::DocumentCas),
@@ -155,6 +161,7 @@ impl StoreTaskReader {
                 read_grace: config.read_grace,
             },
         );
+        let (group_archives, group_feed) = group.unzip();
         Ok(Self {
             shared: Arc::new(Shared {
                 documents,
@@ -162,6 +169,7 @@ impl StoreTaskReader {
                 stream,
                 results,
                 group_archives,
+                group_feed,
                 layout,
                 config,
                 readers,
@@ -294,13 +302,22 @@ impl Shared {
         }) else {
             return Err(not_applied("group_accepted_snapshot_missing"));
         };
-        if !is_terminal(snapshot.content.status) {
+        let finalizing_at = group_finalizing_at(&doc.value, &license);
+        let commit = doc.value.pointer("/checkpoint/commit_seq")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| invalid("group_checkpoint_commit_missing"))?;
+        if !is_terminal(snapshot.content.status)
+            && snapshot.source_commit.0 <= commit
+            && finalizing_at.is_none_or(|sequence| snapshot.source_commit.0 < sequence)
+        {
             return Ok(Some(Stored::Live(snapshot)));
         }
-        // The follower may publish before the strict authority commits its
-        // cold confirmation. Keep the accepted task visible, but do not read
-        // terminal state, artifacts or result from the unconfirmed feed cut.
-        let previous = previous_group_snapshot(&doc.value, &license, &snapshot)?;
+        // A Working snapshot can already hold the final answer: Show and
+        // SaveResult are sealed in the same decision. Rewind either snapshot
+        // until the terminal is confirmed. A snapshot newer than the
+        // checkpoint read can also belong to an unseen finalizing decision.
+        let before = finalizing_at.unwrap_or(snapshot.source_commit.0);
+        let previous = previous_group_snapshot(&doc.value, &license, before)?;
         Ok(Some(Stored::Live(previous.unwrap_or_else(|| {
             let mut safe = snapshot;
             safe.content = TaskContent {
@@ -404,19 +421,20 @@ impl Shared {
     }
 }
 
-fn previous_group_snapshot(
-    document: &serde_json::Value,
-    license: &StrictLicense,
-    terminal: &TaskSnapshot,
-) -> Result<Option<TaskSnapshot>, StoreError> {
-    let checkpoint = document.get("checkpoint");
-    let finalizing_at = checkpoint
-        .and_then(|value| value.get("tasks"))
+fn group_finalizing_at(document: &serde_json::Value, license: &StrictLicense) -> Option<u64> {
+    document.pointer("/checkpoint/tasks")
         .and_then(serde_json::Value::as_array)
         .and_then(|tasks| tasks.iter().find(|task| task.get("tid").and_then(serde_json::Value::as_str) == Some(&license.tid.0)))
         .and_then(|task| task.pointer("/finalization/record/source_commit"))
         .and_then(serde_json::Value::as_u64)
-        .unwrap_or(terminal.source_commit.0);
+}
+
+fn previous_group_snapshot(
+    document: &serde_json::Value,
+    license: &StrictLicense,
+    finalizing_at: u64,
+) -> Result<Option<TaskSnapshot>, StoreError> {
+    let checkpoint = document.get("checkpoint");
     let Some(entries) = checkpoint
         .and_then(|value| value.get("feed_publications"))
         .and_then(serde_json::Value::as_array)
@@ -578,8 +596,12 @@ impl TaskReaderPort for StoreTaskReader {
             Some(Stored::Live(snapshot)) => {
                 // No coverage yet: start before the first entry, so the first
                 // events of the task are never skipped.
-                let at = snapshot.snapshot_event_id.map_or(START, stream_id);
-                let cursor = self.shared.cursor(&snapshot.sid, &snapshot.tid, at);
+                let cursor = if let Some(feed) = self.shared.group_feed_for(&snapshot.sid) {
+                    feed.cursor(&snapshot.sid, &snapshot.tid, snapshot.snapshot_event_id)?
+                } else {
+                    let at = snapshot.snapshot_event_id.map_or(START, stream_id);
+                    self.shared.cursor(&snapshot.sid, &snapshot.tid, at)
+                };
                 Some(RestoredTask::Live {
                     view: live_view(snapshot),
                     cursor,
@@ -595,6 +617,9 @@ impl TaskReaderPort for StoreTaskReader {
     ) -> Result<ResumeCheck, StoreError> {
         if !in_session(&cursor.sid, &cursor.tid) {
             return Ok(ResumeCheck::InvalidScope);
+        }
+        if let Some(feed) = self.shared.group_feed_for(&cursor.sid) {
+            return self.shared.validate_group_resume(feed, scope, cursor).await;
         }
         let Some(at) = position::parse(&self.shared.config.backend, &cursor.token) else {
             return Ok(ResumeCheck::Gap);
@@ -617,6 +642,9 @@ impl TaskReaderPort for StoreTaskReader {
         scope: TaskScope,
         after: TaskCursor,
     ) -> BoxStream<'static, Result<FollowItem, StoreError>> {
+        if let Some(feed) = self.shared.group_feed_for(&after.sid) {
+            return strict_follow::follow(self.shared.clone(), feed, scope, after);
+        }
         let follow = Follow {
             shared: self.shared.clone(),
             scope,

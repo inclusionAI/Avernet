@@ -53,6 +53,19 @@ pub enum RoundPart {
     Data { data: serde_json::Value },
 }
 
+/// Only the designated product crosses a workflow edge. A completion may also
+/// carry a private status message or history which belongs to the producing node.
+/// For a direct message answer, its ordered parts are the product.
+pub fn predecessor_product(value: &serde_json::Value) -> Option<serde_json::Value> {
+    use serde_json::json;
+    if value.get("state")?.as_str()? != "completed" { return None; }
+    if let Some(artifacts) = value.get("artifacts") {
+        Some(json!({"state": "completed", "artifacts": artifacts.as_array()?}))
+    } else {
+        Some(json!({"state": "completed", "message": {"parts": value.get("message")?.get("parts")?.as_array()?}}))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RoundInput {
     pub schema_version: RoundSchemaVersion,

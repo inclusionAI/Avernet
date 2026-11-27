@@ -18,6 +18,11 @@ with `append: true`. The adapter does not invent a final-chunk flag. Node and
 class metadata accompany artifacts and update events. Thinking may appear as a
 streamed event but is invalid inside a persisted display snapshot.
 
+For a strict FSM final answer, the reducer retains the final node's original
+`artifactId` and ordered text/data parts. GetTask and the SSE artifact update
+expose that same ID; a data string is not reclassified as text. Direct message
+answers have no downstream artifact ID and retain the deterministic display ID.
+
 The adapter rejects unknown display versions, unresolved references and non-text
 AppendText values. It performs no storage, network, identity generation or quota
 accounting. Formatting does not modify the neutral snapshot or event, and its

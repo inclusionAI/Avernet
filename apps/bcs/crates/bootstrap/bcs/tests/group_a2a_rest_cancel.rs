@@ -54,8 +54,8 @@ async fn start_round(world: &CompanionWorld, app: &Router) -> (Sid, String) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "send: {body}");
-    let tid = body["id"].as_str().unwrap().to_owned();
-    let sid = Sid(body["contextId"].as_str().unwrap().to_owned());
+    let tid = body["task"]["id"].as_str().unwrap().to_owned();
+    let sid = Sid(body["task"]["contextId"].as_str().unwrap().to_owned());
     tokio::time::timeout(Duration::from_secs(90), async {
         while world.journal.executions.load(Ordering::SeqCst) == 0 {
             world.drive(1).await;

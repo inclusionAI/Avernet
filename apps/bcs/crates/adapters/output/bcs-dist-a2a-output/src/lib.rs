@@ -25,8 +25,15 @@ fn artifact(node: &NodeId, id: &ArtifactId, class: OutputClass, value: &Value) -
     // Length framing keeps arbitrary node/artifact names collision free. This
     // uses exactly the identity tuple used by the shared display projection.
     let id_class = if class == OutputClass::FinalAnswer { "final_answer" } else { class_name(class) };
-    let artifact_id = format!("dist:{}:{}:{}:{}", id_class, node.0.len(), node.0, id.0);
+    let mut artifact_id = format!("dist:{}:{}:{}:{}", id_class, node.0.len(), node.0, id.0);
     let parts = if class == OutputClass::FinalAnswer {
+        let value = if value.is_object() {
+            artifact_id = value.get("artifact_id").and_then(Value::as_str)
+                .filter(|id| !id.is_empty()).ok_or_else(|| invalid("output_final_id_invalid"))?.to_owned();
+            value.get("parts").ok_or_else(|| invalid("output_final_parts_invalid"))?
+        } else {
+            value
+        };
         let parts: Vec<RoundPart> = serde_json::from_value(value.clone())
             .map_err(|_| invalid("output_final_parts_invalid"))?;
         if parts.is_empty() {

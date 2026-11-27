@@ -391,7 +391,7 @@ impl FsmReducerRunner {
                 };
                 (attempt, did)
             };
-            let request = self.request_payload(context, round, workflow, &id, attempt);
+            let request = self.request_payload(context, round, workflow, &id, attempt)?;
             let deadline_id = DeadlineId(format!(
                 "fsm:dispatch:{}:{}:{id}:{attempt}",
                 round.key.tid.0,
@@ -438,24 +438,27 @@ impl FsmReducerRunner {
         _workflow: &ValidatedWorkflow,
         node: &str,
         attempt: u32,
-    ) -> Payload {
+    ) -> Result<Payload, RunnerError> {
         let mut upstream = serde_json::Map::new();
         for (id, run) in &round.nodes {
             if let Some(artifact) = &run.artifact
                 && is_predecessor(context.workflow, node, id)
             {
-                let value = serde_json::to_value(artifact).unwrap_or(serde_json::Value::Null);
-                upstream.insert(id.clone(), value);
+                let product = match artifact {
+                    Payload::Inline(value) => predecessor_product(value).map(Payload::Inline),
+                    Payload::Ref(_) => None,
+                }.ok_or_else(|| Self::round_error("invalid_upstream_product"))?;
+                upstream.insert(id.clone(), serde_json::json!(product));
             }
         }
-        Payload::Inline(serde_json::json!({
+        Ok(Payload::Inline(serde_json::json!({
             "schema_version": 1,
             "generation": round.key.generation.get(),
             "node": node,
             "attempt": attempt,
-            "parts": serde_json::to_value(&round.parts).unwrap_or(serde_json::Value::Null),
+            "parts": &round.parts,
             "upstream": upstream,
-        }))
+        })))
     }
 
     fn on_agent(
@@ -575,7 +578,7 @@ impl FsmReducerRunner {
                         };
                         (new_attempt, new_did)
                     };
-                    let request = self.request_payload(context, round, workflow, &node_id, new_attempt);
+                    let request = self.request_payload(context, round, workflow, &node_id, new_attempt)?;
                     let deadline_id = DeadlineId(format!(
                         "fsm:dispatch:{}:{}:{node_id}:{new_attempt}",
                         round.key.tid.0,
@@ -765,7 +768,8 @@ impl FsmReducerRunner {
             return;
         };
         let budget = bcs_service_api::port::repo::distributed::group_round::RoundBudgetProfile::v1();
-        let parts = artifacts.iter().filter_map(serde_json::Value::as_array).flatten();
+        let parts = artifacts.iter()
+            .filter_map(|answer| answer.get("parts").unwrap_or(answer).as_array()).flatten();
         if parts.clone().count() > budget.max_page_rows as usize
             || parts.into_iter().any(|part| serde_json::to_vec(part)
                 .map_or(true, |encoded| encoded.len() > budget.feed_event_bytes))
@@ -843,7 +847,12 @@ fn final_artifacts(result: &Payload) -> Option<Vec<serde_json::Value>> {
         if artifacts.is_empty() {
             return None;
         }
-        artifacts.iter().map(parts_of).collect()
+        let mut ids = BTreeSet::new();
+        artifacts.iter().map(|artifact| {
+            let id = artifact.get("artifactId")?.as_str()?;
+            if id.is_empty() || !ids.insert(id) { return None; }
+            Some(serde_json::json!({"artifact_id": id, "parts": parts_of(artifact)?}))
+        }).collect()
     } else {
         Some(vec![parts_of(value.get("message")?)?])
     }

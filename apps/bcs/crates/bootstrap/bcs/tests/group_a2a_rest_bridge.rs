@@ -13,6 +13,8 @@
 mod group_a2a_companion_support;
 #[path = "group_a2a_rest_reuse/mod.rs"]
 mod group_a2a_rest_reuse;
+#[path = "group_a2a_rest_reuse/staged_visibility.rs"]
+mod staged_visibility;
 
 use bcs_dist_model::Admission;
 use bcs_store_api::{WriteOutcome, document::DocumentStorePlugin};
@@ -144,7 +146,7 @@ async fn rest_message_send_completes_a_strict_round_over_real_joints() {
             StatusCode::OK,
             "the flagship group send must answer with its receipt: {body:?}"
         );
-        let body = body.expect("receipt body");
+        let body = &body.as_ref().expect("receipt body")["task"];
         let tid = bcs_dist_model::Tid(body["id"].as_str().expect("receipt task id").to_owned());
         let sid = bcs_dist_model::Sid(
             body["contextId"].as_str().expect("receipt session id").to_owned(),
@@ -192,6 +194,7 @@ async fn rest_message_send_completes_a_strict_round_over_real_joints() {
         };
         let completed =
             until_rest_task_state(&world, &app, &tid, "TASK_STATE_COMPLETED").await;
+        assert_eq!(completed["artifacts"][0]["artifactId"], "review-answer");
         let parts: Vec<_> = completed["artifacts"]
             .as_array()
             .expect("artifact array")
@@ -257,7 +260,7 @@ async fn rest_message_send_completes_a_strict_round_over_real_joints() {
         let (status, body) = response_of(&app, rest_send("bridge-first", "please research", false)).await;
         assert_eq!(status, StatusCode::OK, "retry answers its receipt: {body:?}");
         assert_eq!(
-            body.expect("retry body")["id"].as_str(),
+            body.expect("retry body")["task"]["id"].as_str(),
             Some(tid.0.as_str()),
             "the retry replays the original round's task"
         );

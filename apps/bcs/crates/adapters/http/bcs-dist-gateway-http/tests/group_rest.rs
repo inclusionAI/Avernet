@@ -50,11 +50,11 @@ async fn rest_contract_preserves_rpc() {
     let (status, body) =
         response_of(&app, rest_send("m-rest-1", "hello", None, json!({ "blocking": false }))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let tid = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let tid = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
     let (again, body) =
         response_of(&app, rest_send("m-rest-1", "hello", None, json!({ "blocking": false }))).await;
     assert_eq!(again, StatusCode::OK, "{body:?}");
-    assert_eq!(body.unwrap()["id"], tid.as_str());
+    assert_eq!(body.unwrap()["task"]["id"], tid.as_str());
     let (collision, _) = response_of(
         &app,
         rest_send("m-rest-1", "different content", None, json!({ "blocking": false })),
@@ -94,7 +94,7 @@ async fn rest_contract_preserves_rpc() {
         .unwrap();
     let (status, body) = response_of(&app, sneaky_request).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let sneaky_view = body.unwrap();
+    let sneaky_view = &body.as_ref().unwrap()["task"];
     let sneaky_tid = sneaky_view["id"].as_str().unwrap().to_owned();
     let sneaky_sid = sneaky_view["contextId"].as_str().unwrap().to_owned();
     // Durable strip: the admitted input of the sneaky session carries no
@@ -161,7 +161,7 @@ async fn blocking_send_budget_expiry_returns_504_and_keeps_the_task() {
     )
     .await;
     assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body:?}");
-    let body = body.unwrap();
+    let body = &body.as_ref().unwrap()["task"];
     assert_eq!(body["status"]["state"], "TASK_STATE_SUBMITTED");
     let tid = body["id"].as_str().unwrap().to_owned();
 
@@ -183,7 +183,7 @@ async fn rpc_cannot_write_rest_context_and_vice_versa() {
     let (status, body) =
         response_of(&app, rest_send("m-iso-1", "rest", None, json!({ "blocking": false }))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let body = body.unwrap();
+    let body = &body.as_ref().unwrap()["task"];
     let rest_sid = body["contextId"].as_str().unwrap().to_owned();
     let rest_tid = body["id"].as_str().unwrap().to_owned();
 
@@ -251,7 +251,7 @@ async fn list_pages_share_cut_across_hot_to_archive() {
     let (status, body) =
         response_of(&app, rest_send("m-seed", "seed", None, json!({ "blocking": false }))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let body = body.unwrap();
+    let body = &body.as_ref().unwrap()["task"];
     let sid = body["contextId"].as_str().unwrap().to_owned();
     let seed = body["id"].as_str().unwrap().to_owned();
     let mut tid_of = vec![(0, seed)];
@@ -259,7 +259,7 @@ async fn list_pages_share_cut_across_hot_to_archive() {
         let (status, body) =
             response_of(&app, rest_send(n, n, None, json!({ "blocking": false }))).await;
         assert_eq!(status, StatusCode::OK, "{body:?}");
-        tid_of.push((delta, body.unwrap()["id"].as_str().unwrap().to_owned()));
+        tid_of.push((delta, body.unwrap()["task"]["id"].as_str().unwrap().to_owned()));
     }
     let tid_of: std::collections::HashMap<i64, String> = tid_of.into_iter().collect();
     publish_at(&p, &tid_of[&1_000], TaskStatus::Working, 1_000, &[]).await;
@@ -289,7 +289,7 @@ async fn list_pages_share_cut_across_hot_to_archive() {
     let (status, body) =
         response_of(&app, rest_send("m-l-new", "late", None, json!({ "blocking": false }))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let late = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let late = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
 
     let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={next}"))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
@@ -365,7 +365,7 @@ async fn rest_subscribe_recovers_boundedly_and_never_cancels() {
     let app = test_router(&stack);
     let (_, body) =
         response_of(&app, rest_send("m-sub-1", "hello", None, json!({ "blocking": false }))).await;
-    let tid = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let tid = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
     let sid = tid.rsplit_once('.').unwrap().0.to_owned();
 
     // The stream lives while the task works; dropping it changes nothing.
@@ -377,7 +377,7 @@ async fn rest_subscribe_recovers_boundedly_and_never_cancels() {
             .unwrap();
         let frames = read_frames(response, 1).await;
         assert_eq!(frames.len(), 1, "{frames:?}");
-        assert_eq!(frames[0].data["id"], tid.as_str());
+        assert_eq!(frames[0].data["task"]["id"], tid.as_str());
         // Every event frame carries the cursor id a client resumes with.
         assert!(frames[0].id.is_some(), "{frames:?}");
     }
@@ -403,7 +403,7 @@ async fn rest_subscribe_recovers_boundedly_and_never_cancels() {
     // closes; a later round of the same session is a fresh task.
     let (_, body) =
         response_of(&app, rest_send("m-sub-2", "done", Some(&sid), json!({ "blocking": false }))).await;
-    let done = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let done = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
     publish_at(&p, &done, TaskStatus::Completed, 2, &[]).await;
     let response = app
         .clone()
@@ -412,7 +412,7 @@ async fn rest_subscribe_recovers_boundedly_and_never_cancels() {
         .unwrap();
     let frames = read_frames(response, 1).await;
     assert_eq!(frames.len(), 1, "{frames:?}");
-    assert_eq!(frames[0].data["status"]["state"], "TASK_STATE_COMPLETED");
+    assert_eq!(frames[0].data["task"]["status"]["state"], "TASK_STATE_COMPLETED");
 
     // A finished task refuses a new cancel with 409.
     let (status, body) = response_of(&app, rest_cancel(&done, "late-cancel")).await;

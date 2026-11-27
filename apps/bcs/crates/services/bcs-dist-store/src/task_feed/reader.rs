@@ -16,7 +16,8 @@ struct ListCursor {
 }
 
 impl StoreTaskFeed {
-    pub(super) fn cursor(
+    /// Resume committed TaskFeed delivery after a snapshot's covered event.
+    pub fn cursor(
         &self,
         sid: &Sid,
         tid: &Tid,

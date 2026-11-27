@@ -283,8 +283,14 @@ fn group_start_replay_is_idempotent() {
         &did,
         2,
         AgentEventKind::Final,
-        serde_json::json!({"value": "start"}),
+        serde_json::json!({"state": "completed", "message": {"parts":[{"text":"private status"}]},
+            "artifacts":[{"artifactId":"result", "parts":[{"text":"public result"}]}]}),
     )]);
+    let ActionIntent::StartDispatch(next) = &done.actions[0] else { panic!("expected successor") };
+    let Payload::Inline(payload) = &next.request else { panic!("expected dispatch body") };
+    let product = &payload["upstream"]["start"]["value"];
+    assert!(product.get("message").is_none());
+    assert_eq!(product["artifacts"][0]["parts"][0]["text"], "public result");
     let nodes: Vec<String> = Round::dispatches(&done).into_iter().map(|(n, _, _)| n).collect();
     assert_eq!(nodes, vec!["final".to_string()], "the round continues from the first admission");
 }
@@ -337,7 +343,7 @@ fn final_on_canceling_attempt_counts_as_verified_success() {
         &did,
         2,
         AgentEventKind::Final,
-        serde_json::json!({"value": "late success"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"late success"}]}}),
     )]);
     assert!(
         Round::dispatches(&raced).iter().any(|(node, attempt, _)| node == "final" && *attempt == 1),
@@ -441,7 +447,7 @@ fn final_counts_as_stop_evidence_in_stopping_phase() {
         &start_did,
         2,
         AgentEventKind::Final,
-        serde_json::json!({"value": "start"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
     )]);
     let left_did = dispatch_of(&fanned, "left").1;
     let right_did = dispatch_of(&fanned, "right").1;
@@ -454,7 +460,7 @@ fn final_counts_as_stop_evidence_in_stopping_phase() {
         &left_did,
         3,
         AgentEventKind::Final,
-        serde_json::json!({"value": "left late"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"left late"}]}}),
     )]);
     assert!(
         Round::finished(&half_stopped).is_empty(),
@@ -466,7 +472,7 @@ fn final_counts_as_stop_evidence_in_stopping_phase() {
         &right_did,
         4,
         AgentEventKind::Final,
-        serde_json::json!({"value": "right late"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"right late"}]}}),
     )]);
     assert_eq!(Round::finished(&closure).len(), 1);
     let (status, Payload::Inline(result)) = &Round::finished(&closure)[0] else {

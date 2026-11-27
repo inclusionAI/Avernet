@@ -28,7 +28,7 @@ async fn d0_matrix_gates_rest_task_read_and_cancel() {
     let app = test_router(&stack);
     let (_, body) =
         response_of(&app, rest_send("m-d0", "hello", None, json!({ "blocking": false }))).await;
-    let tid = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let tid = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
 
     // Cancel grant revoked: the cancel route refuses and nothing durable
     // happens for the round.
@@ -49,6 +49,12 @@ async fn d0_matrix_gates_rest_task_read_and_cancel() {
     let (status, body) = response_of(&app, rest_list("pageSize=2")).await;
     assert_eq!(status.as_u16(), 403, "{body:?}");
     assert_eq!(code_of(&body), "PERMISSION_DENIED");
+    let sid = tid.rsplit_once('.').unwrap().0;
+    let (status, body) = response_of(&app, rpc_request("ListTasks", json!({"contextId": sid}), "list-revoked")).await;
+    assert_eq!(status.as_u16(), 200);
+    let rpc = body.expect("RPC error envelope");
+    assert_eq!(rpc["error"]["code"], -32001);
+    assert!(rpc.get("result").is_none());
     stack.grants.read.store(true, Ordering::SeqCst);
     let (status, body) = response_of(&app, rest_task("GET", &tid)).await;
     assert_eq!(status.as_u16(), 200, "{body:?}");
@@ -65,7 +71,7 @@ async fn revoked_grant_ends_an_open_stream_within_one_recheck() {
     let app = test_router(&stack);
     let (_, body) =
         response_of(&app, rest_send("m-live", "hello", None, json!({ "blocking": false }))).await;
-    let tid = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let tid = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
 
     let response = app
         .clone()
@@ -126,7 +132,7 @@ async fn an_oversized_stream_frame_closes_with_the_budget_code() {
     let app = test_router(&stack);
     let (_, body) =
         response_of(&app, rest_send("m-big", "hello", None, json!({ "blocking": false }))).await;
-    let tid = body.unwrap()["id"].as_str().unwrap().to_owned();
+    let tid = body.unwrap()["task"]["id"].as_str().unwrap().to_owned();
 
     // A legal snapshot unit whose content alone passes the input budget's
     // spirit but whose public frame exceeds it.

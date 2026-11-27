@@ -236,10 +236,12 @@ async fn strict_node_send_preserves_order_and_carries_bound_predecessors() {
     agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"task": task("TASK_STATE_WORKING")})]));
     let mut req = request("step-two");
     let upstream = json!({"research": {"state": "completed", "artifacts": [{"parts": [{"text": "research answer"}]}]}});
+    let mut reported = upstream["research"].clone();
+    reported["message"] = agent_message("private-research-status");
     req.payload = Payload::Inline(json!({
         "schema_version": 1, "generation": 1, "node": "review", "attempt": 1,
         "parts": [{"kind":"text", "text":"check this"}, {"kind":"data", "data":42}],
-        "upstream": {"research": {"kind":"inline", "value":upstream["research"]}}
+        "upstream": {"research": {"kind":"inline", "value":reported}}
     }));
     let outcome = client.start(&start_authority(), req).await;
     assert_eq!(name(&outcome), "accepted");

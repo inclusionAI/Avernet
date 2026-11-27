@@ -281,7 +281,7 @@ fn fork_workflow() -> StateMachineDefinition {
 #[test]
 fn fork_join_uses_designated_final() {
     let designated = serde_json::json!({"state": "completed", "message": {"parts": [{"text": "designated"}]}});
-    let branch = |name: &str| serde_json::json!({"value": name});
+    let branch = |name: &str| serde_json::json!({"state":"completed", "message":{"parts":[{"text":name}]}});
     let mut orders = Vec::new();
     for first in ["right", "left"] {
         let second = if first == "right" { "left" } else { "right" };
@@ -481,7 +481,7 @@ fn determinism_replay_law() {
             &start_did,
             2,
             AgentEventKind::Final,
-            serde_json::json!({"value": "start"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
         )]));
         let fanout = chain.last().unwrap();
         let (_, left_did) = dispatch_of(fanout, "left");
@@ -498,14 +498,14 @@ fn determinism_replay_law() {
             &left_did,
             4,
             AgentEventKind::Final,
-            serde_json::json!({"value": "left"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"left"}]}}),
         )]));
         chain.push(round.step(&[agent(
             "task-1",
             &right_did,
             5,
             AgentEventKind::Final,
-            serde_json::json!({"value": "right"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"right"}]}}),
         )]));
         let joined = chain.last().unwrap();
         let (_, final_did) = dispatch_of(joined, "final");
@@ -514,7 +514,7 @@ fn determinism_replay_law() {
             &final_did,
             6,
             AgentEventKind::Final,
-            serde_json::json!({"value": "designated"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"designated"}]}}),
         )]));
         decisions.push(chain);
     }
@@ -673,7 +673,7 @@ fn unexpected_interaction_enters_stop_barrier() {
             &start_did,
             2,
             AgentEventKind::Final,
-            serde_json::json!({"value": "start"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
         )]);
         let (_, left_did) = dispatch_of(&fanned, "left");
         let (_, right_did) = dispatch_of(&fanned, "right");
@@ -749,7 +749,7 @@ fn sibling_in_flight_blocks_terminal() {
         &start_did,
         2,
         AgentEventKind::Final,
-        serde_json::json!({"value": "start"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
     )]);
     let (_, left_did) = dispatch_of(&fanned, "left");
     let (_, right_did) = dispatch_of(&fanned, "right");
@@ -896,7 +896,7 @@ fn old_context_replay_pins_workflow() {
             &start_did,
             2,
             AgentEventKind::Final,
-            serde_json::json!({"value": "start"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
         )],
     );
     assert!(
@@ -912,7 +912,7 @@ fn old_context_replay_pins_workflow() {
             &start_did,
             2,
             AgentEventKind::Final,
-            serde_json::json!({"value": "start"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
         )],
     );
     assert!(
@@ -926,7 +926,7 @@ fn old_context_replay_pins_workflow() {
         &start_did,
         2,
         AgentEventKind::Final,
-        serde_json::json!({"value": "start"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
     )]);
     let nodes: Vec<String> = Round::dispatches(&pinned)
         .into_iter()
@@ -949,7 +949,7 @@ fn old_context_replay_pins_workflow() {
         &start2,
         3,
         AgentEventKind::Final,
-        serde_json::json!({"value": "start"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
     )]);
     // The designated final node waits for every predecessor: only the draft
     // branch runs after the fan-out.
@@ -964,7 +964,7 @@ fn old_context_replay_pins_workflow() {
         &draft2,
         4,
         AgentEventKind::Final,
-        serde_json::json!({"value": "draft"}),
+        serde_json::json!({"state":"completed", "message":{"parts":[{"text":"draft"}]}}),
     )]);
     let nodes: Vec<String> = Round::dispatches(&joined)
         .into_iter()
@@ -992,7 +992,7 @@ impl Round {
             &did,
             seq,
             AgentEventKind::Final,
-            serde_json::json!({"value": "start"}),
+            serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}}),
         )])
     }
 }

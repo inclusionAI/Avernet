@@ -528,7 +528,9 @@ fn build_message(
         let mut results = serde_json::Map::new();
         for (node, encoded) in predecessors.as_object().ok_or("request_invalid")? {
             match serde_json::from_value(encoded.clone()).map_err(|_| "request_invalid")? {
-                Payload::Inline(content) => { results.insert(node.clone(), content); }
+                Payload::Inline(content) => {
+                    results.insert(node.clone(), predecessor_product(&content).ok_or("upstream_product_invalid")?);
+                }
                 Payload::Ref(_) => return Err("request_by_reference"),
             }
         }

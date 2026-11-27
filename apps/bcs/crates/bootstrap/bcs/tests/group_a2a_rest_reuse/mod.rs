@@ -19,8 +19,8 @@ fn send_in_context(context: &Sid, message_id: &str, text: &str) -> Request<Body>
 
 fn receipt_ids(task: Value) -> (Sid, Tid) {
     (
-        Sid(task["contextId"].as_str().unwrap().into()),
-        Tid(task["id"].as_str().unwrap().into()),
+        Sid(task["task"]["contextId"].as_str().unwrap().into()),
+        Tid(task["task"]["id"].as_str().unwrap().into()),
     )
 }
 

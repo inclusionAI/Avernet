@@ -22,7 +22,7 @@ impl ArtifactPart {
         content: &serde_json::Value,
         offset: usize,
     ) -> Option<Vec<Self>> {
-        let parts: Vec<RoundPart> = serde_json::from_value(content.clone()).ok()?;
+        let parts: Vec<RoundPart> = serde_json::from_value(content.get("parts").unwrap_or(content).clone()).ok()?;
         if parts.is_empty() {
             return None;
         }
@@ -116,7 +116,8 @@ pub enum OutputClass {
     Output,
     Tool,
     Thinking,
-    /// A strict FSM final artifact: its Upsert contains ordered `RoundPart`s.
+    /// Final-node output. An original artifact carries `{artifact_id, parts}`;
+    /// a direct message or legacy snapshot carries just the ordered `RoundPart`s.
     FinalAnswer,
 }
 

@@ -166,7 +166,7 @@ fn conformance_dist_runner_core_service() {
                 seq: InputSeq(2),
                 kind: AgentEventKind::Final,
                 remote_event_id: None,
-                payload: Payload::Inline(serde_json::json!({"value": "start"})),
+                payload: Payload::Inline(serde_json::json!({"state":"completed", "message":{"parts":[{"text":"start"}]}})),
             },
         },
         RunnerInput::Cancel { tid: Tid("task-1".into()) },

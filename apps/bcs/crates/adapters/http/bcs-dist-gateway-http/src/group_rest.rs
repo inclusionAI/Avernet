@@ -24,7 +24,7 @@
 
 use crate::mapping::{self, TaskShape};
 use crate::{AppState, cursor};
-use a2a::{AgentCapabilities, AgentCard, AgentInterface};
+use a2a::{AgentCapabilities, AgentCard, AgentInterface, SendMessageResponse, StreamResponse};
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Path, Query, State};
@@ -56,18 +56,19 @@ const REQUEST_ID: &str = "x-request-id";
 // ---- wire DTOs (owned here; never in the application or store) ----
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GroupSendConfiguration {
     /// Explicit blocking choice; wins over `returnImmediately` when both ride
     /// the request.
-    #[serde(default)]
     blocking: Option<bool>,
-    #[serde(default, rename = "returnImmediately")]
     return_immediately: Option<bool>,
+    #[serde(alias = "wait_timeout_millis")]
     wait_timeout_millis: Option<u32>,
+    #[serde(alias = "history_length")]
     history_length: Option<i32>,
-    #[serde(default)]
+    #[serde(alias = "accepted_output_modes")]
     accepted_output_modes: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(rename = "taskPushNotificationConfig", alias = "pushNotificationConfig", alias = "push_notification_config")]
     push_notification_config: Option<Value>,
 }
 
@@ -314,11 +315,7 @@ async fn send(
             .get_task(&caller, &group, &receipt.tid, CreationSource::GroupA2a)
             .await
         {
-            Ok(view) => Json(mapping::task(
-                &view,
-                TaskShape::history(history.map(|n| n.min(MAX_HISTORY as i32))),
-            ))
-            .into_response(),
+            Ok(view) => framed_final(view, history, false),
             Err(error) => rest_error(&error),
         };
     }
@@ -345,7 +342,7 @@ fn framed_final(view: bcs_dist_model::TaskView, history: Option<i32>, waited_out
     } else {
         StatusCode::OK
     };
-    (status, Json(task)).into_response()
+    (status, Json(SendMessageResponse::Task(task))).into_response()
 }
 
 async fn send_streaming(
@@ -510,11 +507,11 @@ pub(crate) async fn task_action(
                 Err(error) => rest_error(&error),
             }
         }
-        ("GET", "subscribe") => {
+        ("GET" | "POST", "subscribe") => {
             let mode = headers
                 .get(LAST_EVENT_ID)
                 .and_then(|value| value.to_str().ok())
-                .and_then(cursor::decode)
+                .and_then(cursor::decode_group)
                 .filter(|cursor| cursor.tid == tid)
                 .map_or(SubscribeMode::Snapshot, SubscribeMode::Resume);
             let subscribe = SubscribeTask {
@@ -590,12 +587,11 @@ pub(crate) async fn task_action(
     }
 }
 
-/// The SSE response of a group stream. Every frame's `data:` is one object
-/// of the shared public projection (a task, a status or artifact update, a
-/// resume acknowledgement or a final error) with no JSON-RPC envelope; every
-/// event frame's `id:` is the cursor a client sends back as its
-/// `Last-Event-ID`; one final error frame ends the stream, so no subscription
-/// hangs on a stopped feed.
+/// The SSE response of a group stream. Normal frames carry the A2A
+/// `StreamResponse` union (without a JSON-RPC envelope); resume acknowledgement
+/// and terminal error are separate control payloads. A frame's `id:` carries
+/// the cursor a client sends back as `Last-Event-ID`. A final error closes the
+/// stream, so no subscription hangs on a stopped feed.
 fn group_stream(
     items: bcs_service_api::application::dist_gateway::TaskSubscription,
     config: &std::sync::Arc<crate::GatewayHttpConfig>,
@@ -617,7 +613,7 @@ fn group_stream(
 /// One frame of a group stream: `None` when the serialized payload exceeds
 /// the public frame budget (the caller answers one `FRAME_BUDGET_EXCEEDED`
 /// frame and closes).
-fn data_frame(value: &Value, id: Option<String>) -> Option<Event> {
+fn data_frame(value: &impl serde::Serialize, id: Option<String>) -> Option<Event> {
     let payload = serde_json::to_string(value).ok()?;
     if payload.len() > PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES {
         return None;
@@ -676,16 +672,15 @@ fn error_frame(error: &GatewayError) -> Event {
 fn group_frames(item: Result<TaskStreamItem, GatewayError>) -> (Vec<Event>, bool) {
     match item {
         Ok(TaskStreamItem::Snapshot { view, cursor }) => {
-            let task = mapping::task(&view, TaskShape::FULL);
-            let value = serde_json::to_value(&task).unwrap_or(Value::Null);
-            match data_frame(&value, cursor.as_ref().and_then(cursor::encode)) {
+            let task = StreamResponse::Task(mapping::task(&view, TaskShape::FULL));
+            match data_frame(&task, cursor.as_ref().and_then(cursor::encode_group)) {
                 Some(event) => (vec![event], false),
                 None => (vec![budget_error_frame()], true),
             }
         }
         Ok(TaskStreamItem::ResumeAccepted { cursor }) => {
             let value = json!({ "resumeAccepted": true });
-            match data_frame(&value, cursor::encode(&cursor)) {
+            match data_frame(&value, cursor::encode_group(&cursor)) {
                 Some(event) => (vec![event], false),
                 None => (vec![budget_error_frame()], true),
             }
@@ -697,9 +692,8 @@ fn group_frames(item: Result<TaskStreamItem, GatewayError>) -> (Vec<Event>, bool
                 let Some(result) = mapping::event(&cursor.sid, event) else {
                     continue;
                 };
-                let value = serde_json::to_value(&result).unwrap_or(Value::Null);
-                let id = (n == last).then(|| cursor::encode(&cursor)).flatten();
-                match data_frame(&value, id) {
+                let id = (n == last).then(|| cursor::encode_group(&cursor)).flatten();
+                match data_frame(&result, id) {
                     Some(frame) => frames.push(frame),
                     None => return (vec![budget_error_frame()], true),
                 }

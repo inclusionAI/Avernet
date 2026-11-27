@@ -15,6 +15,7 @@ const FORMAT: &str = "1.";
 const BACKEND: &str = "tbase";
 /// Changes only if a future rebuild procedure recreates a stream.
 const GENERATION: &str = "1";
+const GROUP_FORMAT: &str = "2.";
 const MAX_ENCODED_BYTES: usize = 1024;
 
 /// `None` when the cursor cannot be expressed in format 1.
@@ -52,6 +53,31 @@ pub fn decode(id: &str) -> Option<TaskCursor> {
             value: position.to_owned(),
         },
     })
+}
+
+/// Group streams also carry namespaced, opaque feed tokens. Do not change
+/// format 1 or let the JSON-RPC binding accept the group-only encoding.
+pub(crate) fn encode_group(cursor: &TaskCursor) -> Option<String> {
+    if let Some(v1) = encode(cursor) {
+        return Some(v1);
+    }
+    let bytes = serde_json::to_vec(cursor).ok()?;
+    if bytes.len() > MAX_ENCODED_BYTES {
+        return None;
+    }
+    let encoded = format!("{GROUP_FORMAT}{}", URL_SAFE_NO_PAD.encode(bytes));
+    (encoded.len() <= MAX_ENCODED_BYTES).then_some(encoded)
+}
+
+pub(crate) fn decode_group(id: &str) -> Option<TaskCursor> {
+    if let Some(v1) = decode(id) {
+        return Some(v1);
+    }
+    if id.len() > MAX_ENCODED_BYTES {
+        return None;
+    }
+    let raw = URL_SAFE_NO_PAD.decode(id.strip_prefix(GROUP_FORMAT)?).ok()?;
+    serde_json::from_slice(&raw).ok()
 }
 
 /// `<digits>-<digits>`.
