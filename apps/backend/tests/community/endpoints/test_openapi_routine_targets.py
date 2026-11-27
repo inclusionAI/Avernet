@@ -146,7 +146,7 @@ class _RuntimeProviders:
             raise self.binding_error
         return ResolvedRuntimeBinding(99, RuntimeBindingSource.CALLER_INSTANCE if self.caller else RuntimeBindingSource.SERVICE_ONLINE)
 
-    def get_latest_by_source_bot_id_and_owner_and_status(self, **kwargs):
+    def get_latest_by_source_bot_and_status(self, **kwargs):
         from types import SimpleNamespace
         return SimpleNamespace(id=7, ext={"binding": {"online": 99, "verify": 98}}, status=kwargs["status"])
 

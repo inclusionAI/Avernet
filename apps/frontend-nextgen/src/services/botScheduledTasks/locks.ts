@@ -11,6 +11,6 @@ export async function loadRoutineLock(
   if (!scope.userId || !context.owner_id) throw new Error('Bot 归属或当前登录身份尚未就绪');
   return sendRoutineRequest<EditLockDto>(`/openapi/v1/bots/${encodeURIComponent(scope.botId)}/edit-lock`, {
     method: 'GET',
-    params: { user_id: scope.userId, entity_id: context.owner_id },
+    params: { user_id: scope.userId, owner_id: context.owner_id },
   });
 }

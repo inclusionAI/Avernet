@@ -49,6 +49,8 @@ export interface BotDomain {
   publicationVersion?: number;
   liveVersion?: number;
   ownerId?: string;
+  /** Stable Bot resource identity, independent of its current Owner. */
+  entityId?: string;
   ownerName?: string;
   entityKey: string;
   name: string;
