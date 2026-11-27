@@ -21,3 +21,6 @@ Run focused tests from `clawbench-base` so its local Python modules are availabl
 ```bash
 python3 -m pytest -q tests
 ```
+
+See the [per-case tool replay proposal](tool-replay.md) for the fixture format
+and the runner boundary.
