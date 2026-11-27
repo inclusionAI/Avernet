@@ -10,11 +10,12 @@ import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { useRunDetail } from '@/hooks/useRunDetail';
 import { useRunList } from '@/hooks/useRunList';
 import { useRunPolling } from '@/hooks/useRunPolling';
-import { createAgentDraft, toSubmitDTO, type ComputeDraft, type DraftIssue } from '@/domain/agentswarm/draft';
+import { createNewAgentRef, resolveRosterRefs, toSubmitDTO, type ComputeDraft, type DraftIssue } from '@/domain/agentswarm/draft';
 import { toIdentityOptions } from '@/domain/agentswarm/identityOptions';
+import { normalizeModelId } from '@/domain/agentswarm/models';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { explainSubmitRefusal } from '@/services/agentswarm/refusals';
-import { submitRun } from '@/services/agentswarm/service';
+import { createDefinition, submitRun } from '@/services/agentswarm/service';
 import { resolveAgentswarmTenant } from '@/services/agentswarm/tenant';
 import { isTerminalStatus } from '@/services/agentswarm/types';
 import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
@@ -68,7 +69,7 @@ export function AgentComputePanel({
 
   const emptyDraft = (): ComputeDraft => ({
     goal: '',
-    agents: [createAgentDraft({ kind: 'bot' })],
+    refs: [createNewAgentRef({ kind: 'bot' })],
     // Default to the Bot this conversation is with: the run then inherits the
     // identity the user is already talking to, instead of forcing a choice.
     identityBotId: defaultIdentityBotId ?? undefined,
@@ -130,7 +131,27 @@ export function AgentComputePanel({
     setSubmitting(true);
     setSubmitIssues([]);
     try {
-      const result = await submitRun(tenant, toSubmitDTO(draft, tenant));
+      const result = await submitRun(
+        tenant,
+        toSubmitDTO(
+          draft,
+          tenant,
+          // The panel has no library view to offer "update existing" in, so a
+          // colliding name surfaces as a submit error from the gateway (409)
+          // rather than being silently suffixed.
+          await resolveRosterRefs(draft, async (entry, name) => {
+            const saved = await createDefinition(tenant, {
+              name,
+              role: entry.body.role,
+              instructions: entry.body.instructions ?? '',
+              kind: entry.body.kind,
+              model: normalizeModelId(entry.body.model) ?? null,
+              manifest_document: entry.body.config_manifest ?? '',
+            });
+            return saved.definition_id;
+          }),
+        ),
+      );
       notifySuccess(`计算任务已提交：${result.run_id}`);
       // The list has no goal, so remember the one this submit used.
       rememberGoal(result.run_id, draft.goal);
@@ -223,6 +244,7 @@ export function AgentComputePanel({
               identityError={botsError}
               submitting={submitting}
               submitIssues={submitIssues}
+              tenant={tenant}
               onSubmit={handleSubmit}
             />
           </div>

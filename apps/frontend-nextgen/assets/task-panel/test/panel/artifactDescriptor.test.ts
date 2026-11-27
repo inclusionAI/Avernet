@@ -1,4 +1,3 @@
-import type { Mock } from 'vitest';
 /** @vitest-environment node */
 import {
   artifactDescriptorWorkspaceFile,

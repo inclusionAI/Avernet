@@ -6,6 +6,7 @@ import { Spin } from '@/components/ui/Spin';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { AgentswarmRequestError } from '@/services/agentswarm/http';
 import { cancelRun } from '@/services/agentswarm/service';
+import { JsonBlock } from './JsonBlock';
 import {
   isTerminalStatus,
   runStatusLabel,
@@ -89,9 +90,7 @@ function AgentRow({ agent, defaultOpen }: { agent: AgentDetailDTO; defaultOpen: 
           {agent.output !== undefined && agent.output !== null ? (
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-foreground">输出</span>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-[11px]">
-                {renderValue(agent.output)}
-              </pre>
+              <JsonBlock value={renderValue(agent.output)} maxHeight="10rem" />
             </div>
           ) : null}
           {messages.length ? (
@@ -101,9 +100,9 @@ function AgentRow({ agent, defaultOpen }: { agent: AgentDetailDTO; defaultOpen: 
                 {messages.map((message) => (
                   <div key={message.message_id} className="rounded bg-muted/60 p-2">
                     <span className="font-medium text-muted-foreground">{message.role}</span>
-                    <pre className="mt-1 whitespace-pre-wrap break-words text-[11px]">
-                      {renderValue(message.content)}
-                    </pre>
+                    <div className="mt-1">
+                      <JsonBlock value={renderValue(message.content)} maxHeight="12rem" />
+                    </div>
                   </div>
                 ))}
               </div>

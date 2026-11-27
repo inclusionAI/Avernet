@@ -27,14 +27,15 @@ test('the template names mcp and skills in one comment and stops there', () => {
   }
 });
 
-test('the template interpolates its values rather than shipping placeholders', () => {
+test('the template ships no placeholders and starts at the document', () => {
   expect(MANIFEST_TEMPLATE).not.toContain('${');
-  expect(MANIFEST_TEMPLATE.split('\n')[0]).toContain('https://github.com');
+  // The grammar URL is rendered beside the editor, not echoed inside every
+  // saved manifest, so the document opens at schema_version.
+  expect(MANIFEST_TEMPLATE.split('\n')[0]).toBe('schema_version: 1');
 });
 
-test('the template points at the full grammar', () => {
+test('the docs URL is a real Avernet spec link', () => {
   expect(MANIFEST_DOCS_URL).toMatch(/^https:\/\/github\.com\/inclusionAI\/Avernet\//);
-  expect(MANIFEST_TEMPLATE).toContain(MANIFEST_DOCS_URL);
 });
 
 test('the template stays short enough to read in a 440px panel', () => {

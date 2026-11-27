@@ -205,7 +205,7 @@ class TestHappyPathAndCompletionContract:
             assert set(r) == {
                 "agent_id", "run_id", "tenant", "status", "attempts",
                 "error", "idempotency_key", "result", "artifact_key",
-                "token_usage",
+                "token_usage", "model",
             }
             assert r["status"] == AgentStatus.COMPLETED
             assert r["attempts"] == 1

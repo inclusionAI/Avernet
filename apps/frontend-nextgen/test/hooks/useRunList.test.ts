@@ -33,6 +33,24 @@ test('the rendered list contains only runs the gateway returned', async () => {
   expect(result.current.total).toBe(2);
 });
 
+test('the status filter is sent to the gateway, not applied to the fetched page', async () => {
+  // The page used to filter the ten rows it already had, so choosing a status
+  // could show an empty list while matching runs sat on another page.
+  fetchList.mockResolvedValueOnce(page([{ run_id: 'r1', status: 'FAILED' }]));
+  renderHook(() => useRunList({ tenant: 'acme', intervalMs: 1000, status: 'FAILED' }));
+  await flush();
+
+  expect(fetchList).toHaveBeenCalledWith('acme', expect.objectContaining({ status: 'FAILED' }));
+});
+
+test('no status query is sent when the filter is cleared', async () => {
+  fetchList.mockResolvedValueOnce(page([]));
+  renderHook(() => useRunList({ tenant: 'acme', intervalMs: 1000 }));
+  await flush();
+
+  expect(fetchList.mock.calls[0][1]).not.toHaveProperty('status');
+});
+
 test('an empty result is reported as loaded and empty rather than as loading forever', async () => {
   fetchList.mockResolvedValueOnce(page([]));
   const { result } = renderHook(() => useRunList({ tenant: 'acme', intervalMs: 1000 }));

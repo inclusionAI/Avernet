@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.agentswarm.domain import models as dm
@@ -183,9 +183,25 @@ class RunRepository(RunRepositoryProtocol):
             )
         return result.rowcount == 1
 
+    # Only these columns may drive ORDER BY. A caller-supplied string reaching
+    # .order_by() would be an injection point, so the key is resolved through
+    # this map and anything unknown falls back to the newest-first default.
+    _SORT_COLUMNS = {
+        # The row's own auto-increment key: the submission order, which is what
+        # "newest first" means before any time column is populated.
+        "id": "id",
+        "run_id": "run_id",
+        "status": "status",
+        "started_at": "started_at",
+        "ended_at": "ended_at",
+        "gmt_modified": "gmt_modified",
+    }
+
     def list_page(self, tenant: dm.TenantId, status: dm.RunStatus | None = None,
                   page: int = 1, page_size: int = 20,
-                  owner_id: str | None = None) -> dm.RunPage:
+                  owner_id: str | None = None,
+                  sort: str | None = None, order: str | None = None,
+                  keyword: str | None = None) -> dm.RunPage:
         """One tenant's runs, optionally narrowed to one owner.
 
         ``owner_id`` is what keeps the end-user list to the caller's own runs: a
@@ -196,6 +212,15 @@ class RunRepository(RunRepositoryProtocol):
         ``env`` scopes the read: a preview list otherwise returned production's runs.
         """
         offset = max(0, (page - 1)) * page_size
+        # Resolve the sort through the allowlist; never interpolate the raw
+        # string into ORDER BY. An unknown column falls back to the historical
+        # newest-first order so old callers keep their behaviour.
+        column = self._SORT_COLUMNS.get((sort or "").strip())
+        if column is None:
+            order_by = (om.AcAgentSwarmRunModel.id.desc(),)
+        else:
+            target = getattr(om.AcAgentSwarmRunModel, column)
+            order_by = (target.asc(),) if (order or "desc").lower() == "asc" else (target.desc(),)
         with self._db.orm_session() as session:
             conditions = [
                 om.AcAgentSwarmRunModel.env == get_current_env(),
@@ -206,12 +231,25 @@ class RunRepository(RunRepositoryProtocol):
                 conditions.append(om.AcAgentSwarmRunModel.status == status.value)
             if owner_id is not None:
                 conditions.append(om.AcAgentSwarmRunModel.owner_id == owner_id)
+            # Keyword search: a run is found by its id or by words in its goal.
+            # ``goal`` is MEDIUMTEXT, so this is a scan within the owner's rows
+            # (already narrowed by env/tenant/owner above); acceptable at this
+            # size and honest about what it matches. The wildcards are escaped
+            # so a literal '%' in a goal cannot turn into a pattern.
+            needle = (keyword or "").strip()
+            if needle:
+                escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                like = f"%{escaped}%"
+                conditions.append(or_(
+                    om.AcAgentSwarmRunModel.run_id.like(like, escape="\\"),
+                    om.AcAgentSwarmRunModel.goal.like(like, escape="\\"),
+                ))
             total = session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmRunModel).where(*conditions)
             ).scalar_one()
             rows = session.execute(
                 select(om.AcAgentSwarmRunModel).where(*conditions)
-                .order_by(om.AcAgentSwarmRunModel.id.desc())
+                .order_by(*order_by)
                 .offset(offset).limit(page_size)
             ).scalars().all()
             return dm.RunPage(
@@ -296,6 +334,7 @@ class RunRepository(RunRepositoryProtocol):
         req_md_raw = _loads(row.request_metadata) or {}
         return dm.Run(
             run_id=dm.RunId(row.run_id),
+            row_id=int(row.id or 0),
             tenant=dm.TenantId(row.tenant),
             goal=row.goal,
             agent_catalog=agent_catalog,

@@ -403,3 +403,135 @@ class TestClassificationIsChannelIndependent:
     def test_both_implementations_are_transports(self):
         assert isinstance(_baas(chat_final("x")), ChatTransport)
         assert isinstance(_engine([])[0], ChatTransport)
+
+
+class TestEngineChannelAppliesTheAgentsModel:
+    """The engine pins a model when it *creates* a session, and a WS
+    ``sessions.patch`` is refused. BaaS binds the model with an HTTP
+    ``POST /api/sessions`` before it sends (``_materialize_session``); this
+    channel skips BaaS, so it must make the same call itself."""
+
+    def _frames(self):
+        # Only the chat's terminal frame: binding the model never touches the
+        # socket, so the leg sees nothing before its chat frame.
+        return [_final_frame("done")]
+
+    def _endpoint(self):
+        return (
+            "ws://proxy.example/proxypass/dev|ops|BOT-x|20003/api/openclaw/ws",
+            "tok",
+        )
+
+    def test_model_is_bound_before_chat_when_set(self):
+        import asyncio
+
+        transport, ws = _engine(self._frames())
+        bound: list[tuple] = []
+
+        async def capture(endpoint, key, model, cancel):
+            bound.append((endpoint, key, model))
+
+        transport._apply_session_model = capture
+        reply = asyncio.run(transport._chat_once(
+            BOT_ID, "hi", OWNER, None, None, timeout_seconds=5.0,
+            model="antchat/Kimi-K2.6",
+        ))
+
+        assert reply == "done"
+        assert len(bound) == 1
+        endpoint, key, model = bound[0]
+        # Same pair the socket itself was opened with — the session API is
+        # reached through the identical proxypass target and token.
+        assert endpoint == ("ws://fake", "tok")
+        assert key == "agent:main:default"
+        assert model == "antchat/Kimi-K2.6"
+
+    def test_no_bind_without_a_model(self):
+        import asyncio
+
+        transport, _ = _engine([_final_frame("done")])
+        calls: list[str] = []
+
+        async def capture(endpoint, key, model, cancel):
+            calls.append(model)
+
+        transport._apply_session_model = capture
+        reply = asyncio.run(transport._chat_once(
+            BOT_ID, "hi", OWNER, None, None, timeout_seconds=5.0,
+        ))
+
+        assert reply == "done"
+        assert calls == []
+
+    def test_session_update_targets_the_proxypass_host_and_carries_model(self):
+        """Reads the real HTTP call: the already-existing session is UPDATED,
+        not re-created (create ignores the model for an existing key), and the
+        model rides the query string that route declares."""
+        import asyncio
+        from unittest import mock
+
+        transport, _ = _engine([])
+        seen: dict = {}
+
+        class _Resp:
+            status_code = 200
+            text = "{}"
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                seen.update(url=url, body=json, headers=headers)
+                return _Resp()
+
+        import httpx
+
+        with mock.patch.object(httpx, "AsyncClient", _Client):
+            asyncio.run(transport._create_session_with_model(
+                self._endpoint(), "agent:main:abc", "antchat/Kimi-K2.6",
+            ))
+
+        assert seen["url"] == (
+            "http://proxy.example/proxypass/dev|ops|BOT-x|20003"
+            "/api/sessions/agent:main:abc/update?model=antchat/Kimi-K2.6"
+        )
+        assert seen["headers"]["x-proxypass-token"] == "tok"
+
+    def test_refused_session_create_is_fail_soft(self):
+        import asyncio
+        from unittest import mock
+
+        transport, _ = _engine([])
+
+        class _Resp:
+            status_code = 400
+            text = '{"detail":"unknown model"}'
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                return _Resp()
+
+        import httpx
+
+        with mock.patch.object(httpx, "AsyncClient", _Client):
+            # Swallowed by the fail-soft wrapper: the chat still runs on the
+            # session's existing model.
+            asyncio.run(transport._apply_session_model(
+                self._endpoint(), "agent:main:abc", "no-such-model", None,
+            ))

@@ -230,11 +230,22 @@ def test_rejected_manifest_persists_nothing(db):
     assert svc.list_definitions(TENANT, ALICE).total == 0
 
 
-def test_blank_manifest_means_no_manifest(db):
+def test_blank_manifest_is_stored_as_the_synthesized_document(db):
+    # Blank is a valid *input* (provisioning would synthesize from 指令), but the
+    # library stores what that persona is: a document whose SOUL.md carries the
+    # instructions. Storing blank left every reader re-synthesizing it.
     svc = _service(db)
-    d = _create(svc, manifest_document="")
-    assert d.manifest_document == ""
-    assert d.manifest_digest == ""
+    d = _create(svc, manifest_document="", instructions="只回复一个词：hello")
+    assert "SOUL.md" in d.manifest_document
+    assert "只回复一个词：hello" in d.manifest_document
+    assert d.manifest_digest.startswith("sha256:")
+
+
+def test_a_supplied_manifest_is_stored_verbatim(db):
+    svc = _service(db)
+    doc = "schema_version: 1\nmanifest:\n  identity:\n    - type: MEMORY.md\n      content: kept\n"
+    d = _create(svc, manifest_document=doc)
+    assert d.manifest_document == doc
 
 
 def test_unbound_validator_refuses_writes(db):

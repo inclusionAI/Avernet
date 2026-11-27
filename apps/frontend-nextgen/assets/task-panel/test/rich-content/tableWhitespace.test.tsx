@@ -8,8 +8,8 @@ const table = '<table>\n<thead>\n<tr>\n<th>名称</th>\n<th>结果</th>\n</tr>\n
 
 describe('task-panel table whitespace', () => {
   it.each([
-    ['HTML', <SafeHtml html={table} />],
-    ['Markdown', <MarkdownCell content={'| 名称 | 结果 |\n| --- | --- |\n| 报告 | 完成 |'} />],
+    ['HTML', <SafeHtml key="html" html={table} />],
+    ['Markdown', <MarkdownCell key="markdown" content={'| 名称 | 结果 |\n| --- | --- |\n| 报告 | 完成 |'} />],
   ])('renders %s tables without invalid structural text nodes', (_label, view) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {

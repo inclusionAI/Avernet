@@ -19,7 +19,7 @@ export interface SubmitRefusal {
 }
 
 const MESSAGES: Partial<Record<AgentswarmErrorKind, string>> = {
-  identity_source_missing: '请选择身份 Bot：包含 Bot 类型 Agent 的运行必须指定身份 Bot',
+  identity_source_missing: '请选择执行权限 Bot：包含 Bot 类型 Agent 的运行必须指定执行权限 Bot',
   identity_source_invalid: '所选 Bot 不能作为身份使用（不是你的 Bot，或尚未取得护照），请改选其他 Bot',
   not_found: '运行不存在，可能已被清理，请刷新列表确认',
 };

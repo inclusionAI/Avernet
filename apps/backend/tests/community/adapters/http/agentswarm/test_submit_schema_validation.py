@@ -44,14 +44,16 @@ def _body(**overrides) -> dict:
     body = {
         "tenant": "teamclaw",
         "goal": "summarize the incident timeline",
-        "agents": [{"name": "scout", "role": "research"}],
+        # kind is required by the schema (no silent llm default); the interface
+        # only creates bot agents, so that is what these submits name.
+        "agents": [{"name": "scout", "role": "research", "kind": "bot"}],
     }
     body.update(overrides)
     return body
 
 
 def _agent(**overrides) -> dict:
-    spec = {"name": "scout", "role": "research"}
+    spec = {"name": "scout", "role": "research", "kind": "bot"}
     spec.update(overrides)
     return spec
 
@@ -214,22 +216,22 @@ class TestAgentSpecCaps:
 
     def test_over_length_name_rejected(self):
         with pytest.raises(ValidationError):
-            AgentSpecDTO(name="n" * (NAME_MAX + 1), role="research")
+            AgentSpecDTO(kind="bot", name="n" * (NAME_MAX + 1), role="research")
 
     def test_over_length_role_rejected(self):
         with pytest.raises(ValidationError):
-            AgentSpecDTO(name="scout", role="r" * (ROLE_MAX + 1))
+            AgentSpecDTO(kind="bot", name="scout", role="r" * (ROLE_MAX + 1))
 
     def test_over_length_instructions_rejected(self):
         with pytest.raises(ValidationError):
             AgentSpecDTO(
-                name="scout", role="research",
+                kind="bot", name="scout", role="research",
                 instructions="i" * (INSTRUCTIONS_MAX + 1),
             )
 
     def test_at_length_spec_accepted(self):
         dto = AgentSpecDTO(
-            name="n" * NAME_MAX, role="r" * ROLE_MAX,
+            kind="bot", name="n" * NAME_MAX, role="r" * ROLE_MAX,
             instructions="i" * INSTRUCTIONS_MAX,
         )
         assert len(dto.name) == NAME_MAX
@@ -242,27 +244,27 @@ class TestMetadataCaps:
     def test_entry_count_over_cap_rejected(self):
         metadata = {f"k{i}": "v" for i in range(METADATA_MAX_ENTRIES + 1)}
         with pytest.raises(ValidationError) as exc:
-            AgentSpecDTO(name="scout", role="research", metadata=metadata)
+            AgentSpecDTO(kind="bot", name="scout", role="research", metadata=metadata)
         assert ("metadata",) in [e["loc"] for e in exc.value.errors()]
 
     def test_value_over_cap_rejected(self):
         with pytest.raises(ValidationError):
             AgentSpecDTO(
-                name="scout", role="research",
+                kind="bot", name="scout", role="research",
                 metadata={"k": "v" * (METADATA_VALUE_MAX + 1)},
             )
 
     def test_key_over_cap_rejected(self):
         with pytest.raises(ValidationError):
             AgentSpecDTO(
-                name="scout", role="research",
+                kind="bot", name="scout", role="research",
                 metadata={"k" * (METADATA_KEY_MAX + 1): "v"},
             )
 
     def test_at_cap_metadata_accepted(self):
         metadata = {f"k{i}": "v" for i in range(METADATA_MAX_ENTRIES - 1)}
         metadata["k" * METADATA_KEY_MAX] = "v" * METADATA_VALUE_MAX
-        dto = AgentSpecDTO(name="scout", role="research", metadata=metadata)
+        dto = AgentSpecDTO(kind="bot", name="scout", role="research", metadata=metadata)
         assert len(dto.metadata) == METADATA_MAX_ENTRIES
 
 
@@ -283,22 +285,22 @@ class TestConfigManifest:
             "script:\n"
             "  body: 'echo provisioned'\n"
         )
-        assert AgentSpecDTO(name="scout", role="research").config_manifest == ""
+        assert AgentSpecDTO(kind="bot", name="scout", role="research").config_manifest == ""
         dto = AgentSpecDTO(
-            name="scout", role="research", config_manifest=document)
+            kind="bot", name="scout", role="research", config_manifest=document)
         assert dto.config_manifest == document
 
     def test_over_length_manifest_rejected(self):
         with pytest.raises(ValidationError) as exc:
             AgentSpecDTO(
-                name="scout", role="research",
+                kind="bot", name="scout", role="research",
                 config_manifest="x" * (CONFIG_MANIFEST_MAX + 1),
             )
         assert "string_too_long" in _error_types(exc)
 
     def test_at_length_manifest_accepted(self):
         dto = AgentSpecDTO(
-            name="scout", role="research",
+            kind="bot", name="scout", role="research",
             config_manifest="x" * CONFIG_MANIFEST_MAX,
         )
         assert len(dto.config_manifest) == CONFIG_MANIFEST_MAX
@@ -385,7 +387,7 @@ class TestIdentityBotId:
             tenant="t",
             goal="triage the queue",
             agents=[
-                _agent(name="llm-one"),
+                _agent(name="llm-one", kind="llm"),
                 _agent(name="bot-one", kind="bot"),
             ],
             identity_bot_id="20261110_abc",

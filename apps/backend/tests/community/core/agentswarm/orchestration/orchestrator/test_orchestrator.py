@@ -512,6 +512,73 @@ class TestOrchestrator:
         assert result["terminate"] == TerminationReason.NO_PROGRESS
         assert len(result["guard_events"]) > 0
 
+    def test_finish_without_spawns_is_reasked_then_dispatches(self):
+        # The orchestrator's job is to dispatch the roster; `finish` reports
+        # what the agents produced. A finish with nothing spawned used to be
+        # accepted-and-terminated, which let a model answer the goal itself and
+        # leave the run with no answer at all. It is now refused once and the
+        # model is asked again — here it complies and spawns.
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "finish", "answer": "I can answer this myself"}),
+            json.dumps({
+                "kind": "spawn_agent",
+                "agents": [{"name": "researcher1", "objective": "do the work"}],
+            }),
+        ])
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["terminate"] is None
+        assert len(result["spawn"]) == 1
+        assert result["spawn"][0].name == "researcher1"
+
+    def test_finish_without_spawns_is_refused_with_an_explanation(self):
+        # The re-ask has to say WHY, or the model just finishes again.
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "finish", "answer": "self-answered"}),
+            json.dumps({"kind": "finish", "answer": "self-answered again"}),
+            json.dumps({"kind": "finish", "answer": "and again"}),
+        ])
+        prompts: list[str] = []
+        inner = orch._llm
+
+        class _Recording:
+            async def complete(self, request):
+                prompts.append(request.user_prompt)
+                return await inner.complete(request)
+
+        orch._llm = _Recording()
+        run = _mk_run()
+        state = RunState(run=run)
+        asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        # The second call is the re-ask: it must carry the reason.
+        assert len(prompts) >= 2
+        assert "no agent has been spawned" in prompts[1]
+        assert "finish is not available yet" in prompts[1]
+
+    def test_finish_is_not_impeded_once_an_agent_has_run(self):
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "finish", "answer": "from the agent"}),
+        ])
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 1
+        state.routed_result_count = 1
+        state.turn_count = 1
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["terminate"] == TerminationReason.FINISH
+        assert result["finish_answer"] == "from the agent"
+
+    def test_system_prompt_forbids_answering_instead_of_dispatching(self):
+        orch = self._mk_orchestrator([])
+        run = _mk_run()
+        prompt = orch._system_prompt(run, RunState(run=run))
+        # The rule the run depends on: orchestrate, do not substitute for the
+        # agents, and never end before dispatching at least one.
+        assert "ORCHESTRATION ONLY" in prompt
+        assert "do not do their work" in prompt
+        assert "must dispatch at least one agent before it can finish" in prompt
+
     def test_wait_decision(self):
         orch = self._mk_orchestrator([
             json.dumps({"kind": "wait", "refs": ["researcher1"], "mode": "all"}),

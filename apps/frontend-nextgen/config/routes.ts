@@ -27,7 +27,18 @@ export const routes = [
       { path: '/workspace/collaboration/session', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
       // Agent Compute：面向 agentswarm 网关的计算任务配置与运行观察页。
-      { path: '/agent-compute', component: '@/pages/AgentCompute' },
+      // PRD v1.7 §1：主页面是运行列表；配置与详情各自独立成路由。
+      { path: '/agent-compute', component: '@/pages/AgentCompute/List' },
+      { path: '/agent-compute/new', component: '@/pages/AgentCompute/New' },
+      { path: '/agent-compute/definitions', component: '@/pages/AgentCompute/Definitions' },
+      { path: '/agent-compute/:runId', component: '@/pages/AgentCompute/Run' },
+      // PRD v1.7 的规划路径（实验室 →「计算任务」）。同一套页面先挂在此别名下，
+      // 让规格里的深链直接落到列表/配置/详情。
+      { path: '/laboratory', redirect: '/lab' },
+      { path: '/laboratory/agent-compute', component: '@/pages/AgentCompute/List' },
+      { path: '/laboratory/agent-compute/new', component: '@/pages/AgentCompute/New' },
+      { path: '/laboratory/agent-compute/definitions', component: '@/pages/AgentCompute/Definitions' },
+      { path: '/laboratory/agent-compute/:runId', component: '@/pages/AgentCompute/Run' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },

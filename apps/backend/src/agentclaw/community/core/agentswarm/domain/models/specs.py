@@ -41,6 +41,8 @@ class TaskEnvelope:
 class SubagentResult:
     output: StructuredOutput
     token_usage: TokenUsage | None = None
+    # The model this subagent actually ran on, as the provider reported it.
+    model: ModelId | None = None
 
 
 @dataclass(frozen=True)

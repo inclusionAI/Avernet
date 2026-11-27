@@ -1,4 +1,4 @@
-import { IDENTITY_PICKER_HINT, type IdentityOption } from '@/domain/agentswarm/identityOptions';
+import { type IdentityOption } from '@/domain/agentswarm/identityOptions';
 import {
   Select,
   SelectContent,
@@ -53,12 +53,14 @@ export function IdentityBotPicker({
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <label className="text-xs font-medium text-foreground" htmlFor="agentswarm-identity-bot">
-          身份 Bot <span className="text-destructive">*</span>
+          执行权限 Bot <span className="text-destructive">*</span>
         </label>
         {loading ? <LoaderCircle className="h-4 w-4 animate-spin text-primary" aria-hidden /> : null}
       </div>
 
-      <p className="text-xs text-muted-foreground">{IDENTITY_PICKER_HINT}</p>
+      <p className="text-xs text-muted-foreground">
+        本次计算任务将使用所选 Bot 的权限执行，仅可选择你拥有管理权限的 Bot。
+      </p>
 
       {error ? (
         <p className="text-xs text-destructive">{error}</p>

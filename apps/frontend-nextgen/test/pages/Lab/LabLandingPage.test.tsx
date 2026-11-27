@@ -17,11 +17,15 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('按原型展示社区和任务，并为描述保留两行高度', () => {
+  it('按原型展示社区、任务与计算任务，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(2);
-    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '任务']);
+    expect(cards).toHaveLength(3);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual([
+      '社区',
+      '任务',
+      '计算任务',
+    ]);
     for (const card of cards) {
       const descriptions = within(card).getAllByText(/./, { selector: 'p' });
       expect(descriptions).toHaveLength(1);
@@ -43,6 +47,15 @@ describe('LabLandingPage(实验室落地页)', () => {
 
     fireEvent.click(card.getByRole('button', { name: /开始体验/ }));
     expect(pushMock).toHaveBeenCalledWith('/lab/tasks');
+  });
+
+  it('计算任务卡:文案对齐 PRD v1.7;开始体验进入 Agent Compute', () => {
+    render(<LabLandingPage />);
+    const card = within(screen.getByRole('article', { name: '计算任务' }));
+    expect(card.getByText(/根据工作目标定义执行 Agent，启动多个容器协同完成批量计算/)).toBeTruthy();
+
+    fireEvent.click(card.getByRole('button', { name: /开始体验/ }));
+    expect(pushMock).toHaveBeenCalledWith('/agent-compute');
   });
 
   it('社区卡:开始体验仍跳 /lab/community(回归)', () => {

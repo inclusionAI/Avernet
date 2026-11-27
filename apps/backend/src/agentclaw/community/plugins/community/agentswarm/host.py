@@ -339,7 +339,8 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
              session_key: str | None = None,
              cancel_event: threading.Event | None = None,
              timeout_seconds: float | None = None,
-             tenant: str = "") -> str:
+             tenant: str = "",
+             model: str | None = None) -> str:
         """One chat leg, on the configured transport.
 
         With no transport injected this is the engine leg unchanged. With one
@@ -354,6 +355,7 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                 cancel_event=cancel_event,
                 timeout_seconds=timeout_seconds,
                 tenant=tenant,
+                model=model,
             )
         return self._chat_transport.chat(
             bot_id, message, owner_id,
@@ -362,6 +364,9 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             cancel_event=cancel_event,
             timeout_seconds=timeout_seconds,
             tenant=tenant,
+            # A per-agent 独立模型 only took effect for in-process llm agents;
+            # carrying it here is what makes it reach a provisioned Bot too.
+            model=model,
         )
 
 

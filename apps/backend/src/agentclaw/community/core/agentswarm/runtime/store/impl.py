@@ -142,6 +142,8 @@ class SliceStore:
             content["artifact_key"] = artifact_key
         if completion["error"] is not None:
             content["error"] = completion["error"]
+        if completion.get("model"):
+            content["model"] = completion["model"]
         await run_blocking(
             self._message_repo.create,
             self._new_message(run_id, tenant, agent_id, MessageRole.ASSISTANT,
@@ -423,15 +425,24 @@ class SliceStore:
         # D13: on terminal, keep the per-agent tail plus result-referenced rows.
         # Sync core: the worker's force_stuck/force_fail run on a to_thread
         # worker thread already, off the event loop.
+        #
+        # A run reaching a terminal state also means no stage can still be
+        # executing, so any round still open ends here. Without this a round's
+        # ended_at stayed NULL for the life of the run, and a reader could not
+        # tell a finished stage from a running one.
+        self._round_repo.close_open(run_id, tenant)
         tail = self._config.message_retention_tail
         if tail <= 0:
-            return
+            return  # rounds are closed above; only message trimming is skipped
         for agent in self._agent_repo.list_by_run(run_id, tenant):
             self._message_repo.apply_retention(run_id, agent.agent_id, tenant, tail)
         self._message_repo.apply_retention(run_id, AgentId(run_id), tenant, tail)
 
     async def apply_run_retention(self, run_id: RunId, tenant: TenantId) -> None:
         await run_blocking(self.apply_run_retention_blocking, run_id, tenant)
+
+    async def close_open_rounds(self, run_id: RunId, tenant: TenantId) -> int:
+        return await run_blocking(self._round_repo.close_open, run_id, tenant)
 
     @staticmethod
     def _ref_matches(ref: str, name: str) -> bool:

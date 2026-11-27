@@ -106,12 +106,13 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
-def _mk_run(run_id=None, tenant=TENANT_A, owner_id: str = "") -> dm.Run:
+def _mk_run(run_id=None, tenant=TENANT_A, owner_id: str = "",
+            goal: str = "test goal") -> dm.Run:
     return dm.Run(
         run_id=dm.RunId(run_id or uuid.uuid4().hex),
         tenant=tenant,
         owner_id=owner_id,
-        goal="test goal",
+        goal=goal,
         agent_catalog=(
             dm.AgentSpec(name="r1", role="research"),
         ),
@@ -435,6 +436,72 @@ class TestRunRepository:
         active_page = run_repo.list_page(TENANT_A, status=dm.RunStatus.RUNNING, page=1, page_size=10)
         assert active_page.total == 3
         assert all(r.status == dm.RunStatus.RUNNING for r in active_page.items)
+
+    def test_list_page_sorts_by_allowlisted_column(self, run_repo):
+        ids = []
+        for _ in range(3):
+            run = _mk_run()
+            run_repo.create(run)
+            ids.append(run.run_id)
+
+        asc = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                 sort="run_id", order="asc")
+        assert [r.run_id for r in asc.items] == sorted(ids)
+
+        desc = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                  sort="run_id", order="desc")
+        assert [r.run_id for r in desc.items] == sorted(ids, reverse=True)
+
+    def test_list_page_sorts_by_row_id(self, run_repo):
+        # The row id is the submission order, which is what the list defaults
+        # to before any time column is populated.
+        created = []
+        for _ in range(3):
+            run = _mk_run()
+            run_repo.create(run)
+            created.append(run.run_id)
+
+        newest_first = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                          sort="id", order="desc")
+        assert [r.run_id for r in newest_first.items] == list(reversed(created))
+
+        oldest_first = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                          sort="id", order="asc")
+        assert [r.run_id for r in oldest_first.items] == created
+
+    def test_list_page_ignores_unknown_sort_column(self, run_repo):
+        # An unknown column must not reach ORDER BY; it falls back to the
+        # newest-first default instead of failing or injecting SQL.
+        for _ in range(2):
+            run_repo.create(_mk_run())
+        page = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                  sort="goal; DROP TABLE ac_agent_swarm_run")
+        assert page.total == 2
+
+    def test_list_page_keyword_matches_goal_and_run_id(self, run_repo):
+        hourly = _mk_run(goal="统计各部门月度工时")
+        other = _mk_run(goal="绘制组织架构图")
+        run_repo.create(hourly)
+        run_repo.create(other)
+
+        by_goal = run_repo.list_page(TENANT_A, page=1, page_size=10, keyword="工时")
+        assert [r.run_id for r in by_goal.items] == [hourly.run_id]
+
+        by_id = run_repo.list_page(TENANT_A, page=1, page_size=10,
+                                   keyword=hourly.run_id)
+        assert [r.run_id for r in by_id.items] == [hourly.run_id]
+
+        none = run_repo.list_page(TENANT_A, page=1, page_size=10, keyword="不存在的词")
+        assert none.total == 0
+
+    def test_list_page_keyword_treats_wildcards_literally(self, run_repo):
+        # A '%' in the search box must not become a match-everything pattern.
+        run_repo.create(_mk_run(goal="100% 完成"))
+        run_repo.create(_mk_run(goal="无关目标"))
+
+        page = run_repo.list_page(TENANT_A, page=1, page_size=10, keyword="100%")
+        assert page.total == 1
+        assert page.items[0].goal == "100% 完成"
 
     def test_list_page_scopes_to_one_owner(self, run_repo):
         # A tenant is a group: listing by tenant alone would show one member
@@ -809,6 +876,50 @@ class TestRoundRepository:
             round_repo.create(r)
         rounds = round_repo.list_by_run(run.run_id, TENANT_A)
         assert len(rounds) == 3
+
+    def test_rounds_stay_open_until_the_run_ends(self, run_repo, round_repo):
+        # Every round row is written with ended_at unset and nothing closes it,
+        # so before close_open ran the field was NULL on completed runs too and
+        # a reader could not tell a finished stage from a running one.
+        run = _mk_run()
+        run_repo.create(run)
+        round_repo.create(dm.Round(
+            id=dm.RoundId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            stage_index=0,
+            orchestrator_steps=1,
+            slowest_attempt_steps=0,
+            cohort_agent_ids=(dm.AgentId("a"),),
+            started_at=dm.EpochMillis(_now_ms()),
+        ))
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at is None
+
+        closed = round_repo.close_open(run.run_id, TENANT_A)
+        assert closed == 1
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at is not None
+
+        # Idempotent: nothing left open, so a second call changes nothing.
+        assert round_repo.close_open(run.run_id, TENANT_A) == 0
+
+    def test_close_open_leaves_already_closed_rounds_alone(self, run_repo, round_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        stamp = dm.EpochMillis(_now_ms() - 1000)
+        round_repo.create(dm.Round(
+            id=dm.RoundId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            stage_index=0,
+            orchestrator_steps=1,
+            slowest_attempt_steps=0,
+            cohort_agent_ids=(dm.AgentId("a"),),
+            started_at=dm.EpochMillis(_now_ms()),
+            ended_at=stamp,
+        ))
+
+        assert round_repo.close_open(run.run_id, TENANT_A) == 0
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at == stamp
 
 
 class TestGuardEventRepository:

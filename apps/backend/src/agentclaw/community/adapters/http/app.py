@@ -418,13 +418,19 @@ def _uses_envelope_contract(request: Request) -> bool:
 
 def _public_error_envelope(
     status: int, request: Request, headers: dict[str, str] | None = None,
+    detail: str | None = None,
 ) -> JSONResponse:
-    """Envelope a public-surface failure that reached an app-level handler."""
+    """Envelope a public-surface failure that reached an app-level handler.
+
+    ``detail`` carries the handler's own reason through. Dropping it left every
+    unmapped failure as its reason phrase alone, so a caller could not tell a
+    name conflict from a stale-version conflict — both arrived as "Conflict".
+    """
     from agentclaw.community.adapters.http.openapi_v1.responses import (
         unmapped_error_response,
     )
 
-    return unmapped_error_response(status, request, headers=headers)
+    return unmapped_error_response(status, request, headers=headers, detail=detail)
 
 
 def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | None:
@@ -561,7 +567,10 @@ async def _http_exception_handler(
             params_suffix(request),
             exc_info=exc,
         )
-        return _public_error_envelope(exc.status_code, request, exc.headers)
+        return _public_error_envelope(
+            exc.status_code, request, exc.headers,
+            detail=exc.detail if isinstance(exc.detail, str) else None,
+        )
     # Internal ``/api`` routes keep FastAPI's ``{"detail": [...]}`` body, but its default
     # handler logs nothing at all — an ``HTTPException`` raised inside a route
     # left no record whatsoever. Log it here before delegating, so the response

@@ -1,41 +1,78 @@
-import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
+import {
+  readManifestInstructions,
+  synthesizeManifest,
+  syncManifestInstructions,
+} from '@/domain/agentswarm/synthManifest';
 import { validateManifest } from '@/domain/agentswarm/manifest';
 
-test('the synthesized document mirrors what the platform builds from instructions', () => {
-  const doc = synthesizeManifest('你是一个数据清洗 Agent。');
-  expect(doc).toContain('schema_version: 1');
-  expect(doc).toContain('identity:');
-  expect(doc).toContain('- type: SOUL.md');
-  expect(doc).toContain('你是一个数据清洗 Agent。');
+// 指令 and the YAML's SOUL.md content are the same text, edited from either side.
+
+test('a blank manifest is synthesized from 指令', () => {
+  const manifest = syncManifestInstructions('', 'be brief');
+  expect(manifest).toContain('SOUL.md');
+  expect(manifest).toContain('be brief');
+  expect(readManifestInstructions(manifest)).toBe('be brief');
 });
 
-test('the synthesized document is valid YAML the form accepts', () => {
-  expect(validateManifest(synthesizeManifest('任意指令')).issues).toEqual([]);
+test('editing 指令 rewrites only the SOUL.md content', () => {
+  // mcp/skills and a second identity document must survive: this edits the
+  // document rather than regenerating it from the instructions.
+  const original = [
+    'schema_version: 1',
+    'manifest:',
+    '  identity:',
+    '    - type: SOUL.md',
+    '      content: old text',
+    '    - type: MEMORY.md',
+    '      content: kept',
+    '  mcp:',
+    '    - server_code: github',
+    '',
+  ].join('\n');
+
+  const updated = syncManifestInstructions(original, 'new text');
+
+  expect(readManifestInstructions(updated)).toBe('new text');
+  expect(updated).toContain('MEMORY.md');
+  expect(updated).toContain('kept');
+  expect(updated).toContain('server_code: github');
+  expect(updated).not.toContain('old text');
+  expect(validateManifest(updated).ok).toBe(true);
 });
 
-test('name and role never enter the synthesized persona', () => {
-  // The backend only reads `instructions`; name/role only label the agent.
-  const doc = synthesizeManifest('只包含指令内容');
-  expect(doc).not.toContain('worker');
-  expect(doc).not.toContain('职责');
+test('a manifest with no SOUL.md gains one instead of losing the instructions', () => {
+  const withoutSoul = [
+    'schema_version: 1',
+    'manifest:',
+    '  identity:',
+    '    - type: MEMORY.md',
+    '      content: kept',
+    '',
+  ].join('\n');
+
+  const updated = syncManifestInstructions(withoutSoul, 'added');
+  expect(readManifestInstructions(updated)).toBe('added');
+  expect(updated).toContain('kept');
 });
 
-test('empty instructions yield an empty content string rather than invalid YAML', () => {
-  const doc = synthesizeManifest('');
-  expect(doc).toContain('content: ""');
-  expect(validateManifest(doc).issues.some((issue) => issue.path.includes('identity'))).toBe(true);
+test('the reverse direction reads 指令 out of the SOUL.md content', () => {
+  const fromYaml = syncManifestInstructions(synthesizeManifest('from yaml'), 'from yaml');
+  expect(readManifestInstructions(fromYaml)).toBe('from yaml');
 });
 
-test('multiline instructions keep their line structure', () => {
-  const doc = synthesizeManifest('第一行\n第二行');
-  expect(doc).toContain('第一行');
-  expect(doc).toContain('第二行');
-  expect(validateManifest(doc).issues).toEqual([]);
+test('an unparseable manifest is left untouched rather than clobbered', () => {
+  // The user is mid-edit in a document we cannot model; rewriting it would
+  // destroy whatever they were typing.
+  const broken = 'manifest: [';
+  expect(syncManifestInstructions(broken, 'x')).toBe(broken);
+  expect(readManifestInstructions(broken)).toBeNull();
 });
 
-test('a blank manifest means synthesized; a written one means user-authored', () => {
-  expect(isSynthesized('')).toBe(true);
-  expect(isSynthesized('   ')).toBe(true);
-  expect(isSynthesized(null)).toBe(true);
-  expect(isSynthesized('schema_version: 1')).toBe(false);
+test('a document without a SOUL.md yields no 指令 to mirror', () => {
+  expect(readManifestInstructions('schema_version: 1\nmanifest:\n  mcp: []\n')).toBeNull();
+});
+
+test('an unchanged instruction set returns the same string, so no needless re-render', () => {
+  const original = syncManifestInstructions('', 'same');
+  expect(syncManifestInstructions(original, 'same')).toBe(original);
 });

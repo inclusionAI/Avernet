@@ -225,6 +225,7 @@ class AgentAuthorizationState:
     bot_id: str | None
     bot_state: str
     authorization: BotAuthorizationDescriptor | None = None
+    objective: str | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +281,9 @@ class AgentDetailItem:
     agent_id: str
     name: str
     role: str
+    # task_spec.objective: the instruction this dispatch was given. A row is
+    # created per dispatch, so a re-dispatch of one catalog entry carries its
+    # own and can differ from the first.
     kind: str
     status: str
     parent_agent_id: str | None
@@ -297,6 +301,7 @@ class AgentDetailItem:
     attempt_ledger: tuple[AgentAttemptDetail, ...]
     messages: tuple[AgentMessageDetail, ...]
     authorization: BotAuthorizationDescriptor | None = None
+    objective: str | None = None
 
 
 @dataclass(frozen=True)
@@ -550,7 +555,9 @@ class AgentSwarmServiceProtocol(Protocol):
     @abstractmethod
     def list_runs(self, tenant: str, status: RunStatus | None = None,
                   *, page: int = 1, page_size: int = 20,
-                  owner_id: str | None = None) -> RunPage: ...
+                  owner_id: str | None = None,
+                  sort: str | None = None, order: str | None = None,
+                  keyword: str | None = None) -> RunPage: ...
 
     @abstractmethod
     def run_events(self, run_id: str, tenant: str, after_agent_id: int = 0,

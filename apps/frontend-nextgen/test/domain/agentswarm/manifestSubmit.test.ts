@@ -1,61 +1,62 @@
-import { canSubmit, createAgentDraft, toSubmitDTO, validateDraft, type ComputeDraft } from '@/domain/agentswarm/draft';
+import {
+  canSubmit,
+  createNewAgentRef,
+  resolveRosterRefs,
+  toSubmitDTO,
+  validateDraft,
+  type ComputeDraft,
+  type AgentRefDraft,
+} from '@/domain/agentswarm/draft';
 import { MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
 
-const bot = (partial: Parameters<typeof createAgentDraft>[0] = {}) =>
-  createAgentDraft({ key: 'a', name: 'greeter', role: 'greets', kind: 'bot', ...partial });
+const bot = (partial: Parameters<typeof createNewAgentRef>[0] = {}) =>
+  createNewAgentRef({ key: 'a', name: 'greeter', role: 'greets', kind: 'bot', ...partial });
 
 const draft = (overrides: Partial<ComputeDraft> = {}): ComputeDraft => ({
   goal: 'g',
-  agents: [bot()],
+  refs: [bot()],
   identityBotId: 'bot-1',
   ...overrides,
 });
 
-test('a blank manifest is omitted from the payload rather than sent as an empty string', () => {
-  const dto = toSubmitDTO(draft({ agents: [bot({ config_manifest: '   ' })] }), 'acme');
-  expect(dto.agents[0]).not.toHaveProperty('config_manifest');
+/**
+ * The manifest now travels in the *definition*, not the run payload, so these
+ * assert on what is handed to the save call — that is where the platform's
+ * `extra="forbid"` and manifest validation actually apply.
+ */
+const captureSave = () => {
+  const calls: Array<{ entry: AgentRefDraft; name: string }> = [];
+  const save = jest.fn(async (entry: AgentRefDraft, name: string) => {
+    calls.push({ entry, name });
+    return `def-${name}`;
+  });
+  return { save, calls };
+};
+
+test('a blank manifest reaches the saved definition as an empty document, never as junk', async () => {
+  const { save, calls } = captureSave();
+  await resolveRosterRefs(draft({ refs: [bot({ config_manifest: '   ' })] }), save);
+  expect(calls[0].entry.body.config_manifest?.trim() ?? '').toBe('');
 });
 
-test('a real manifest is transmitted verbatim so the platform judges the grammar', () => {
-  const dto = toSubmitDTO(draft({ agents: [bot({ config_manifest: MANIFEST_TEMPLATE })] }), 'acme');
-  // Surrounding whitespace is trimmed; the body is untouched.
-  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE.trim());
-  // The template's guidance comments ride along unchanged: the platform's
-  // preflight is authoritative, and trimming them would be this layer rewriting
-  // a document the user chose to submit.
-  expect(dto.agents[0].config_manifest).toContain('schema_version: 1');
-  expect(dto.agents[0].config_manifest).toContain('identity:');
+test('a real manifest is carried to the definition verbatim', async () => {
+  const { save, calls } = captureSave();
+  await resolveRosterRefs(draft({ refs: [bot({ config_manifest: MANIFEST_TEMPLATE })] }), save);
+  expect(calls[0].entry.body.config_manifest).toBe(MANIFEST_TEMPLATE);
 });
 
-test('a valid manifest does not block submission', () => {
-  expect(validateDraft(draft({ agents: [bot({ config_manifest: MANIFEST_TEMPLATE })] }))).toEqual([]);
+test('an unparseable manifest is refused before any save happens', () => {
+  const issues = validateDraft(draft({ refs: [bot({ config_manifest: 'manifest: [' })] }));
+  expect(issues.some((issue) => issue.message.includes('配置清单无法提交'))).toBe(true);
+  expect(canSubmit(draft({ refs: [bot({ config_manifest: 'manifest: [' })] }))).toBe(false);
 });
 
-test('an invalid manifest blocks submission and names the agent', () => {
-  const issues = validateDraft(draft({ agents: [bot({ name: 'scout', config_manifest: 'manifest: [oops' })] }));
-  expect(issues).toHaveLength(1);
-  expect(issues[0].field).toBe('agents');
-  expect(issues[0].message).toContain('scout');
-  expect(canSubmit(draft({ agents: [bot({ config_manifest: 'manifest: [oops' })] }))).toBe(false);
-});
-
-test('one agent with a bad manifest blocks the whole run', () => {
-  const issues = validateDraft(
-    draft({
-      agents: [bot({ key: 'ok', name: 'ok' }), bot({ key: 'bad', name: 'bad', config_manifest: 'x: [' })],
-    }),
-  );
-  expect(issues.some((issue) => issue.message.includes('bad'))).toBe(true);
-});
-
-test('a manifest on one agent does not leak onto another', () => {
+test('a two-agent roster still submits one run-level identity', () => {
   const dto = toSubmitDTO(
-    draft({
-      agents: [bot({ key: 'a', config_manifest: MANIFEST_TEMPLATE }), bot({ key: 'b', name: 'plain' })],
-    }),
+    draft({ refs: [bot({ key: 'a' }), bot({ key: 'b', name: 'reviewer' })] }),
     'acme',
+    { a: 'def-a', b: 'def-b' },
   );
-  // Surrounding whitespace is trimmed; the body is untouched.
-  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE.trim());
-  expect(dto.agents[1]).not.toHaveProperty('config_manifest');
+  expect(dto.identity_bot_id).toBe('bot-1');
+  expect(dto.agent_refs).toHaveLength(2);
 });

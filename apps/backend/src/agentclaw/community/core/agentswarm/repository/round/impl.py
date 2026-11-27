@@ -1,14 +1,14 @@
 """RoundRepository — ac_agent_swarm_round persistence (D19 no-await-in-session)."""
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.repository.round import model as om
 from agentclaw.community.core.agentswarm.repository.round.protocol import (
     RoundRepositoryProtocol,
 )
-from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads
+from agentclaw.community.core.agentswarm.repository.types import _dumps, _loads, _now_ms
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -32,6 +32,33 @@ class RoundRepository(RoundRepositoryProtocol):
             )
             session.add(row)
         return round_record
+
+    def close_open(self, run_id: dm.RunId, tenant: dm.TenantId,
+                   ended_at: int | None = None) -> int:
+        """Close every round of this run that is still open.
+
+        A round row is written once, when its stage starts, and nothing closes
+        it — so ``ended_at`` stayed NULL on every run, completed ones included,
+        and a reader could not tell a finished stage from a running one. The
+        run's own termination is the point where no stage can still be
+        executing, so that is where the remainder is closed.
+
+        Guarded by ``ended_at IS NULL`` so calling it twice (or after a stage
+        already closed itself) is a no-op rather than a rewrite.
+        """
+        stamp = ended_at if ended_at is not None else _now_ms()
+        with self._db.orm_session() as session:
+            result = session.execute(
+                update(om.AcAgentSwarmRoundModel)
+                .where(
+                    om.AcAgentSwarmRoundModel.run_id == run_id,
+                    om.AcAgentSwarmRoundModel.tenant == tenant,
+                    om.AcAgentSwarmRoundModel.is_deleted.is_(False),
+                    om.AcAgentSwarmRoundModel.ended_at.is_(None),
+                )
+                .values(ended_at=stamp)
+            )
+            return int(result.rowcount or 0)
 
     def list_by_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> list[dm.Round]:
         with self._db.orm_session() as session:

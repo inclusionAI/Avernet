@@ -312,11 +312,24 @@ async def list_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
+    sort: str | None = Query(
+        None,
+        description="Sort column: run_id | status | started_at | ended_at. "
+                    "Unknown values fall back to newest-first.",
+    ),
+    order: str | None = Query(
+        None, description="Sort direction: asc | desc (default desc).",
+    ),
+    keyword: str | None = Query(
+        None,
+        description="Keyword search over the run id and the goal text.",
+    ),
 ):
     # Scoped to the caller: a tenant is a group, not a person, so a tenant-wide
     # list would show one member another's prompts.
     rp = svc.list_runs(tenant, status, page=page, page_size=page_size,
-                       owner_id=user.staffId)
+                       owner_id=user.staffId,
+                       sort=sort, order=order, keyword=keyword)
     return RunListDTO(
         items=[_to_summary(r) for r in rp.items],
         total=rp.total,
@@ -593,6 +606,7 @@ def _goal_excerpt(goal: str) -> str:
 def _to_summary(run) -> RunSummaryDTO:
     return RunSummaryDTO(
         run_id=run.run_id,
+        row_id=run.row_id,
         status=run.status.value,
         termination_reason=run.termination_reason.value if run.termination_reason else None,
         final_answer=run.final_answer,
@@ -649,6 +663,7 @@ def _to_detail_dto(detail) -> RunDetailDTO:
                     else None
                 ),
                 role=a.role,
+                objective=getattr(a, "objective", None),
                 kind=a.kind,
                 status=a.status,
                 parent_agent_id=a.parent_agent_id,
@@ -810,7 +825,11 @@ async def create_definition(
     except DefinitionNameConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_NAME_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_name_conflict: a definition named "
+                   f"{exc.name!r} already exists",
+        ) from exc
     except DefinitionManifestInvalid as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_MANIFEST_REJECTED)
@@ -911,11 +930,20 @@ async def update_definition(
     except DefinitionRowConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_ROW_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Two different refusals share 409, so each says which it is: a name the
+        # caller already uses, or a version that moved on under them.
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_version_conflict: {exc}",
+        ) from exc
     except DefinitionNameConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_NAME_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_name_conflict: a definition named "
+                   f"{exc.name!r} already exists",
+        ) from exc
     except DefinitionManifestInvalid as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_MANIFEST_REJECTED)

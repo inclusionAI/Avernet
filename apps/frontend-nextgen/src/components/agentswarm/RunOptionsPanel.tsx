@@ -9,6 +9,12 @@ export interface RunOptionsPanelProps {
   /** Run-level `options`; includes `model_name`, the default for agents. */
   options: RunOptionsDTO | null | undefined;
   onChange: (options: RunOptionsDTO) => void;
+  /**
+   * The execution Bot's catalogue, which is what its agents can actually be
+   * routed to. Absent falls back to the static list.
+   */
+  models?: readonly string[];
+  modelsHint?: string;
 }
 
 /**
@@ -59,7 +65,7 @@ export function hasCustomLimits(options: RunOptionsDTO | null | undefined): bool
  * deployment's own bounds. The model sits outside the switch because choosing a
  * model is not a limit override.
  */
-export function RunOptionsPanel({ options, onChange }: RunOptionsPanelProps) {
+export function RunOptionsPanel({ options, onChange, models, modelsHint }: RunOptionsPanelProps) {
   const custom = hasCustomLimits(options);
   const issues = validateOptions(options);
   const issueFor = (key: keyof RunOptionsDTO) => issues.find((issue) => issue.key === key)?.message;
@@ -85,8 +91,12 @@ export function RunOptionsPanel({ options, onChange }: RunOptionsPanelProps) {
         默认由平台控制。开启后按下方数值提交，留空则沿用平台默认值。
       </p>
 
+      {/* One limit per row: at two columns each field had half the settings
+          column, so a label, its unit and its hint wrapped against each other.
+          Reading them as a stack also matches the order they matter in, which
+          is the validator's order. */}
       {custom ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           {OPTION_FIELDS.map((field) => {
             const raw = options?.[field.key];
             const message = issueFor(field.key);
@@ -123,9 +133,10 @@ export function RunOptionsPanel({ options, onChange }: RunOptionsPanelProps) {
       ) : null}
 
       <ModelSelector
-        label="运行默认模型"
+        label="执行默认模型"
         inheritLabel="使用平台默认模型"
-        hint="未单独指定模型的 Agent 使用该模型。"
+        hint={modelsHint ?? '未单独指定模型的 Agent 使用该模型。'}
+        models={models}
         value={options?.model_name ?? null}
         onChange={(value) => set({ model_name: value })}
       />

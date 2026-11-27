@@ -22,6 +22,19 @@ export const KNOWN_MODELS: readonly string[] = [
 /** The sentinel the Select uses for "fall through to the next level". */
 export const INHERIT_VALUE = '__inherit__';
 
+/**
+ * A model id is stored exactly as the Bot's catalogue spells it.
+ *
+ * The bot channel passes the stored value straight to the Bot's session, and the
+ * catalogue ids are provider-qualified already (`provider/model`, as the models
+ * API documents). Anything this client adds to a name would be a name the Bot
+ * cannot resolve, so there is deliberately no qualification step here.
+ */
+export function normalizeModelId(model: string | null | undefined): string | undefined {
+  const value = model?.trim();
+  return value ? value : undefined;
+}
+
 export function isKnownModel(value: string | null | undefined): boolean {
   return Boolean(value) && KNOWN_MODELS.includes(String(value));
 }

@@ -369,9 +369,12 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
 
     def list_runs(self, tenant: str, status: RunStatus | None = None,
                   *, page: int = 1, page_size: int = 20,
-                  owner_id: str | None = None) -> RunPage:
+                  owner_id: str | None = None,
+                  sort: str | None = None, order: str | None = None,
+                  keyword: str | None = None) -> RunPage:
         return self._run_repo.list_page(
             TenantId(tenant), status, page, page_size, owner_id=owner_id,
+            sort=sort, order=order, keyword=keyword,
         )
 
     async def cancel(self, run_id: str, tenant: str) -> str:
@@ -494,6 +497,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 agent_id=str(agent.agent_id),
                 name=agent.name,
                 role=agent.role,
+                objective=(
+                    agent.task_spec.objective
+                    if getattr(agent, "task_spec", None) else None
+                ),
                 kind=agent.kind.value,
                 status=agent.status.value,
                 parent_agent_id=(
@@ -728,6 +735,32 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             return ""
         return "sha256:" + hashlib.sha256(document.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _materialized_manifest(manifest_document: str, instructions: str) -> str:
+        """The document a definition stores: never blank.
+
+        A blank manifest is a valid *input* — it asks provisioning to synthesize
+        an identity-only persona from 指令 — but storing blank leaves the library
+        unable to show what that persona is, and every reader has to synthesize
+        it again to know. Store the synthesized document instead; the value is
+        the same one provisioning would have produced.
+
+        The instructions' own text is what lands in SOUL.md, so editing 指令
+        still changes the persona: the editor rewrites the document with it.
+        """
+        if manifest_document.strip():
+            return manifest_document
+        import yaml as _yaml
+        return _yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "manifest": {
+                    "identity": [{"type": "SOUL.md", "content": instructions or ""}],
+                },
+            },
+            sort_keys=False, allow_unicode=True, default_flow_style=False,
+        )
+
     def create_definition(
         self, *, tenant: str, owner_id: str, name: str, role: str = "",
         instructions: str = "", kind: AgentKind = AgentKind.LLM,
@@ -736,6 +769,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
     ) -> AgentDefinition:
         validator = self._require_definition_validator()
         self._check_definition_role(role)
+        manifest_document = self._materialized_manifest(manifest_document, instructions)
         validator.validate_document(manifest_document)
         definition = AgentDefinition(
             definition_id=AgentDefinitionId(uuid.uuid4().hex),
@@ -786,6 +820,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
     ) -> AgentDefinition:
         validator = self._require_definition_validator()
         self._check_definition_role(role)
+        manifest_document = self._materialized_manifest(manifest_document, instructions)
         validator.validate_document(manifest_document)
 
         current = self._definition_repo.get_live(

@@ -107,6 +107,7 @@ class ChatTransport(ABC):
         cancel_event: threading.Event | None = None,
         timeout_seconds: float | None = None,
         tenant: str = "",
+        model: str | None = None,
     ) -> str:
         """Run one chat leg and return the bot's reply text.
 
@@ -123,6 +124,9 @@ class ChatTransport(ABC):
                 unwinds promptly and returns an empty string.
             timeout_seconds: The caller's wait limit. Absent, the transport's
                 own :attr:`chat_timeout_seconds` governs.
+            model: The model this leg should run on, when the agent named one.
+                Carried to the engine so a per-agent override actually applies;
+                absent, the Bot's own configuration decides.
             tenant: The tenant this execution acts under. Only channels that
                 select platform credentials per tenant read it.
 

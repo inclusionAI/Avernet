@@ -174,7 +174,7 @@ def _spec_body() -> dict:
     return {
         "tenant": TENANT,
         "goal": "map the incident",
-        "agents": [{"name": "scout", "role": "research"}],
+        "agents": [{"name": "scout", "role": "research", "kind": "llm"}],
         "idempotency_key": "idem-audit",
     }
 
