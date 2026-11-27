@@ -212,6 +212,7 @@ async def test_package_exists_lists_directory_without_reading_it_as_a_file():
         call(
             "/api/file/list",
             json={"dir_path": DIRECTORY, "recursive": False},
+            allow_device_failover=True,
         )
     ]
 

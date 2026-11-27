@@ -87,10 +87,12 @@ Known, accepted gaps (noted for reviewers; follow-ups listed below):
   mutation paths never rotating, no-alternate / no-bot_uuid / pinned-device /
   unidentifiable-target passthrough, device-404 passthrough, resolver wiring,
   and status-case normalization of the device list.
-- Local (`DEPLOY_PROFILE=test uv run pytest`): plugins/prod 121/121,
-  core/devices/services 907/907, and the transport test file 43/43
-  (including the status-case normalization case); 0 failures. The full
-  gates run on the PR head in CI.
+- `tests/community/core/skill_center/test_local_skill_package_storage_io.py`:
+  the package existence probe lists the directory once, with failover enabled,
+  and never tries to read the directory as a file.
+- Run the production BaaS filesystem and transport tests, the owning devices
+  tests, and the Skill Center tests that exercise the filesystem adapter. The
+  full gates run on the PR head in CI.
 
 ## Out of scope / follow-up (human handover)
 
