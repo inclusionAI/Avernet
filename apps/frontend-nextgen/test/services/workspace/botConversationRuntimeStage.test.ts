@@ -94,6 +94,35 @@ test('my Bot preserves an explicitly selected request stage', () => {
   });
 });
 
+test('non-subject-scoped service session lists still carry the service runtime stage', async () => {
+  const bot = { ...base, runtimeStage: 'online' as const };
+  await botSessionService.listSessionsPage(bot, 'viewer', 1, 100, '', undefined, false);
+
+  expect(request).toHaveBeenCalledWith(
+    '/openapi/v1/bots/service/sessions',
+    expect.objectContaining({
+      params: expect.objectContaining({ user_id: 'viewer', page: 1, page_size: 100, stage: 'online' }),
+    }),
+  );
+  const params = request.mock.calls[0][1]?.params;
+  expect(params).not.toHaveProperty('f_user_id');
+});
+
+test('non-subject-scoped personal session lists still omit stage', async () => {
+  const bot = { ...base, botType: 'personal', runtimeStage: 'online' as const };
+  await botSessionService.listSessionsPage(bot, 'viewer', 1, 100, '', undefined, false);
+
+  expect(request).toHaveBeenCalledWith(
+    '/openapi/v1/bots/service/sessions',
+    expect.objectContaining({
+      params: expect.objectContaining({ user_id: 'viewer', page: 1, page_size: 100 }),
+    }),
+  );
+  const params = request.mock.calls[0][1]?.params;
+  expect(params).not.toHaveProperty('stage');
+  expect(params).not.toHaveProperty('f_user_id');
+});
+
 test('non-service team Bots omit even stale explicit instance-range stages', () => {
   const bot = { ...base, isTeamBot: true, botType: undefined };
   expect(withConversationSubjectParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).not.toHaveProperty('stage');
