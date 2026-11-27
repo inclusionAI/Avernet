@@ -37,6 +37,7 @@ from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_instance_service import (
     BindingNotFoundError,
     BotPublishNotFoundError,
+    BotOnlinePublicationNotFoundError,
     InstanceHealthStatus,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -389,7 +390,8 @@ class ServicePublicationFacade:
         return {"bot_id": bot_id, "items": cards}
 
     def list_containers(
-        self, bot_id: str, *, actor_id: str, owner_id: str
+        self, bot_id: str, *, actor_id: str, owner_id: str,
+        allow_unpublished: bool = False,
     ) -> dict[str, Any]:
         """Return live service-Bot instances after collaborator authorization."""
         self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
@@ -398,6 +400,10 @@ class ServicePublicationFacade:
                 bot_id=bot_id,
                 health_check=True,
             )
+        except BotOnlinePublicationNotFoundError as exc:
+            if allow_unpublished:
+                return {"bot_id": bot_id, "instances": []}
+            raise ServiceContainerConflictError("service runtime is not live") from exc
         except (BotPublishNotFoundError, BindingNotFoundError) as exc:
             raise ServiceContainerConflictError("service runtime is not live") from exc
         except (DeviceServiceError, BaasServiceError) as exc:

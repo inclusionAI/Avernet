@@ -27,6 +27,20 @@ npm run check:open-core
 npm run ci
 ```
 
+## Scheduled-task runtime targets
+
+Refreshing execution history sends `GET /routines/{id}/runs` with the task's
+reported stage and instance, even when a draft list omits `operator_id`. It does
+not trigger another execution or substitute the current Owner as the Caller.
+Backend validates the selected instance against the resolved runtime binding.
+The page requests online containers with `allow_unpublished=true`: a draft-only
+service Bot has an empty online list, while permission, binding and provider
+failures retain their error handling. No extra publication request or polling
+is added. Regression coverage lives in
+[target routing](test/services/botScheduledTasks/targets.test.ts),
+[runtime metadata](test/services/botScheduledTasks/metadata.test.ts) and
+[history refresh](test/pages/BotWorkshop/ScheduledTasks/RoutineDetail.history.test.tsx).
+
 ## Bot management: friend roster
 
 Public settings reuses one friend roster for managed and external Bots. The

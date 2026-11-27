@@ -366,8 +366,9 @@ def test_get_instances_by_bot_no_publish_raises():
     publish_repo = MagicMock()
     publish_repo.get_latest_success_by_source_bot_id.return_value = None
     router = _make_router(repo=repo, baas_service=MagicMock(), publish_repo=publish_repo)
-    with pytest.raises(BotPublishNotFoundError):
+    with pytest.raises(dsr_mod.BotOnlinePublicationNotFoundError):
         router.get_instances_by_bot(bot_id="bot-001")
+    repo.get_by_id.assert_not_called()
 
 
 def test_get_instances_by_bot_missing_binding_online_raises():

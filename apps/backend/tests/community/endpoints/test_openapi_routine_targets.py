@@ -107,11 +107,38 @@ async def test_http_deprecated_contract_does_not_gain_selectors(world, async_cli
 
 
 @pytest.mark.asyncio
-async def test_http_uuid_only_draft_runs_preserves_legacy_rejection(world, async_client):
-    transport = seed(world)
-    result = await async_client.get(BASE + "/job/runs", params={"user_id": "u_owner", "runtime_stage": "draft", "device_uuid": "local_dev_test"}, headers=headers())
-    assert result.status_code == 400
-    assert transport.calls_to("invoke") == []
+@pytest.mark.parametrize("device_uuid,status", [("instance-a", 200), ("foreign", 404)])
+async def test_http_uuid_only_draft_runs_validates_instance_and_reads_history(
+    world, async_client, device_uuid, status
+):
+    providers, transport = seed_recording_runtime(world)
+    result = await async_client.get(
+        BASE + "/job/runs",
+        params={"user_id": "u_owner", "runtime_stage": "draft", "device_uuid": device_uuid},
+        headers=headers(),
+    )
+    assert result.status_code == status, result.text
+    assert len(providers.binding_requests) == 1
+    binding_request = providers.binding_requests[0]
+    assert binding_request.stage == "draft"
+    assert binding_request.actor_user_id == "u_owner"
+    if status == 404:
+        assert result.json()["data"] is None
+        assert transport.calls == []
+        assert providers.connections == []
+        return
+
+    data = result.json()["data"]
+    assert data["total"] == 1
+    assert data["items"][0]["run_id"] == "same"
+    assert data["failed_targets"] == []
+    # Refresh reads the selected container once; it never triggers another run.
+    assert transport.calls == [
+        ({"url": "instance-a"}, "GET", "/api/cron/job/runs", None, {"limit": 20})
+    ]
+    assert providers.connections == [
+        (99, "u_owner", {"bot_id": "bot_test", "device_uuid": "instance-a"})
+    ]
 
 
 class _RuntimeProviders:

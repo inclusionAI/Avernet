@@ -778,3 +778,29 @@ async def test_teclaw_caller_targeted_stage_reads_are_allowed(stage):
     svc._resolver.resolve_for_binding.assert_called_once_with(
         99, "owner", bot_id="bot", device_uuid="instance-a"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["owner", "new-owner"])
+@pytest.mark.parametrize("selected_device", ["instance-a", "foreign-instance"])
+async def test_draft_history_without_operator_keeps_instance_and_authorization(owner, selected_device):
+    svc = service()
+    svc._bot_provider.get_bot.return_value["owner_id"] = owner
+    svc._transport.invoke.return_value = {"success": True, "data": {"runs": [{"job_id": "job", "status": "ok"}]}}
+    kwargs = dict(bot_id="bot", user_id="owner", nick_name="Owner", task_id="job",
+                  runtime_stage="draft", device_uuid=selected_device, authenticated_user_id=owner)
+    if selected_device == "foreign-instance":
+        with pytest.raises(CronRelayError) as exc:
+            await svc.get_cron_runs(**kwargs)
+        assert exc.value.error_code == 404
+        svc._transport.invoke.assert_not_called()
+    else:
+        result = await svc.get_cron_runs(**kwargs)
+        assert result["data"]["runs"][0]["status"] == "ok"
+        assert svc._transport.invoke.await_count == 1
+        request = svc._runtime_bindings.resolve.call_args.args[0]
+        assert request.owner_id == owner
+        assert request.actor_user_id == owner
+        assert request.stage == "draft"
+        svc._resolver.resolve_for_binding.assert_called_once_with(99, owner, bot_id="bot", device_uuid=selected_device)
+    svc._resolver.resolve_for_bot.assert_not_called()

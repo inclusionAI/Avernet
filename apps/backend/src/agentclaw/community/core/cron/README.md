@@ -51,6 +51,10 @@ membership is validated before forwarding once. No provisioning or fallback
 occurs. Omitted creation target fields preserve the legacy draft behavior.
 
 Detail, update, delete, run, runs and running accept the same target fields.
+Draft history with a device UUID does not require an explicit operator ID:
+it uses the authenticated actor and validates the instance against the resolved
+runtime binding, matching immediate execution. Published UUID-only history
+keeps its existing aggregation behavior. Refreshing history never executes a task.
 Explicitly selected published instances permit complete edits and deletion.
 Legacy untargeted published management retains its existing broadcast restrictions.
 Creation/detail results expose runtime_stage, device_uuid and operator_id

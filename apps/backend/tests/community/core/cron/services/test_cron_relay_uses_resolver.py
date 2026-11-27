@@ -2557,7 +2557,7 @@ class TestForwardRequestUsesResolver:
         transport.invoke.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_get_cron_runs_rejects_personal_bot_device_uuid(self):
+    async def test_get_cron_runs_rejects_foreign_draft_device_uuid(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
             "bot_id": "personal-bot",
@@ -2585,7 +2585,7 @@ class TestForwardRequestUsesResolver:
                 device_uuid="DEVICE-002",
             )
 
-        assert exc_info.value.error_code == 400
+        assert exc_info.value.error_code == 404
 
     @pytest.mark.asyncio
     async def test_run_cron_online_stage_routes_teclaw_binding_via_real_resolver(self):
