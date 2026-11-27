@@ -31,11 +31,32 @@ const isRequired = (field: BotTemplateField) =>
 const isEmpty = (value: unknown) =>
   value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
 
+const isModelTemplateField = (field: BotTemplateField) => {
+  const semanticKey = String(field.field_key)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[\s-]/g, '_');
+  return ['model', 'default_model', 'model_id'].includes(semanticKey);
+};
+
 function sanitizeTemplateValues(fields: BotTemplateField[], values: Record<string, unknown>) {
   const next = { ...values };
   fields.forEach((field) => {
     const key = String(field.field_key);
     const type = asFieldType(field);
+    const rawValue = next[key];
+    if (isModelTemplateField(field)) {
+      const config =
+        rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+          ? { ...rawValue }
+          : typeof rawValue === 'string' && rawValue
+          ? { model: rawValue }
+          : {};
+      delete (config as Record<string, unknown> & { __validation_error?: unknown }).__validation_error;
+      next[key] = config;
+      Object.assign(next, config);
+      return;
+    }
     const value = next[key];
     if (type === 'antcode' || type === 'yuque') {
       next[key] = Array.isArray(value)
