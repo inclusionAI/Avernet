@@ -104,10 +104,11 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     () =>
       activeIdentity?.kind === 'user'
         ? buildGroupMentionConfig(session?.participants ?? [], {
+            groupKind: group?.kind,
             excludedActorIds: activeIdentity.id ? [activeIdentity.id] : [],
           })
         : undefined,
-    [activeIdentity?.id, activeIdentity?.kind, session?.participants],
+    [activeIdentity?.id, activeIdentity?.kind, group?.kind, session?.participants],
   );
 
   const taskExecution = useGroupTaskExecution({
@@ -133,7 +134,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     setLastSentMentions([]);
     panelRef.current?.closePanelForce();
   }, [session?.sessionId, panelRef]);
-  // 引用/解释/发送/空态点名写入/副屏面板动作：同目录 useGroupChatPaneActions 下沉装配。
   const { insertDraft, handlePanelAction, quoteSelectedMessage, explainSelectedMessage, handleGroupSend } =
     useGroupChatPaneActions({
       group,
@@ -156,7 +156,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
 
   // 输入框可见性（与下方 GroupChatComposer 渲染条件同源）：空态行动区仅在可发送视角提供。
   const composerVisible = !!session && !historyOnly && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
-  // 帽条可见性与 composer 分离：「退出会话」仅在 human 视角已加入（present）时有意义（同原 LeaveBar）。
   const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
   return (
@@ -256,6 +255,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             <SpeakingLeaseStrip model={speakingLease} topRounded={!statusBarVisible} />
             <GroupChatComposer
               session={session}
+              groupKind={group.kind}
               connectionStatus={connectionStatus}
               mentionConfig={mentionConfig}
               onSend={speakingLease?.composeSender(handleGroupSend) ?? handleGroupSend}
