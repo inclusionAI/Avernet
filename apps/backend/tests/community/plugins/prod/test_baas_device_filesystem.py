@@ -49,7 +49,7 @@ async def test_read_file_calls_transport_post():
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     result = await fs.read_file("/path/to/foo")
     assert result == b"hello world"
-    transport.post.assert_called_once_with("/api/file/read", json={"file_path": "/path/to/foo"})
+    transport.post.assert_called_once_with("/api/file/read", json={"file_path": "/path/to/foo"}, allow_device_failover=True)
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_list_dir_calls_transport_post():
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     files = await fs.list_dir("/dir", recursive=True)
     assert files == [{"name": "a"}]
-    transport.post.assert_called_once_with("/api/file/list", json={"dir_path": "/dir", "recursive": True})
+    transport.post.assert_called_once_with("/api/file/list", json={"dir_path": "/dir", "recursive": True}, allow_device_failover=True)
 
 
 @pytest.mark.asyncio
@@ -304,7 +304,7 @@ async def test_desktop_baas_device_filesystem_uses_same_logic():
     transport = _make_transport(response=_ok_response(content=b"x"))
     fs = DesktopBaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     await fs.read_file("/foo")
-    transport.post.assert_called_once_with("/api/file/read", json={"file_path": "/foo"})
+    transport.post.assert_called_once_with("/api/file/read", json={"file_path": "/foo"}, allow_device_failover=True)
 
 
 # ── reads surface errors (no swallow); deletes stay best-effort idempotent ──────
@@ -380,12 +380,21 @@ async def test_exists_recovers_when_file_appears_before_directory_probe():
 
     assert await fs.exists("/workspace/install_coship_tools.py") is True
     assert transport.post.call_args_list == [
-        call("/api/file/read", json={"file_path": "/workspace/install_coship_tools.py"}),
+        call(
+            "/api/file/read",
+            json={"file_path": "/workspace/install_coship_tools.py"},
+            allow_device_failover=True,
+        ),
         call(
             "/api/file/list",
             json={"dir_path": "/workspace/install_coship_tools.py", "recursive": False},
+            allow_device_failover=True,
         ),
-        call("/api/file/read", json={"file_path": "/workspace/install_coship_tools.py"}),
+        call(
+            "/api/file/read",
+            json={"file_path": "/workspace/install_coship_tools.py"},
+            allow_device_failover=True,
+        ),
     ]
 
 

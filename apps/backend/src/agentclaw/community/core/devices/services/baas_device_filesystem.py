@@ -109,6 +109,7 @@ class BaasDeviceFileSystem(DeviceFileSystem):
                 self._transport.post,
                 "/api/file/read",
                 json={"file_path": file_path},
+                allow_device_failover=True,
             )
             resp.raise_for_status()
             return resp.content
@@ -231,6 +232,7 @@ class BaasDeviceFileSystem(DeviceFileSystem):
                 self._transport.post,
                 "/api/file/list",
                 json={"dir_path": dir_path, "recursive": recursive},
+                allow_device_failover=True,
             )
             resp.raise_for_status()
             result = resp.json()

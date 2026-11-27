@@ -63,17 +63,10 @@ _STALE_TOKEN_STATUS = 401
 # channel is dead answers 502 immediately, with no downstream span) before any
 # engine code runs. That verdict is about the selected device, not about the
 # request: replaying the same read against another ACTIVE instance of the same bot
-# is the same read, which is what makes a one-shot rotation safe on the read paths
-# that opt in. Deliberately NOT retried: mutating routes — see
-# :data:`_ROTATABLE_READ_PATHS`.
+# is the same read. Only callers that know the operation is a side-effect-free
+# read may explicitly opt in to rotation; the transport never infers this from
+# the endpoint path or HTTP verb.
 _GATEWAY_UNAVAILABLE_STATUS = frozenset({502, 503, 504})
-
-# The idempotent, side-effect-free engine file routes eligible for device
-# rotation on a gateway-unavailable response. ``/api/file/upload`` /
-# ``/api/file/remove`` / ``/api/file/rmtree`` stay single-shot: a replayed
-# mutation could double-apply on a device it did reach, or run against a
-# different instance the caller never named.
-_ROTATABLE_READ_PATHS = frozenset({"/api/file/read", "/api/file/list"})
 
 
 def _paas_device_id_from_target(target: str) -> str | None:
@@ -138,7 +131,11 @@ class BaasTransport(Protocol):
     """
 
     @abstractmethod
-    def post(self, path: str, *, json: Any | None = None) -> httpx.Response: ...
+    def post(
+        self, path: str, *, json: Any | None = None, allow_device_failover: bool = False
+    ) -> httpx.Response:
+        """POST; opt in only for a side-effect-free read safe on another device."""
+        ...
 
     @abstractmethod
     def post_multipart(
@@ -363,7 +360,9 @@ class BaasInvokeTransport(BaasTransport):
         )
         return response
 
-    def _invoke(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def _invoke(
+        self, method: str, path: str, *, allow_device_failover: bool = False, **kwargs: Any
+    ) -> httpx.Response:
         """Issue one container call against this transport's cached ``http_info``.
 
         Retries once against a re-resolved ``http_info`` when the gateway answers
@@ -375,8 +374,8 @@ class BaasInvokeTransport(BaasTransport):
 
         Every other status — 403 included, see :data:`_STALE_TOKEN_STATUS` — is the
         device's own answer and is returned untouched, with one exception: a
-        gateway-unavailable 502/503/504 on an auto-selected read path rotates
-        once to another ACTIVE instance (see :meth:`_rotate_once`).
+        gateway-unavailable 502/503/504 on an opted-in, auto-selected read
+        rotates once to another ACTIVE instance (see :meth:`_rotate_once`).
         """
         call = dict(
             bind_id=self._bind_id,
@@ -400,16 +399,19 @@ class BaasInvokeTransport(BaasTransport):
             )
         if (
             response.status_code in _GATEWAY_UNAVAILABLE_STATUS
-            and method == "POST"
-            and path in _ROTATABLE_READ_PATHS
+            and allow_device_failover
             and self._bot_uuid
             and self._device_uuid is None
         ):
             return self._rotate_once(path, call, info, response)
         return response
 
-    def post(self, path: str, *, json: Any | None = None) -> httpx.Response:
-        return self._invoke("POST", path, json=json)
+    def post(
+        self, path: str, *, json: Any | None = None, allow_device_failover: bool = False
+    ) -> httpx.Response:
+        return self._invoke(
+            "POST", path, json=json, allow_device_failover=allow_device_failover
+        )
 
     def get(self, path: str) -> httpx.Response:
         return self._invoke("GET", path)
@@ -465,7 +467,10 @@ class DesktopBaasInvokeTransport(BaasTransport):
         self._headers = headers
         self._client = client
 
-    def post(self, path: str, *, json: Any | None = None) -> httpx.Response:
+    def post(
+        self, path: str, *, json: Any | None = None, allow_device_failover: bool = False
+    ) -> httpx.Response:
+        # Desktop has no alternate BaaS device selection.
         return self._client.post(
             self._invoke_url(path), json=json, headers=self._headers
         )

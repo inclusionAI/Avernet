@@ -42,8 +42,10 @@ device unreachable", not "request wrong".
 
 Bounded, read-only failover in `BaasInvokeTransport`:
 
-- On a 502/503/504 response for `POST` on `/api/file/read` / `/api/file/list`
-  (the idempotent engine read routes), when the transport resolved via BaaS
+- `BaasDeviceFileSystem.read_file` and `list_dir` explicitly opt in to
+  device failover. Other operations default to no rotation; the transport
+  does not match endpoint strings. On a 502/503/504 response to an opted-in
+  read, when the transport resolved via BaaS
   auto-select (caller pinned no `device_uuid`) and knows its BaaS `bot_uuid`,
   it lists the bot's devices (`list_devices_by_bot_uuid`), picks another
   `ACTIVE` instance excluding the one that just failed (parsed from
