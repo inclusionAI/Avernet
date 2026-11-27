@@ -141,7 +141,7 @@ def _url(path=""):
 # ── create ──────────────────────────────────────────────────────────────────
 
 def test_create_returns_201_and_the_actor_fields(client):
-    r = client.post(_url("/add"), json={"name": "reviewer", "role": "v1"})
+    r = client.post(_url("/add"), json={"name": "reviewer", "role": "v1", "kind": "bot"})
     assert r.status_code == 201
     body = r.json()
     assert body["owner_id"] == ME and body["creator_id"] == ME
@@ -150,21 +150,36 @@ def test_create_returns_201_and_the_actor_fields(client):
 
 def test_name_conflict_is_409(client, stub, audit):
     stub.create_error = DefinitionNameConflict("reviewer")
-    r = client.post(_url("/add"), json={"name": "reviewer"})
+    r = client.post(_url("/add"), json={"name": "reviewer", "kind": "bot"})
     assert r.status_code == 409
     assert any(row["action"] == "definition_name_conflict" for row in audit.rows)
 
 
 def test_invalid_manifest_is_422(client, stub):
     stub.create_error = DefinitionManifestInvalid("bad yaml")
-    r = client.post(_url("/add"), json={"name": "reviewer", "manifest_document": "x"})
+    r = client.post(_url("/add"), json={"name": "reviewer", "kind": "bot", "manifest_document": "x"})
     assert r.status_code == 422
     assert "bad yaml" in r.json()["detail"]
 
 
 def test_a_request_supplying_owner_is_rejected(client):
     # owner_id is derived from the session, never accepted from the body.
-    r = client.post(_url("/add"), json={"name": "reviewer", "owner_id": "99999"})
+    r = client.post(_url("/add"), json={"name": "reviewer", "kind": "bot", "owner_id": "99999"})
+    assert r.status_code == 422
+
+
+def test_a_request_omitting_kind_is_refused(client):
+    # kind decides whether an agent answers in-process or provisions a persona,
+    # so it has no default: an omitted kind must be refused here rather than
+    # silently becoming an llm agent the caller never asked for.
+    r = client.post(_url("/add"), json={"name": "reviewer", "role": "v1"})
+    assert r.status_code == 422
+
+
+def test_a_revise_omitting_kind_is_refused(client):
+    r = client.post(_url("/update"), json={
+        "definition_id": "def-1", "name": "reviewer", "definition_row_id": 101,
+    })
     assert r.status_code == 422
 
 
@@ -231,7 +246,8 @@ def test_versions_of_a_live_definition_are_not_deleted(client, stub):
 def test_stale_revise_is_409(client, stub, audit):
     stub.update_error = DefinitionRowConflict(101)
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "reviewer", "definition_row_id": 101,
+        "definition_id": "def-1", "name": "reviewer", "kind": "bot",
+        "definition_row_id": 101,
     })
     assert r.status_code == 409
     assert any(row["action"] == "definition_row_conflict" for row in audit.rows)
@@ -240,7 +256,8 @@ def test_stale_revise_is_409(client, stub, audit):
 def test_revise_of_absent_definition_is_404(client, stub):
     stub.update_error = AgentSwarmRunNotFoundError("def-1")
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "reviewer", "definition_row_id": 101,
+        "definition_id": "def-1", "name": "reviewer", "kind": "bot",
+        "definition_row_id": 101,
     })
     assert r.status_code == 404
 
@@ -251,7 +268,7 @@ def test_delete_reports_retired_count(client):
 
 
 def test_revise_requires_the_row_id(client):
-    r = client.post(_url("/update"), json={"definition_id": "def-1", "name": "reviewer"})
+    r = client.post(_url("/update"), json={"definition_id": "def-1", "name": "reviewer", "kind": "bot"})
     assert r.status_code == 422
 
 
@@ -280,8 +297,8 @@ def test_openapi_lists_all_six_definition_operations(client):
 def test_revise_returns_the_new_version(client, stub, audit):
     stub.live = _defn(role="v1", row_id=101)
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "reviewer", "role": "v2",
-        "definition_row_id": 101,
+        "definition_id": "def-1", "name": "reviewer", "kind": "bot",
+        "role": "v2", "definition_row_id": 101,
     })
     assert r.status_code == 200
     body = r.json()
@@ -292,7 +309,8 @@ def test_revise_returns_the_new_version(client, stub, audit):
 def test_revise_with_an_invalid_manifest_is_422(client, stub, audit):
     stub.update_error = DefinitionManifestInvalid("bad yaml")
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "reviewer", "definition_row_id": 101,
+        "definition_id": "def-1", "name": "reviewer", "kind": "bot",
+        "definition_row_id": 101,
     })
     assert r.status_code == 422
     assert any(
@@ -303,7 +321,8 @@ def test_revise_with_an_invalid_manifest_is_422(client, stub, audit):
 def test_revise_renaming_onto_a_live_name_is_409(client, stub):
     stub.update_error = DefinitionNameConflict("taken")
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "taken", "definition_row_id": 101,
+        "definition_id": "def-1", "name": "taken", "kind": "bot",
+        "definition_row_id": 101,
     })
     assert r.status_code == 409
 
@@ -311,7 +330,8 @@ def test_revise_renaming_onto_a_live_name_is_409(client, stub):
 def test_revise_with_an_over_long_role_is_422(client, stub):
     stub.update_error = ValueError("role is 900 characters, over the 512 limit")
     r = client.post(_url("/update"), json={
-        "definition_id": "def-1", "name": "reviewer", "definition_row_id": 101,
+        "definition_id": "def-1", "name": "reviewer", "kind": "bot",
+        "definition_row_id": 101,
     })
     assert r.status_code == 422
 
@@ -334,7 +354,7 @@ def test_listing_returns_a_page_envelope(client, stub):
 
 def test_create_with_an_over_long_role_is_422(client, stub):
     stub.create_error = ValueError("role too long")
-    r = client.post(_url("/add"), json={"name": "reviewer"})
+    r = client.post(_url("/add"), json={"name": "reviewer", "kind": "bot"})
     assert r.status_code == 422
 
 

@@ -16,7 +16,12 @@ class AgentSpecDTO(BaseModel):
     name: str = Field(max_length=128)
     role: str = Field(max_length=20000)
     instructions: str = Field(default="", max_length=20000)
-    kind: AgentKind = AgentKind.LLM
+    # Required, not defaulted — same reason as CreateDefinitionDTO.kind: the
+    # kind decides whether the agent answers in-process or provisions a
+    # persona. The interface creates bot agents only (``llm`` is test-only and
+    # has no entry point), so a silent default was the wrong one to fall back
+    # to: an omitted kind produced an llm agent that looked like a bot request.
+    kind: AgentKind
     model: str | None = None
     engine: str | None = None
     bot_type: str | None = None
@@ -356,7 +361,13 @@ class CreateDefinitionDTO(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     role: str = Field(default="", max_length=20000)
     instructions: str = Field(default="", max_length=20000)
-    kind: AgentKind = AgentKind.LLM
+    # Required, not defaulted. A definition's kind decides how it is executed
+    # (an llm agent answers in-process; a bot agent provisions a persona), so a
+    # caller that forgets it would silently get the other one — llm agents have
+    # no persona, no engine and no manifest, and the mistake only surfaces much
+    # later as a run that behaves nothing like the request. Asking for it makes
+    # an omitted kind a 422 at the call site instead.
+    kind: AgentKind
     model: str | None = Field(default=None, max_length=128)
     engine: str | None = Field(default=None, max_length=64)
     bot_type: str | None = Field(default=None, max_length=32)

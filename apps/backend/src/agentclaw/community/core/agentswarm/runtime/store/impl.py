@@ -142,6 +142,8 @@ class SliceStore:
             content["artifact_key"] = artifact_key
         if completion["error"] is not None:
             content["error"] = completion["error"]
+        if completion.get("model"):
+            content["model"] = completion["model"]
         await run_blocking(
             self._message_repo.create,
             self._new_message(run_id, tenant, agent_id, MessageRole.ASSISTANT,

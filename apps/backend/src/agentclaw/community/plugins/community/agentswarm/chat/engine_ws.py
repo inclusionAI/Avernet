@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from agentclaw.community.log import get_logger
 
@@ -68,6 +69,11 @@ _RECV_SLICE_SECONDS = 1.0
 # worker) hostage; the receive slices inside keep it cooperative with
 # the shared cancel event just like the chat loop.
 _SESSION_RESET_SECONDS = 10.0
+# Upper bound on the ``POST /api/sessions`` call that binds an agent's 独立模型
+# to its session before chat.send. Same fail-soft posture as the reset: a slow
+# engine must not hold the leg hostage when the reply can still be served on
+# the session's existing model.
+_SESSION_MODEL_SECONDS = 10.0
 # One worker per concurrent engine chat the pod may carry: the default for
 # direct construction; the composition root sizes the bridge from
 # ``agentswarm.executor.max_platform_workers``.
@@ -166,7 +172,8 @@ class ChatLegMixin(ChatTransport):
              session_key: str | None = None,
              cancel_event: threading.Event | None = None,
              timeout_seconds: float | None = None,
-             tenant: str = "") -> str:
+             tenant: str = "",
+             model: str | None = None) -> str:
         # Sync-out by SPI contract; async-in in the bridge worker that
         # carries this call: the engine leg runs its own asyncio.run loop
         # here and every wait inside it is bounded — the recv loop's
@@ -200,7 +207,7 @@ class ChatLegMixin(ChatTransport):
         try:
             reply = asyncio.run(self._chat_once(
                 bot_id, message, owner, session_key, cancel_event,
-                timeout_seconds=deadline))
+                timeout_seconds=deadline, model=model))
         except TimeoutError as exc:
             logger.warning(
                 "[agentswarm][chat][leg] transport=%s timeout bot=%s "
@@ -278,10 +285,20 @@ class ChatLegMixin(ChatTransport):
     async def _chat_once(self, bot_id: BotId, message: str, owner: str,
                          session_key: str | None,
                          cancel_event: threading.Event | None,
-                         timeout_seconds: float | None = None) -> str:
+                         timeout_seconds: float | None = None,
+                         model: str | None = None) -> str:
         ws_url, token = self._engine_endpoint(bot_id, owner)
         ws = await self._connect_engine(ws_url, token)
         try:
+            # Model-before-chat: the engine pins a model when it creates a
+            # session, and a chat.send cannot switch it. Bind the agent's
+            # 独立模型 first, on the same engine the socket talks to; absent a
+            # model the Bot's own configured one stands. Fail-soft like the
+            # reset below.
+            if model:
+                await self._apply_session_model(
+                    (ws_url, token), session_key or _DEFAULT_SESSION_KEY,
+                    model, cancel_event)
             # Reset-before-chat: the upcoming chat.send addresses one
             # session key, and the engine's blessed fresh-conversation
             # mechanism is sessions.reset on that key — a retried or
@@ -369,6 +386,79 @@ class ChatLegMixin(ChatTransport):
                 raise ChatRefusedError(
                     f"engine refused the reset: {payload!r}")
             return
+
+    async def _apply_session_model(self, endpoint: tuple[str, str],
+                                   session_key: str, model: str,
+                                   cancel_event: threading.Event | None
+                                   ) -> None:
+        """Bind ``model`` to the conversation the upcoming chat.send addresses.
+
+        The engine pins a model when it *creates* a session — a chat.send
+        cannot switch one, and a WS ``sessions.patch`` is refused. BaaS gets
+        this right by calling the engine's HTTP ``POST /api/sessions`` with
+        the model before it sends (``_materialize_session``); this leg skips
+        BaaS entirely, so it makes the same call itself on the same proxypass
+        target. Creation is idempotent engine-side: an existing key keeps its
+        model rather than being rebuilt.
+
+        Fail-soft. A refused or slow call only warns — the chat then runs on
+        whatever model the session already carries, which is an answer-quality
+        risk, never a liveness one.
+        """
+        try:
+            await asyncio.wait_for(
+                self._create_session_with_model(
+                    endpoint, session_key, model),
+                timeout=_SESSION_MODEL_SECONDS,
+            )
+            logger.info(
+                "[agentswarm][host-platform] session model bound "
+                "(session=%s model=%s)", session_key, model,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[agentswarm][host-platform] session model bind failed; chat "
+                "proceeds on the session's existing model "
+                "(session=%s model=%s): %s", session_key, model, exc,
+            )
+
+    async def _create_session_with_model(self, endpoint: tuple[str, str],
+                                         session_key: str, model: str) -> None:
+        """Bind ``model`` onto the addressed session via the engine's update API.
+
+        ``POST /api/sessions`` only CREATEs: for a key that already exists it is
+        idempotent and ignores the model, which silently left every provisioned
+        bot running the platform default. The bot's session exists before this
+        leg runs, so the model has to be patched on: ``/{key}/update`` reaches
+        the engine's ``sessions.patch`` and is the route for a session that is
+        already there.
+
+        Path, host and credential all derive from the socket's own proxypass
+        target, so this reaches the same sandbox the chat leg talks to.
+        """
+        import httpx
+
+        ws_url, token = endpoint
+        parsed = urlsplit(ws_url)
+        scheme = "https" if parsed.scheme in ("wss", "https") else "http"
+        # Everything before the engine's own path is the proxypass target —
+        # that prefix is what routes to this bot's sandbox.
+        prefix = parsed.path.rsplit("/api/", 1)[0]
+        update_url = urlunsplit(
+            (scheme, parsed.netloc,
+             f"{prefix}/api/sessions/{session_key}/update", "model=" + model, "")
+        )
+        async with httpx.AsyncClient(timeout=_SESSION_MODEL_SECONDS) as client:
+            resp = await client.post(
+                update_url, headers={"x-proxypass-token": token},
+            )
+        if resp.status_code >= 400:
+            raise ChatRefusedError(
+                f"engine refused the session model update ({resp.status_code}): "
+                f"{resp.text[:200]}"
+            )
 
     async def _connect_engine(self, ws_url: str, token: str) -> Any:
         """Connect+handshake with bounded retry (15/30/60s)."""

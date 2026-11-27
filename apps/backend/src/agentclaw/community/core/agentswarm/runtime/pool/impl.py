@@ -731,4 +731,7 @@ class SubagentRuntime:
             "result": result_payload,
             "artifact_key": artifact_key,
             "token_usage": raw.token_usage if raw else None,
+            # The model the provider reported serving for this agent. Recorded
+            # so the run's own reports can tell which model did the work.
+            "model": raw.model if raw else None,
         }

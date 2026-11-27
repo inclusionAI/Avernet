@@ -159,6 +159,7 @@ class BaasGatewayChatTransport(ChatTransport):
         cancel_event: threading.Event | None = None,
         timeout_seconds: float | None = None,
         tenant: str = "",
+        model: str | None = None,
     ) -> str:
         owner = (owner_id or "").strip()
         if not owner:
@@ -192,6 +193,7 @@ class BaasGatewayChatTransport(ChatTransport):
                     cancel_event=cancel_event,
                     timeout_seconds=deadline,
                     tenant=tenant,
+                    model=model,
                 )
             )
         except Exception as exc:
@@ -238,6 +240,7 @@ class BaasGatewayChatTransport(ChatTransport):
         message: str,
         session_mode: SessionMode,
         session_key: str | None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """The request body.
 
@@ -249,6 +252,12 @@ class BaasGatewayChatTransport(ChatTransport):
         metadata: dict[str, Any] = {
             "bot_options": {"lifecycle_stage": "online"},
         }
+        # The platform reads `metadata.model` into the engine session it creates
+        # (openapi message -> create_session(model=...)), so this is where a
+        # per-agent model actually takes effect. Omitted when the agent named
+        # none, leaving the Bot's own configuration in charge.
+        if model:
+            metadata["model"] = model
         if session_mode is SessionMode.CONTINUE and session_key:
             metadata["session_key"] = session_key
         else:
@@ -266,6 +275,7 @@ class BaasGatewayChatTransport(ChatTransport):
         cancel_event: threading.Event | None,
         timeout_seconds: float,
         tenant: str,  # unused: the platform tenant comes from platform_tenant
+        model: str | None = None,
     ) -> str:
         target = self._resolve_target(bot_id, owner)
         platform_tenant = self._platform_tenant
@@ -291,6 +301,7 @@ class BaasGatewayChatTransport(ChatTransport):
             message=message,
             session_mode=session_mode,
             session_key=session_key,
+            model=model,
         )
         headers = {
             # This surface authenticates the minted principal, not a bearer

@@ -26,7 +26,7 @@ def _base(**over):
 
 
 def test_inline_only_is_accepted():
-    dto = SubmitRunDTO(**_base(agents=[{"name": "a", "role": "r"}]))
+    dto = SubmitRunDTO(**_base(agents=[{"name": "a", "role": "r", "kind": "bot"}]))
     assert len(dto.agents) == 1 and dto.agent_refs == []
 
 
@@ -38,7 +38,7 @@ def test_refs_only_is_accepted():
 def test_both_forms_is_refused():
     with pytest.raises(ValidationError):
         SubmitRunDTO(**_base(
-            agents=[{"name": "a", "role": "r"}],
+            agents=[{"name": "a", "role": "r", "kind": "bot"}],
             agent_refs=[{"definition_id": "d1"}],
         ))
 
@@ -68,6 +68,6 @@ def test_inline_agent_contract_is_unchanged():
         "change and must not ride along with agent definitions"
     )
     dto = SubmitRunDTO(**_base(agents=[{
-        "name": "a", "role": "r", "identity_file": "SOUL.md",
+        "name": "a", "role": "r", "kind": "bot", "identity_file": "SOUL.md",
     }]))
     assert dto.agents[0].identity_file == "SOUL.md"

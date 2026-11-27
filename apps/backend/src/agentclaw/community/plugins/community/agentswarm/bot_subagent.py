@@ -205,6 +205,12 @@ class AvernetSubagent:
             tenant=self._run.tenant,
             cancel_event=cancel,
         )
+        # The agent's own 独立模型, when it named one. Each transport applies it
+        # its own way: the BaaS channel rides ``metadata.model`` into session
+        # creation, the engine channel patches the session before its
+        # chat.send. Absent, the Bot's own configuration decides.
+        if self._spec.model:
+            chat_kwargs["model"] = self._spec.model
         resolved_chat_timeout = self._resolved_chat_timeout()
         if resolved_chat_timeout is not None:
             chat_kwargs["timeout_seconds"] = resolved_chat_timeout
@@ -236,7 +242,19 @@ class AvernetSubagent:
             output = json.loads(text)
         except Exception:
             output = {"text": text}
-        return SubagentResult(output=output)
+        # A Bot turn returns text, not the session's model, so the request's own
+        # value is the record. Resolved the same way the LLM agent resolves it —
+        # the definition's model, else the run-level one — because for this
+        # channel that value is authoritative: the transport binds it to the
+        # session before sending, so a turn that reached the agent at all ran
+        # on it.
+        return SubagentResult(output=output, model=self._resolved_model())
+
+    def _resolved_model(self) -> str | None:
+        if self._spec.model:
+            return self._spec.model
+        options = getattr(self._run, "run_options", None)
+        return getattr(options, "model_name", None) or None
 
     async def teardown(self) -> None:
         # Best-effort by contract: a failed delete never fails the slice,

@@ -246,9 +246,13 @@ class OpenAICompatibleClient:
         except ValueError:
             pass
         usage_raw = data.get("usage") or {}
+        # The served model, not the requested one: an alias or fallback would
+        # otherwise be invisible.
+        served = data.get("model")
+        served_model = str(served).strip() if isinstance(served, str) else ""
         return CompletionResponse(
             text=(choice.get("message") or {}).get("content") or "",
-            model=ModelId(model),
+            model=ModelId(served_model or model),
             token_usage=TokenUsage(
                 prompt_tokens=usage_raw.get("prompt_tokens", 0),
                 completion_tokens=usage_raw.get("completion_tokens", 0),

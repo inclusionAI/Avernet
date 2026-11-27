@@ -65,6 +65,7 @@ class LLMBackedSubagent:
         return SubagentResult(
             output=output,
             token_usage=response.token_usage,
+            model=response.model,
         )
 
     async def teardown(self) -> None:

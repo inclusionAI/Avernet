@@ -153,7 +153,7 @@ def _submit_body(goal: str = "wire goal",
     body = {
         "tenant": TENANT,
         "goal": goal,
-        "agents": [{"name": "a1", "role": "work"}],
+        "agents": [{"name": "a1", "role": "work", "kind": "llm"}],
         # Required by the submit contract: every run's Bot agents inherit an
         # existing Bot's identity instead of waiting for approval.
         "identity_bot_id": IDENTITY_SOURCE,

@@ -204,6 +204,26 @@ class TestRequest:
         assert metadata["session_key"] == "sess-9"
         assert "biz_task_id" not in metadata
 
+    def test_a_named_model_rides_in_metadata(self):
+        # The platform reads metadata.model into the engine session it creates,
+        # which is where a per-agent 独立模型 actually takes effect.
+        seen: list[httpx.Request] = []
+        transport = _make(_transport_returning(chat_final("hi"), record=seen))
+
+        transport.chat(BOT_ID, "a", owner_id=OWNER, tenant=TENANT, model="Kimi-K2.5")
+
+        assert json.loads(seen[0].content)["metadata"]["model"] == "Kimi-K2.5"
+
+    def test_no_model_means_none_is_sent(self):
+        # Absent must stay absent: an explicit null would tell the platform the
+        # agent chose "no model" instead of "whatever the Bot is configured for".
+        seen: list[httpx.Request] = []
+        transport = _make(_transport_returning(chat_final("hi"), record=seen))
+
+        transport.chat(BOT_ID, "a", owner_id=OWNER, tenant=TENANT)
+
+        assert "model" not in json.loads(seen[0].content)["metadata"]
+
 
 # ── what the stream means ─────────────────────────────────────────────────
 
