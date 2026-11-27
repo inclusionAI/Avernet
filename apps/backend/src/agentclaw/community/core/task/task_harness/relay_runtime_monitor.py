@@ -97,6 +97,14 @@ async def monitor_relay_runtime(
     resume_step = resolve_relay_resume_step(task_id, node, self._graph)
     attempts = relay_resume_attempts(node, current)
     now = self._clock()
+    if result.state == "terminal_failed" and result.source != "bcs.delivery":
+        if current.get("terminal_failure_generation") != generation:
+            current["terminal_failure_observed_at"] = now
+            current["terminal_failure_generation"] = generation
+        current.setdefault("terminal_failure_observed_at", now)
+    else:
+        current.pop("terminal_failure_observed_at", None)
+        current.pop("terminal_failure_generation", None)
     if now < current.get("resume_quiet_until", 0.0):
         return None
     terminal_success_elapsed = 0.0
@@ -137,7 +145,16 @@ async def monitor_relay_runtime(
 
     if result.state == "terminal_failed":
         current["terminal_success_observed_at"] = None
-        reason = "runtime_failed"
+        # Engine restarts can produce short-lived error/aborted observations.
+        # Use the normal inactivity window rather than immediately consuming
+        # the same-session recovery budget, including after a delivered resume.
+        failure_since = current.get("terminal_failure_observed_at", now)
+        failure_seconds = max(0.0, now - failure_since)
+        detail["terminal_failure_elapsed_seconds"] = failure_seconds
+        if confirmed_group_failure or failure_seconds >= (
+            self._active_no_progress_max_cycles * self._runtime_probe_threshold
+        ):
+            reason = "runtime_failed"
     elif result.state == "terminal_success":
         if current.get("terminal_success_observed_at") is None:
             # Start the observation clock from the first runtime success
@@ -211,11 +228,13 @@ async def monitor_relay_runtime(
     if reason is None:
         logger.info(
             "[task][harness] runtime probe observed task=%s node=%s state=%s "
-            "status=%s source=%s progressed=%s no_progress=%s elapsed=%.0fs",
+            "status=%s source=%s progressed=%s no_progress=%s elapsed=%.0fs "
+            "terminal_failure_elapsed=%.0fs",
             task_id, node.node_id, result.state, result.status, result.source,
             result.progressed,
             current.get("no_progress", 0) if result.state == "active" else 0,
             elapsed,
+            detail.get("terminal_failure_elapsed_seconds", 0.0),
         )
         return None
 
@@ -275,6 +294,7 @@ async def monitor_relay_runtime(
         # The heartbeat baseline is also cleared so the prompt itself cannot
         # be counted as fresh progress; attempts remain cumulative.
         current["terminal_success_observed_at"] = None
+        current.pop("terminal_failure_observed_at", None)
         current["cursor"] = None
         current["unknown"] = 0
         current["no_progress"] = 0

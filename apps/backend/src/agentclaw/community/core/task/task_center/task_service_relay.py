@@ -28,11 +28,10 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = logging.getLogger("task.relay")
 
-# Temporary production duty-domain fallback. Search quality work is still in
-# progress; once the normal catalog consistently returns duty bots, remove this
-# table and the private fallback helper below with it. Bot catalogs are
-# environment-isolated, so these production identities must not be injected
-# into the pre catalog.
+# Temporary duty-domain fallback. Search quality work is still in progress;
+# once the normal catalog consistently returns duty bots, remove this table
+# pair and the private fallback helper below with it. Bot catalogs are
+# environment-isolated, so each environment only receives its own identities.
 _TEMPORARY_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
     BotCandidate(
         bot_id="20260407_025zmn4f:378611",
@@ -65,10 +64,33 @@ _TEMPORARY_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
         description="Natural-language data and feature generation",
     ),
 )
+_TEMPORARY_PRE_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
+    BotCandidate(
+        bot_id="20261020_xa4pi64f:146836",
+        name="RiskProfilePlus-任务分身",
+        description="RP+平台：securitydataservice 取数、ODPS 回流、View 构建、traceId 诊断",
+    ),
+    BotCandidate(
+        bot_id="20261014_dpv2dfuk:35983",
+        name="UCT20值班助手",
+        description="策略配置 / 切流评估 / Trace 耗时 / 策略下发链路 / 下发链路监控",
+    ),
+    BotCandidate(
+        bot_id="20261014_im6mcv40:35983",
+        name="aliuct值班助手",
+        description="UCT1.0 / aliuct：策略拦截 / 超时 / 未命中 / 引擎答疑 / 策略仿真",
+    ),
+    BotCandidate(
+        bot_id="20261014_fnr8p3xe:35983",
+        name="FeaturePro",
+        description="FeaturePro 平台：特征创建/迁移/验证/报错诊断",
+    ),
+)
 
 
 class TaskServiceRelayMixin:
     _temporary_duty_candidates: tuple[BotCandidate, ...] = _TEMPORARY_DUTY_CANDIDATES
+    _temporary_pre_duty_candidates: tuple[BotCandidate, ...] = _TEMPORARY_PRE_DUTY_CANDIDATES
 
     def _build_relay_root_execution_instruction(self, task_id: str) -> str:
         """Build the first baton for the existing requester/Bot session."""
@@ -200,21 +222,27 @@ class TaskServiceRelayMixin:
         """Apply the temporary duty fallback directly inside search.
 
         This is intentionally one small, removable policy method in the search
-        interface rather than a separate pluggable module.  The fallback is
-        production-only: pre has a different Bot catalog and must not receive
-        these production identities.  If normal search already returns one duty
-        bot, keep the search result unchanged so the fallback does not overwhelm
-        relevance ranking.
+        interface rather than a separate pluggable module.  Prod and pre use the
+        same semantic-search result first and append only their own environment
+        duty fallback.  If normal search already returns one duty bot, keep the
+        search result unchanged so the fallback does not overwhelm relevance
+        ranking.
         """
-        if get_current_env() != "prod":
+        environment = get_current_env()
+        if environment == "prod":
+            duty_candidates = self._temporary_duty_candidates
+        elif environment == "pre":
+            duty_candidates = self._temporary_pre_duty_candidates
+        else:
             return candidates, "search", 0
-        duty_ids = {candidate.bot_id for candidate in self._temporary_duty_candidates}
+
+        duty_ids = {candidate.bot_id for candidate in duty_candidates}
         if any(candidate.bot_id in duty_ids for candidate in candidates):
             return candidates, "search", 0
         return (
-            [*candidates, *self._temporary_duty_candidates],
+            [*candidates, *duty_candidates],
             "search_plus_fallback",
-            len(self._temporary_duty_candidates),
+            len(duty_candidates),
         )
 
     async def search_bots(

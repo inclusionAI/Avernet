@@ -298,6 +298,9 @@ class TaskContext:
     # S5D must exclude every executor already used on this relay chain, even
     # when the repeat is not consecutive.
     used_executor_ids: list[str] = field(default_factory=list)
+    # Derived read-only reuse ledger projection from accepted predecessor outputs.
+    # Each entry is a compact business fact, not another authoritative state store.
+    reusable_facts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
