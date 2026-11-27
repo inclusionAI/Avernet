@@ -21,7 +21,6 @@ provides:
   - ProductProfileRepository
   - default_composition
 consumes:
-  - ProductProfilePublicationAuthorizer
   - ProductRuntimeAuthorization
   - RolloutExecutionPort
   - RolloutInteractionPort
@@ -88,8 +87,8 @@ unchanged.
 
 ## Creation, queries and revision metadata
 
-- `create_product_profile(name, stages)` checks the independent publication
-  authority, creates the [default composition](configuration.py) internally,
+- `create_product_profile(name, stages)` creates the [default
+  composition](configuration.py) internally,
   validates it with the static YAML workflow, and requires installed execution,
   evidence, adaptation Agent, isolation and notification capabilities before
   committing the complete immutable configuration. Callers cannot supply or

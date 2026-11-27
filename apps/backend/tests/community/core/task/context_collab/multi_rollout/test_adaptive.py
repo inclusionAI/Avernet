@@ -33,9 +33,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_contr
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import (
     ProductProfileService,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProfilePublisherAllowlist,
-)
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.session_messages import (
     OpenApiStageSessionMessages,
 )
@@ -94,7 +91,6 @@ async def test_feedback_new_plan_real_stage_input_pass_and_durable_uuid(multi):
     )
     service = ProductProfileService(
         h.repository,
-        ProfilePublisherAllowlist((h.owner.actor,)),
         h.authorization,
         h.execution,
         h.interaction,
