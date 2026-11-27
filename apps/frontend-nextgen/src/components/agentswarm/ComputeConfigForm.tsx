@@ -26,6 +26,7 @@ import {
   type DraftIssue,
 } from '@/domain/agentswarm/draft';
 import { AGENT_EXAMPLES } from '@/domain/agentswarm/examples';
+import { listDefinitions } from '@/services/agentswarm/service';
 import type { IdentityOption } from '@/domain/agentswarm/identityOptions';
 
 
@@ -46,6 +47,11 @@ export interface ComputeConfigFormProps {
   /** Navigate to the definition library page; owned by the page, not the form. */
   onManageDefinitions?: () => void;
   /**
+   * Called when an agent's name field loses focus: the moment a name is
+   * finished, and the right time to ask whether the library already has it.
+   */
+  onNameBlur?: () => void;
+  /**
    * A refusal that belongs beside the submit action — currently a definition
    * name that already exists — rendered by the caller where the user is looking.
    */
@@ -61,6 +67,34 @@ export interface ComputeConfigFormProps {
  * the run-level identity source. Errors are shown at the field that owns them,
  * not only in the footer.
  */
+/**
+ * Resolves roster names against the whole library, not the page in hand.
+ *
+ * The library is paged, so a definition the user already saved could sit past
+ * the loaded page and stay an unmatched blank entry — which collides at submit.
+ * Each name is asked for by exactly that name; the gateway's filter is a LIKE, so
+ * the answer is compared again here.
+ */
+async function referenceByNameRemotely(
+  draft: ComputeDraft,
+  tenant: string | undefined,
+): Promise<ComputeDraft> {
+  if (!tenant) return draft;
+  const names = [...new Set(draft.refs.map((ref) => ref.body.name.trim()).filter(Boolean))];
+  if (!names.length) return draft;
+  try {
+    const pages = await Promise.all(
+      names.map((name) => listDefinitions(tenant, { name, page: 1, page_size: 1 })),
+    );
+    const found = pages.flatMap((page) => page.items ?? []);
+    const exact = found.filter((item) => names.includes(item.name));
+    return exact.length ? autoReferenceByBodyName(draft, exact) : draft;
+  } catch {
+    // A failed lookup leaves the roster as typed; submit re-checks.
+    return draft;
+  }
+}
+
 export function ComputeConfigForm({
   draft,
   onChange,
@@ -73,6 +107,7 @@ export function ComputeConfigForm({
   submitIssues = [],
   tenant,
   onManageDefinitions,
+  onNameBlur,
   collisionNotice,
   onSubmit,
 }: ComputeConfigFormProps) {
@@ -148,7 +183,11 @@ export function ComputeConfigForm({
     >
       {/* PRD §7: full-width config. The form is the main column; 运行设置 sits
           beside it and stays reachable while the form scrolls. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-y-auto px-5 py-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {/* The roster column needs room for a card's name, role and three
+          selects on one line; at a flat 320px the settings column took a third
+          of a 1024px viewport and the form's own controls wrapped. It now grows
+          with the viewport and only holds at 320 from xl up. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-y-auto px-5 py-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
       <fieldset disabled={submitting} className="min-h-0 space-y-6">
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -172,7 +211,14 @@ export function ComputeConfigForm({
                       const refs = example.agents.map((agent) =>
                         createNewAgentRef({ kind: 'bot', ...agent }),
                       );
-                      onChange(autoReferenceByBodyName({ ...draft, goal: example.goal, refs }, definitions));
+                      const filled: ComputeDraft = { ...draft, goal: example.goal, refs };
+                      onChange(autoReferenceByBodyName(filled, definitions));
+                      // The list in hand is one page; a definition past it would
+                      // stay a blank entry and collide at submit. Filling in is a
+                      // data change, not a field event, so it has to ask itself.
+                      void referenceByNameRemotely(filled, tenant).then((resolved) => {
+                        if (resolved !== filled) onChange(resolved);
+                      });
                     }}
                   >
                     填入示例任务
@@ -270,6 +316,7 @@ export function ComputeConfigForm({
             duplicateNames={showFieldErrors ? duplicateNames : new Set()}
             manifestError={showFieldErrors ? manifestIssue : undefined}
             canRemove={draft.refs.length > 1}
+            onNameBlur={onNameBlur}
             onChange={(patch) => {
               const current = draft.refs[Math.min(selectedAgent, draft.refs.length - 1)];
               if (!current) return;

@@ -337,6 +337,41 @@ export function findDefinitionCollisions(
 }
 
 /**
+ * The same collision check, asked of the gateway.
+ *
+ * `findDefinitionCollisions` can only see the definitions already loaded, and
+ * the library is paged — a name taken on page 3 was invisible, so the submit
+ * went through and came back 409 after the roster had been partly saved. This
+ * asks per name (the gateway filters server-side) and returns the same shape,
+ * so the caller's banner and "use the existing definition" action are unchanged.
+ *
+ * `lookup` resolves one name to at most one stored definition.
+ */
+export async function findDefinitionCollisionsLive(
+  draft: ComputeDraft,
+  lookup: (name: string) => Promise<{ definition_id: string; name: string } | null>,
+): Promise<DefinitionCollision[]> {
+  const names = [
+    ...new Set(draft.refs.filter((ref) => ref.origin === 'new').map((ref) => ref.body.name.trim())),
+  ].filter(Boolean);
+
+  const found = await Promise.all(names.map((name) => lookup(name).catch(() => null)));
+  const byName = new Map<string, string>();
+  for (const definition of found) {
+    if (definition) byName.set(definition.name, definition.definition_id);
+  }
+
+  const collisions: DefinitionCollision[] = [];
+  for (const ref of draft.refs) {
+    if (ref.origin !== 'new') continue;
+    const name = ref.body.name.trim();
+    const existingId = byName.get(name);
+    if (name && existingId) collisions.push({ refKey: ref.key, name, existingDefinitionId: existingId });
+  }
+  return collisions;
+}
+
+/**
  * Persists every `new` roster entry as a definition and returns its id.
  *
  * `save` receives the entry's own name; collisions are rejected upstream by

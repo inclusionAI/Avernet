@@ -2,7 +2,7 @@ import { PageHeader } from '@/components/Common/PageHeader';
 import { ComputeConfigForm } from '@/components/agentswarm/ComputeConfigForm';
 import {
   createNewAgentRef,
-  findDefinitionCollisions,
+  findDefinitionCollisionsLive,
   referenceExistingDefinition,
   resolveRosterRefs,
   toSubmitDTO,
@@ -16,7 +16,7 @@ import { normalizeModelId } from '@/domain/agentswarm/models';
 import { explainSubmitRefusal } from '@/services/agentswarm/refusals';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { createDefinition, submitRun } from '@/services/agentswarm/service';
+import { createDefinition, listDefinitions, submitRun } from '@/services/agentswarm/service';
 import { resolveAgentswarmTenant } from '@/services/agentswarm/tenant';
 import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
@@ -25,7 +25,7 @@ import { useRunGoalStore } from '@/stores/runGoalStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { getCapabilities } from '@/capabilities';
 import { history } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const BASE = '/agent-compute';
 
@@ -74,8 +74,52 @@ export default function AgentComputeNewPage() {
   const rememberGoal = useRunGoalStore((state) => state.remember);
   const selectRun = useAgentComputePanelStore((state) => state.selectRun);
 
-  const { definitions, refresh: refreshDefinitions } = useDefinitions(tenant);
+  const { refresh: refreshDefinitions } = useDefinitions(tenant);
   const [collisions, setCollisions] = useState<DefinitionCollision[]>([]);
+
+  /** Names the roster would create — what the gateway is asked about. */
+  const typedNames = useMemo(
+    () =>
+      draft.refs
+        .filter((ref) => ref.origin === 'new')
+        .map((ref) => ref.body.name.trim())
+        .filter(Boolean),
+    [draft.refs],
+  );
+
+  /**
+   * Ask the gateway whether any of those names is already taken.
+   *
+   * Runs when a name field loses focus, which is the moment the user has
+   * finished typing one. A per-keystroke check would ask about half-typed names
+   * and show a banner for something that was never going to be submitted; a
+   * check only at submit told them after the whole form was filled.
+   *
+   * A failed lookup is silent here: submit re-checks, and a banner saying the
+   * lookup failed would be noise beside a form the user is still filling.
+   */
+  /** The gateway's answer for one exact name; the filter it applies is a LIKE. */
+  const lookupDefinitionByName = useCallback(
+    async (name: string) => {
+      const page = await listDefinitions(tenant, { name, page: 1, page_size: 1 });
+      return (page.items ?? []).find((item) => item.name === name) ?? null;
+    },
+    [tenant],
+  );
+
+  const checkNameCollisions = useCallback(async () => {
+    if (!typedNames.length) {
+      setCollisions([]);
+      return;
+    }
+    try {
+      const found = await findDefinitionCollisionsLive(draft, lookupDefinitionByName);
+      setCollisions(found);
+    } catch {
+      setCollisions([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedNames.join('\u0000'), lookupDefinitionByName]);
 
   /**
    * Saves the roster's new entries, or reports names that are already taken.
@@ -86,7 +130,11 @@ export default function AgentComputeNewPage() {
    * screen should make on the user's behalf.
    */
   const persistNewEntries = async () => {
-    const found = findDefinitionCollisions(draft, definitions);
+    // Checked against the gateway, not just the page in hand. The library is
+    // paged, so a definition past the first page was invisible here and the
+    // submit went through only to come back 409 — the user then had to notice
+    // and redo it as a reference by hand.
+    const found = await findDefinitionCollisionsLive(draft, lookupDefinitionByName);
     if (found.length) {
       // The banner owns this message; pushing it into `issues` as well printed
       // the same sentence twice — once in the form footer, once in the banner.
@@ -187,6 +235,7 @@ export default function AgentComputeNewPage() {
                 submitIssues={issues}
                 tenant={tenant}
                 onManageDefinitions={() => history.push(`${BASE}/definitions`)}
+                onNameBlur={() => void checkNameCollisions()}
                 collisionNotice={
                   collisions.length ? (
                     <div role="alert" className="space-y-2">

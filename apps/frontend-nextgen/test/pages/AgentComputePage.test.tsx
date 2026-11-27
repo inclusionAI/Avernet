@@ -294,7 +294,7 @@ describe('Agent Compute 详情页（PRD v1.7 §7 整页布局）', () => {
     render(<AgentComputeRunPage />);
 
     // What was asked and what came back, both readable from the detail pane.
-    expect(await screen.findByRole('button', { name: /^输入/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^指令/ })).toBeInTheDocument();
     const output = screen.getByRole('button', { name: /^输出/ });
     fireEvent.click(output);
     await waitFor(() => expect(document.body.textContent).toContain('共 12 个部门'));

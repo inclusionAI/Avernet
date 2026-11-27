@@ -91,8 +91,12 @@ export function RunOptionsPanel({ options, onChange, models, modelsHint }: RunOp
         默认由平台控制。开启后按下方数值提交，留空则沿用平台默认值。
       </p>
 
+      {/* One limit per row: at two columns each field had half the settings
+          column, so a label, its unit and its hint wrapped against each other.
+          Reading them as a stack also matches the order they matter in, which
+          is the validator's order. */}
       {custom ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           {OPTION_FIELDS.map((field) => {
             const raw = options?.[field.key];
             const message = issueFor(field.key);

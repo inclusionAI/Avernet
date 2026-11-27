@@ -155,6 +155,8 @@ export interface AgentEditorProps {
   /** The manifest error message, when this agent's manifest is the offender. */
   manifestError?: string;
   canRemove: boolean;
+  /** Fires when the name field loses focus, so the page can check the library. */
+  onNameBlur?: () => void;
   onChange: (patch: Partial<AgentDraft>) => void;
   onDuplicate: () => void;
   onRemove: () => void;
@@ -178,6 +180,7 @@ export function AgentEditor({
   duplicateNames,
   manifestError,
   canRemove,
+  onNameBlur,
   onChange,
   onDuplicate,
   onRemove,
@@ -254,6 +257,7 @@ export function AgentEditor({
 
                 aria-invalid={nameInvalid || duplicateNames.has(agent.name.trim()) || undefined}
                 onChange={(event) => onChange({ name: event.target.value })}
+                onBlur={onNameBlur}
               />
               <p className="text-xs leading-5 text-muted-foreground">
                 {readOnly
