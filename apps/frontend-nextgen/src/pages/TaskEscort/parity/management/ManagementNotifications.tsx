@@ -60,12 +60,16 @@ export function ManagementNotification({ context }: { context: TaskEscortParityC
                 : '未订阅任何事件'}
             </p>
           </div>
-          <details>
-            <summary className="cursor-pointer text-primary">事件消息配置详情</summary>
-            <div className="mt-3 space-y-3">
+          <section aria-label="事件消息配置" className="space-y-3">
+            <h4 className="font-medium">事件消息配置</h4>
+            <div className="space-y-3">
               {Object.entries(config.eventOptions).map(([event, options]) => (
-                <div key={event} className="space-y-2 rounded-lg border border-border p-3">
-                  <p className="font-medium">{managementEvents[event] ?? event}</p>
+                <section
+                  key={event}
+                  aria-label={`${managementEvents[event] ?? event}消息配置`}
+                  className="min-w-0 space-y-3 rounded-lg border border-border bg-muted/20 p-4"
+                >
+                  <h5 className="font-medium">{managementEvents[event] ?? event}</h5>
                   <Fields
                     fields={[
                       ['标题', options.title],
@@ -76,11 +80,11 @@ export function ManagementNotification({ context }: { context: TaskEscortParityC
                       ['字段值长度上限', options.maxOutputValueLen],
                     ]}
                   />
-                </div>
+                </section>
               ))}
               {!Object.keys(config.eventOptions).length && <p className="text-muted-foreground">未配置事件级覆盖</p>}
             </div>
-          </details>
+          </section>
           <Fields
             fields={[
               [

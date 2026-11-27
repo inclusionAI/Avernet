@@ -1,0 +1,123 @@
+/* Empty-workspace introduction only; no global shell or shared theme overrides. */
+.task-escort-workspace .task-escort-introduction-page {
+  background: hsl(var(--background));
+}
+.task-escort-introduction {
+  max-width: 1180px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.task-escort-introduction .escort-intro-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+  align-items: center;
+  gap: 38px;
+  padding: 34px 0 38px;
+}
+.task-escort-introduction .escort-intro-copy h2 {
+  font-size: clamp(27px, 2.65vw, 38px);
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+.task-escort-introduction .escort-intro-map {
+  margin: 0;
+  padding: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: linear-gradient(145deg, hsl(var(--muted) / 0.25), hsl(var(--primary) / 0.035));
+  box-shadow: 0 8px 28px hsl(var(--foreground) / 0.025);
+}
+.task-escort-introduction .escort-intro-loop {
+  position: relative;
+}
+.task-escort-introduction .escort-intro-loop-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px 24px;
+}
+.task-escort-introduction .escort-intro-loop-steps > :nth-child(3) {
+  grid-column: 2;
+  grid-row: 2;
+  border-color: hsl(var(--primary) / 0.25);
+}
+.task-escort-introduction .escort-intro-loop-steps > :nth-child(4) {
+  grid-column: 1;
+  grid-row: 2;
+}
+.task-escort-introduction .escort-intro-arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  color: hsl(var(--primary) / 0.55);
+  transform: translate(-50%, -50%);
+}
+.task-escort-introduction .escort-intro-arrow-first {
+  left: 50%;
+  top: calc(25% - 7px);
+}
+.task-escort-introduction .escort-intro-arrow-second {
+  left: calc(75% + 6px);
+  top: 50%;
+}
+.task-escort-introduction .escort-intro-arrow-third {
+  left: 50%;
+  top: calc(75% + 7px);
+}
+.task-escort-introduction .escort-intro-benefits {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+.task-escort-introduction .escort-intro-start {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2.2fr);
+  gap: 28px;
+  margin-bottom: 20px;
+}
+@media (max-width: 1400px) {
+  .task-escort-introduction .escort-intro-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 26px;
+    padding-top: 24px;
+  }
+  .task-escort-introduction .escort-intro-map {
+    max-width: 620px;
+    width: 100%;
+  }
+  .task-escort-introduction .escort-intro-benefits {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .task-escort-introduction .escort-intro-start {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 650px) {
+  .task-escort-introduction .escort-intro-hero {
+    padding: 18px 0 28px;
+    gap: 25px;
+  }
+  .task-escort-introduction .escort-intro-copy h2 {
+    font-size: 28px;
+  }
+  .task-escort-introduction .escort-intro-map {
+    padding: 16px;
+  }
+  .task-escort-introduction .escort-intro-benefits {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 380px) {
+  .task-escort-introduction .escort-intro-loop-steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .task-escort-introduction .escort-intro-loop-steps > li {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .task-escort-introduction .escort-intro-arrow {
+    display: none;
+  }
+}

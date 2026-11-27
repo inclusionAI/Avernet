@@ -46,8 +46,25 @@ export interface OverviewNodeExecution {
   sessionKey: string | null;
   sessionId: string | null;
 }
+/** Display-only, redacted launch projection. Never retains the raw stored JSON. */
+export interface OverviewLaunchField {
+  label: string;
+  source: string;
+  text: string | null;
+  note: string | null;
+}
+/** Detail-only fields: paginated run-list consumers do not require this projection. */
+export interface OverviewDetailedRun extends OverviewRun {
+  launchInput: OverviewLaunchField;
+  launchParams: OverviewLaunchField;
+  parentRunId: string | null;
+  rootRunId: string | null;
+  deviceId: string | null;
+  botType: string | null;
+  stage: string | null;
+}
 export interface OverviewRunDetail {
-  run: OverviewRun;
+  run: OverviewDetailedRun;
   nodes: OverviewNodeExecution[];
 }
 export interface OverviewHealth {

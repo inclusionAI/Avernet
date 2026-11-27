@@ -65,8 +65,18 @@ export interface OverviewNodeDto {
   embedded_session_key?: unknown;
   session_id?: unknown;
 }
+/** Existing detail columns and default-off, server-authorized runtime projection only. */
+export interface OverviewDetailedRunDto extends OverviewRunDto {
+  input_json?: unknown;
+  params_json?: unknown;
+  parent_flow_id?: unknown;
+  root_flow_id?: unknown;
+  device_id?: unknown;
+  bot_type?: unknown;
+  stage?: unknown;
+}
 export interface OverviewRunDetailDto {
-  run: OverviewRunDto;
+  run: OverviewDetailedRunDto;
   nodes: OverviewNodeDto[];
 }
 export interface OverviewHealthDto {
