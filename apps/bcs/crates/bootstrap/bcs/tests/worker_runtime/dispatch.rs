@@ -8,6 +8,22 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use std::{num::NonZeroU32, time::Duration};
 
+
+/// Fixture send proof: the durable proof written with a send intent. The
+/// store persists and returns it; contents only matter to connector
+/// takeover decisions, which construct their own via the rules.
+fn proof(operation: &SendOperation) -> SendProof {
+    SendProof {
+        dedupe_domain: "fixture-domain".into(),
+        guarantee_deadline: TimestampMillis(i64::MAX),
+        operation: match operation {
+            SendOperation::Start { request_id } => ProofOperation::Start { request_id: request_id.clone() },
+            SendOperation::Input { seq, request_id } => ProofOperation::Input { seq: *seq, request_id: request_id.clone() },
+        },
+        body_digest: Digest("sha256:fixture-body".into()),
+        config_digest: Digest("sha256:fixture-config".into()),
+    }
+}
 fn field<'a>(v: &'a Value, key: &str) -> anyhow::Result<&'a str> {
     v[key]
         .as_str()
@@ -111,7 +127,7 @@ impl Host {
                 let operation = SendOperation::Start {
                     request_id: RequestId(format!("{}.send", did.0)),
                 };
-                held.begin_send(operation.clone()).await?;
+                held.begin_send(operation.clone(), proof(&operation)).await?;
                 if request["accepted"].as_bool().unwrap_or(false) {
                     held.record_acceptance(AcceptanceEvidence {
                         operation,
@@ -163,7 +179,7 @@ impl Host {
                             .remote
                             .clone()
                             .ok_or_else(|| anyhow::anyhow!("remote missing"))?;
-                        held.begin_send(operation.clone()).await?;
+                        held.begin_send(operation.clone(), proof(&operation)).await?;
                         held.confirm_input(seq, AcceptanceEvidence { operation, remote })
                             .await?;
                     }

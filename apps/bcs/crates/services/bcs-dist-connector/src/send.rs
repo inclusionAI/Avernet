@@ -1,17 +1,17 @@
 //! Starting a call, resolving a start whose outcome is unknown, and
 //! (re-)attaching to the remote task.
 //!
-//! SENT policy: a start that may have reached the agent is never repeated
-//! blindly. It is resent only when the agent declares the start idempotent,
-//! asked for by request id when the agent supports that, and otherwise left
-//! unresolved. A start that definitely did not leave the process is retried a
-//! bounded number of times.
+//! SENT policy: the current agent port does not provide trusted downstream
+//! dedupe evidence, so a possibly-sent start is never repeated. It can be
+//! looked up by request id, or retained by the verification lane. Only a
+//! definite NotSent is retried in the ordinary lane.
 //!
 //! Glossary:
 //! - **send intent**: `begin_send(Start)` moves the phase `claimed →
-//!   sending` before the network call (B3). A new holder that finds
-//!   `sending` cannot know whether the start reached the agent and must
-//!   **resolve the start** (`start(true)`) with the SENT policy (B15).
+//!   `sending` and durably writes the attempt's `SendProof` before the
+//!   network call (B3, plan T6). A new holder that finds `sending` cannot
+//!   know whether the start reached the agent and must **resolve the
+//!   start** (`start(true)`) with the SENT policy (B15).
 //! - **acceptance**: `record_acceptance` stores the agent's task reference
 //!   and moves the phase to `accepted` before any event is reported (B4).
 //! - **re-attach**: follow an accepted task again (after a takeover, a
@@ -28,134 +28,177 @@ use crate::call::{Call, Flow, held_write};
 use crate::delayed::UnresolvedKind;
 use crate::report::Admitted;
 use bcs_dist_model::*;
-use bcs_service_api::core::dist_connector::{Reattach, UncertainSend};
-use bcs_service_api::port::dist_agent::{
-    QueryOutcome, RemoteEventStream, RemoteQuery, SendOutcome, StableSendRequest,
-};
+use bcs_service_api::core::dist_connector::Reattach;
+use bcs_service_api::port::dist_agent::{CallOperation, StableSendRequest};
+use bcs_service_api::port::dist_agent::{QueryOutcome, RemoteEventStream, RemoteQuery, SendOutcome};
 use bcs_service_api::port::repo::distributed::dispatch::{AcceptanceEvidence, SendOperation};
+
+/// The canonical body bytes of a send attempt: the inline JSON as sent, or
+/// the immutable blob key for a request stored by reference. A resend's
+/// proof covers the same bytes, so a drifted request never matches.
+pub(crate) fn canonical_body(payload: &Payload) -> Vec<u8> {
+    match payload {
+        Payload::Inline(value) => serde_json::to_vec(value).unwrap_or_default(),
+        Payload::Ref(reference) => reference.key.clone().into_bytes(),
+    }
+}
 
 impl Call {
     /// Sends the call's request. `possibly_sent` = the dispatch was found in
     /// the sending phase, so an earlier holder may already have sent it.
     ///
-    /// One loop, one attempt per pass:
-    /// - While nothing may have reached the agent (`uncertain == false`), each
-    ///   pass re-reads `disp` (fenced) and ends the call as canceled if a
-    ///   cancel is there.
-    /// - Once the start may have reached the agent (found in `sending`, or an
-    ///   `OutcomeUnknown` answer), each pass first applies the SENT policy:
-    ///   resend (bounded), ask the agent by request id, or unresolved.
-    /// - Definite "not sent" is retried with a sleeping backoff up to
-    ///   `not_sent_retries` times (B16), then unresolved.
-    ///
-    /// Returns `Ok` also when it leaves the call unresolved; `follow` then
-    /// only watches for a cancel.
+    /// A former holder's send intent is possibly sent, even if the old
+    /// record has no proof or the payload cannot be loaded. Recovery uses
+    /// only the original request id and never sends its body again.
     pub async fn start(&mut self, possibly_sent: bool) -> Flow {
         let did = self.did().clone();
-        let target = self.spec().target.clone();
-        let capabilities = self.spec().capabilities.clone();
-        let request = self.spec().request.clone();
+        let spec = self.spec().clone();
+        let capabilities = spec.capabilities.clone();
         let request_id = self.ports.rules.start_request_id(&did);
         let operation = SendOperation::Start {
             request_id: request_id.clone(),
         };
-        let retries = self.config.not_sent_retries;
-        let (mut uncertain, mut not_sent, mut resends) = (possibly_sent, 0u32, 0u32);
-        let mut backoff = self.backoff();
-        loop {
-            if uncertain {
-                match self.ports.rules.uncertain_start(&capabilities) {
-                    UncertainSend::Resend if resends < retries => resends += 1,
-                    UncertainSend::Resend => {
-                        self.mark_unresolved(UnresolvedKind::Uncertain, "resend_exhausted").await;
-                        return Ok(());
-                    }
-                    UncertainSend::AskAgent => {
-                        if !possibly_sent {
-                            // Give the agent a moment to register the request.
-                            backoff.wait().await;
-                        }
-                        return self.ask_agent(operation, request_id).await;
-                    }
-                    UncertainSend::Unresolved => {
-                        self.mark_unresolved(UnresolvedKind::Uncertain, "start_outcome_unknown").await;
-                        return Ok(());
-                    }
+        if possibly_sent {
+            let execution = &self.held.view().execution;
+            // Recover a synchronous reply durably observed before its inbox
+            // report, or a proven rejection whose report was interrupted.
+            if execution.remote.is_none() && spec.node_history.is_some() {
+                if execution.node_responses.iter().any(|response| matches!(response.kind, AgentEventKind::Final)) {
+                    return self.replay_recorded_node_final().await;
                 }
-            } else {
-                // Nothing has left the process yet: a cancel ends the call here.
-                let view = held_write!(self, "dispatch read", self.held.refresh());
-                if view.control.cancel.is_some() {
-                    return self.end_canceled_unsent().await;
+                if execution.node_input_delivery == Some(DeliveryState::Undelivered) {
+                    return self.end_with_error("rejected", "node_start_rejected", FinalDispatchOutcome::Failed, "node_start_rejected").await;
                 }
             }
-            // The request is loaded first: a request that is gone fails the
-            // call cleanly from "claimed", and a later holder that finds the
-            // same call again reports the same error and finishes it.
-            let Some(payload) = self.load(&request).await? else {
-                if uncertain {
-                    // It may have been sent earlier and cannot be sent again.
-                    self.mark_unresolved(UnresolvedKind::Uncertain, "request_unavailable").await;
-                    return Ok(());
-                }
-                return self
-                    .end_with_error("failed", "request_unavailable", FinalDispatchOutcome::Failed, "request_unavailable")
-                    .await;
+            return self.resolve_start(operation, request_id, "start_maybe_sent").await;
+        }
+        let proof_operation = ProofOperation::Start {
+            request_id: request_id.clone(),
+        };
+        let mut not_sent = 0;
+        let mut backoff = self.backoff();
+        let Some(payload) = self.load(&spec.request).await? else {
+            return self
+                .end_with_error("failed", "request_unavailable", FinalDispatchOutcome::Failed, "request_unavailable")
+                .await;
+        };
+        let frozen_history = if spec.node_history.is_some() {
+            let Some(repo) = self.ports.node_history.clone() else {
+                return self.end_with_error("failed", "node_history_unconfigured", FinalDispatchOutcome::Failed, "node_history_unconfigured").await;
             };
-            // Send intent is durable before the network call (B3). On a later
-            // pass the phase is already `sending`: the permit comes from a
-            // fenced read, with no write.
-            held_write!(self, "send intent", self.held.begin_send(operation.clone()));
+            let mut backoff = self.backoff();
+            Some(loop {
+                match crate::node_history::pinned_history(&spec, repo.as_ref(), self.ports.blobs.as_ref()).await {
+                    Ok(history) => break history,
+                    Err(error) if crate::call::permanent(&error) => {
+                        tracing::error!(did=%did.0, ?error, "frozen node history cannot be loaded");
+                        return self.end_with_error(
+                            "failed", "node_history_unavailable", FinalDispatchOutcome::Failed, "node_history_unavailable",
+                        ).await;
+                    }
+                    Err(_) => {
+                        backoff.wait().await;
+                        held_write!(self, "dispatch read", self.held.refresh());
+                    }
+                }
+            })
+        } else { None };
+        // BCS owns the history. Every attempt gets a new remote context so
+        // it never layers this history on top of previous remote turns.
+        let context_id = spec.node_history.as_ref().map(|_| format!("fsm-node:{}", request_id.0));
+        let body = match &frozen_history {
+            Some(history) => serde_json::to_vec(&(&payload, &context_id, history))
+                .map_err(|_| crate::call::Stop::Invalid)?,
+            None => canonical_body(&payload),
+        };
+        if frozen_history.is_some() && body.len() > bcs_service_api::port::repo::distributed::group_round::RoundBudgetProfile::v1().inbound_bytes {
+            return self.end_with_error("failed", "node_history_input_budget", FinalDispatchOutcome::Failed, "node_history_input_budget").await;
+        }
+        // Send intent and its identity are durable before any network call.
+        let proof = self.ports.rules.send_proof(
+            &spec,
+            proof_operation,
+            &body,
+            self.config.send_fingerprint(&capabilities),
+        );
+        loop {
+            let view = held_write!(self, "dispatch read", self.held.refresh());
+            if view.control.cancel.is_some() {
+                return self.end_canceled_unsent().await;
+            }
+            held_write!(
+                self,
+                "send intent",
+                self.held.begin_send(operation.clone(), proof.clone())
+            );
+            let authority = self.authority_now(CallOperation::Start, None, &spec);
             let send = StableSendRequest {
                 request_id: request_id.clone(),
-                context_id: None,
-                payload,
+                context_id: context_id.clone(),
+                payload: payload.clone(),
+                node: spec.node.clone(),
+                attempt: spec.attempt,
+                frozen_history: frozen_history.clone(),
             };
-            match self.ports.agent.start(&target, send).await {
+            match self.ports.agent.start(&authority, send).await {
                 SendOutcome::Accepted { remote, events } => {
                     return self.accepted(operation, remote, events).await;
                 }
                 SendOutcome::Completed { result } => {
-                    if self.report(AgentEventKind::Final, None, result).await? == Admitted::Yes {
-                        self.finish(FinalDispatchOutcome::Completed, "sync_result").await?;
-                    }
-                    return Ok(());
-                }
-                // Only the resend was refused (an expired credential, say):
-                // that proves nothing about the earlier send, whose task may
-                // be running.
-                SendOutcome::Rejected { code } if uncertain => {
-                    self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
-                    return Ok(());
+                    return match self.ports.rules.completed_result(&result) {
+                        Ok(verified) => {
+                            let verified = self.remember_node_response(&AgentEventKind::Final, verified).await?;
+                            if self.report(AgentEventKind::Final, None, verified).await? == Admitted::Yes {
+                                self.finish(FinalDispatchOutcome::Completed, "sync_result").await?;
+                            }
+                            Ok(())
+                        }
+                        Err(code) => {
+                            self.end_with_error("failed", code, FinalDispatchOutcome::Failed, code).await
+                        }
+                    };
                 }
                 SendOutcome::Rejected { code } => {
-                    let evidence = format!("rejected:{code}");
+                    let (code, evidence) = if spec.node_history.is_some() {
+                        held_write!(self, "node rejection", self.held.record_node_start(DeliveryState::Undelivered, false));
+                        ("node_start_rejected".to_owned(), "node_start_rejected".to_owned())
+                    } else {
+                        let evidence = format!("rejected:{code}");
+                        (code, evidence)
+                    };
                     return self
                         .end_with_error("rejected", &code, FinalDispatchOutcome::Failed, &evidence)
                         .await;
                 }
                 SendOutcome::NotSent { code } => {
                     not_sent += 1;
-                    if not_sent > retries {
-                        let kind = if uncertain {
-                            UnresolvedKind::Uncertain
-                        } else {
-                            UnresolvedKind::NotSent
-                        };
-                        self.mark_unresolved(kind, &code).await;
+                    if spec.node_history.is_some() {
+                        // Only the adapter's definitive no-send opens a retry.
+                        held_write!(self, "node not sent", self.held.record_node_start(DeliveryState::Undelivered, true));
+                    }
+                    if not_sent > self.config.not_sent_retries {
+                        self.mark_unresolved(UnresolvedKind::NotSent, &code).await;
                         return Ok(());
                     }
                     backoff.wait().await;
                 }
                 SendOutcome::OutcomeUnknown { code } => {
                     tracing::warn!(did = %did.0, code, "start outcome unknown");
-                    if !uncertain {
-                        uncertain = true;
-                    } else {
+                    if capabilities.query_by_request {
+                        // Give the index time to register the request.
                         backoff.wait().await;
                     }
+                    return self.resolve_start(operation, request_id, &code).await;
                 }
             }
+        }
+    }
+
+    async fn resolve_start(&mut self, operation: SendOperation, request_id: RequestId, code: &str) -> Flow {
+        if self.spec().capabilities.query_by_request {
+            self.ask_agent(operation, request_id).await
+        } else {
+            self.hand_off(code, VerificationKey::Retained).await
         }
     }
 
@@ -163,15 +206,33 @@ impl Call {
     /// the start did reach it: record the acceptance and go on as if the
     /// start had just been accepted.
     async fn ask_agent(&mut self, operation: SendOperation, request_id: RequestId) -> Flow {
-        let target = self.spec().target.clone();
         let mut backoff = self.backoff();
         let mut tries = 0u32;
         loop {
-            match self.ports.agent.query(&target, RemoteQuery::ByRequest(request_id.clone())).await {
+            let authority = self.authority_now(CallOperation::Query, None, self.spec());
+            match self.ports.agent.query(&authority, RemoteQuery::ByRequest(request_id.clone())).await {
                 // The answer may already carry the task's state, even its
                 // result: record the acceptance, then report that state
                 // before deciding whether the task must be followed at all.
                 QueryOutcome::Found { remote, status, snapshot } => {
+                    if let Some(known) = self.held.view().execution.remote.clone() {
+                        if !self.owns(&remote, &known) {
+                            // A task already accepted by this call: an
+                            // answer about any other task is not evidence.
+                            tracing::warn!(
+                                did = %self.did().0, task = %remote.task_id,
+                                "by-request answer of a foreign task ignored"
+                            );
+                            tries += 1;
+                            if tries > self.config.not_sent_retries {
+                                return self
+                                    .hand_off("remote_ref_mismatch", VerificationKey::ByRequest { request_id })
+                                    .await;
+                            }
+                            backoff.wait().await;
+                            continue;
+                        }
+                    }
                     let evidence = AcceptanceEvidence { operation, remote };
                     let cancel = held_write!(self, "acceptance", self.held.record_acceptance(evidence.clone()));
                     self.report_task_state(status, snapshot).await?;
@@ -185,12 +246,16 @@ impl Call {
                     return Ok(());
                 }
                 QueryOutcome::Unsupported => {
-                    self.mark_unresolved(UnresolvedKind::Uncertain, "query_by_request_unsupported").await;
-                    return Ok(());
+                    // The standard profile keeps this unknown a verification
+                    // obligation (plan T7): never a resend, never a recovery.
+                    return self
+                        .hand_off("query_by_request_unsupported", VerificationKey::Retained)
+                        .await;
                 }
                 // "Not found" may only mean "not registered yet": ask a few
-                // times, and even then it is no proof, so the call is left
-                // unresolved rather than sent again.
+                // times, and even then it is no proof. The short-term query
+                // capacity is exhausted: hand the call to the verification
+                // lane (plan T7) instead of parking it in the actor forever.
                 outcome @ (QueryOutcome::NotFound | QueryOutcome::Unavailable { .. }) => {
                     tries += 1;
                     if tries > self.config.not_sent_retries {
@@ -198,8 +263,9 @@ impl Call {
                             QueryOutcome::Unavailable { code } => code,
                             _ => "not_found_by_request".to_owned(),
                         };
-                        self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
-                        return Ok(());
+                        return self
+                            .hand_off(&code, VerificationKey::ByRequest { request_id })
+                            .await;
                     }
                     backoff.wait().await;
                 }
@@ -248,7 +314,6 @@ impl Call {
     /// marked unresolved.
     pub async fn reattach(&mut self) -> Flow {
         self.reattach_due = false;
-        let target = self.spec().target.clone();
         let capabilities = self.spec().capabilities.clone();
         let Some(remote) = self.held.view().execution.remote.clone() else {
             self.mark_unresolved(UnresolvedKind::Uncertain, "no_remote_task").await;
@@ -264,7 +329,8 @@ impl Call {
                         return Ok(());
                     }
                 }
-                match self.ports.agent.subscribe(&target, &remote, None).await {
+                let authority = self.authority_now(CallOperation::Subscribe, Some(remote.clone()), self.spec());
+                match self.ports.agent.subscribe(&authority, &remote, None).await {
                     Ok(stream) => self.events = Some(stream),
                     Err(error) => {
                         tracing::warn!(did = %self.did().0, code = error.code, "subscribe failed; next tick");
@@ -292,6 +358,10 @@ impl Call {
         self.last_polled = Some((status, snapshot.clone()));
         // The interaction ids are placeholders; the rules derive them.
         let placeholder = || InteractionId(String::new());
+        // The Completed snapshot is not the product yet: only the rules'
+        // verified completion turns it into the call's Final, and an
+        // incomplete one is a durable stop fact the recovery continues
+        // from (plan T6).
         let kind = match status {
             TaskStatus::Submitted | TaskStatus::Working => AgentEventKind::Snapshot,
             TaskStatus::InputRequired => AgentEventKind::InputRequired {
@@ -300,13 +370,26 @@ impl Call {
             TaskStatus::AuthRequired => AgentEventKind::AuthRequired {
                 interaction: placeholder(),
             },
-            TaskStatus::Completed => AgentEventKind::Final,
+            TaskStatus::Completed => {
+                let snapshot = with_state(snapshot, status);
+                // The Completed snapshot becomes the product Final only when
+                // the rules verify it complete; an incomplete one is a
+                // durable stop fact the recovery continues from (plan T6).
+                return match self.ports.rules.completed_result(&snapshot) {
+                    Ok(verified) => {
+                        let known = self.held.view().execution.remote.clone();
+                        self.on_event(AgentEventKind::Final, known, None, verified).await
+                    }
+                    Err(code) => self.stop_fact(code, snapshot).await,
+                };
+            }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Rejected => AgentEventKind::Error,
         };
         // The state word the rules read comes from the status, not from
         // whatever shape the snapshot has.
         let snapshot = with_state(snapshot, status);
-        self.on_event(kind, None, snapshot).await
+        let known = self.held.view().execution.remote.clone();
+        self.on_event(kind, known, None, snapshot).await
     }
 
     /// Reads the remote task once (query by task id) and reports its state
@@ -321,12 +404,24 @@ impl Call {
     /// unavailable agent is not an agent result and is simply asked again
     /// later.
     pub async fn read_remote(&mut self) -> Flow<RemoteRead> {
-        let target = self.spec().target.clone();
-        let Some(remote) = self.held.view().execution.remote.clone() else {
+        let remote = self.held.view().execution.remote.clone();
+        let Some(remote) = remote else {
             return Ok(RemoteRead::Gone);
         };
-        match self.ports.agent.query(&target, RemoteQuery::ByTask(remote)).await {
-            QueryOutcome::Found { status, snapshot, .. } => {
+        let authority = self.authority_now(CallOperation::Query, Some(remote.clone()), self.spec());
+        match self.ports.agent.query(&authority, RemoteQuery::ByTask(remote)).await {
+            QueryOutcome::Found { remote, status, snapshot } => {
+                if let Some(known) = self.held.view().execution.remote.clone() {
+                    if !self.owns(&remote, &known) {
+                        // Evidence of another task is never this call's stop
+                        // fact (plan T6): it answers nothing about A.
+                        tracing::warn!(
+                            did = %self.did().0, task = %remote.task_id,
+                            "query answered with a foreign task; not saved"
+                        );
+                        return Ok(RemoteRead::Unavailable);
+                    }
+                }
                 self.report_task_state(status, snapshot).await?;
                 Ok(RemoteRead::Found)
             }

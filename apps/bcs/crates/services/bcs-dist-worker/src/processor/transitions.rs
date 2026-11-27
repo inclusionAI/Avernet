@@ -1,8 +1,59 @@
 use super::{decision::ValidatedDecision, effects::CompletedEffects, encoding::encoded_size};
 use bcs_dist_encoding::{digest_fields, hex_of};
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{common::*, session::*};
+use bcs_service_api::port::repo::distributed::{
+    common::*,
+    group_round::decode_strict_license,
+    session::*,
+};
 use std::num::NonZeroU32;
+
+/// The strict-group checkpoints survive a `runner_state` rewrite only when
+/// the processor carries the sealed license marker and the closed rounds'
+/// cold index along (plan T7): the marker is the only public-read/execution
+/// permission of a licensed round, and its loss hides the round from every
+/// strict cut (inbox producer, task feed, admission classification) until
+/// the terminal proof transfer completes.
+fn carry_authority_markers(previous: Option<&TaskRunnerState>, next: &mut RunnerState) {
+    let Some(previous) = previous else {
+        return;
+    };
+    let Some(next_value) = next.value.as_object_mut() else {
+        return;
+    };
+    for key in ["group_admission", "group_cold"] {
+        if let Some(marker) = previous.state.value.get(key) {
+            next_value.insert(key.into(), marker.clone());
+        }
+    }
+}
+
+/// The runner state retained by terminal commits of a licensed round: the
+/// frozen markers only, never live FSM state.
+pub(super) fn terminal_authority_state(previous: Option<&TaskRunnerState>) -> Option<RunnerState> {
+    let previous = previous?;
+    let value = serde_json::json!({
+        "group_admission": previous.state.value.get("group_admission")?,
+        "group_cold": previous.state.value.get("group_cold").cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(vec![])),
+    });
+    Some(RunnerState {
+        format_version: 1,
+        value,
+    })
+}
+
+/// The licensed round of this checkpoint, if the current task belongs to it.
+pub(super) fn task_license(
+    checkpoint: &Checkpoint,
+    tid: &Tid,
+) -> Option<bcs_service_api::port::repo::distributed::group_round::StrictLicense> {
+    let state = checkpoint.runner_state.as_ref()?;
+    if state.tid != *tid {
+        return None;
+    }
+    decode_strict_license(&state.state.value)
+}
 
 pub(super) fn next_checkpoint(
     before: &Checkpoint,
@@ -78,9 +129,11 @@ pub(super) fn apply_decision(
         serde_json::to_value(&decision.display).map_err(|_| invalid("display_encoding"))?,
     );
     task.output_usage = decision.usage;
+    let mut next_state = decision.next_state;
+    carry_authority_markers(before.runner_state.as_ref(), &mut next_state);
     candidate.runner_state = Some(TaskRunnerState {
         tid: task.tid.clone(),
-        state: decision.next_state,
+        state: next_state,
     });
     let active_deadlines = candidate
         .deadlines
@@ -134,7 +187,7 @@ pub(super) fn apply_decision(
         if matches!(
             event.body,
             OutputBody::Artifact {
-                class: OutputClass::Output | OutputClass::Tool,
+                class: OutputClass::Output | OutputClass::Tool | OutputClass::FinalAnswer,
                 ..
             }
         ) {
@@ -230,17 +283,30 @@ pub(super) fn apply_decision(
             terminal_event_id: None,
             terminal_published: false,
         });
+        // A licensed round keeps its authority markers frozen at the finish
+        // boundary; the terminal spine condenses them only after the cold
+        // proof transferred. Unlicensed sessions clear as before.
         if candidate
             .runner_state
             .as_ref()
             .is_some_and(|state| state.tid == metadata.tid)
         {
-            candidate.runner_state = None;
+            candidate.runner_state = before
+                .runner_state
+                .as_ref()
+                .and_then(|state| terminal_authority_state(Some(state)))
+                .map(|state| TaskRunnerState {
+                    tid: metadata.tid.clone(),
+                    state,
+                });
         }
         kinds.push(EffectKind::SaveResult { record });
     }
     candidate.view_drafts.insert(task.tid.clone(), content);
-    install_effects(&mut candidate, &metadata.sid, kinds)?;
+    match task_license(before, &metadata.tid) {
+        Some(license) => install_effects_licensed(&mut candidate, &license, kinds)?,
+        None => install_effects(&mut candidate, &metadata.sid, kinds)?,
+    }
     Ok(candidate)
 }
 
@@ -301,6 +367,7 @@ pub(super) fn archive_confirmed(
     let reference = completed
         .saved
         .get(&task.tid)
+        .or_else(|| task_license(before, &task.tid).and(task.result_ref.as_ref()))
         .ok_or_else(|| invalid("archive_unconfirmed"))?
         .clone();
     let finalization = task
@@ -333,12 +400,16 @@ pub(super) fn archive_confirmed(
     candidate
         .deadlines
         .retain(|deadline| !belongs_to_task(deadline, &task.tid));
-    if candidate
+    if let Some(previous) = before
         .runner_state
         .as_ref()
-        .is_some_and(|state| state.tid == metadata.tid)
+        .filter(|state| state.tid == metadata.tid)
     {
-        candidate.runner_state = None;
+        candidate.runner_state = terminal_authority_state(Some(previous))
+            .map(|state| TaskRunnerState {
+                tid: metadata.tid.clone(),
+                state,
+            });
     }
     candidate
         .view_drafts
@@ -367,7 +438,10 @@ pub(super) fn archive_confirmed(
             ),
         },
     ];
-    install_effects(&mut candidate, &metadata.sid, kinds)?;
+    match task_license(before, &metadata.tid) {
+        Some(license) => install_effects_licensed(&mut candidate, &license, kinds)?,
+        None => install_effects(&mut candidate, &metadata.sid, kinds)?,
+    }
     Ok(candidate)
 }
 
@@ -396,6 +470,48 @@ pub(super) fn install_effects(
             })
         })
         .collect::<Result<_, StoreError>>()?;
+    Ok(())
+}
+
+/// Strict-group licensed installs (plan T7 slice 2): `AppendEvents` and
+/// `PublishSnapshot` effects are split out of the blocking session outbox
+/// into the durable paired publication register, registered with the same
+/// authoritative commit. Their stable delivery identities continue the batch's
+/// dense index order and their sealed commit binding is completed by
+/// `seal_candidate`. Retirement and next-round dispatch never wait for them;
+/// every other effect kind keeps the original outbox authorization exactly.
+pub(super) fn install_effects_licensed(
+    candidate: &mut Checkpoint,
+    license: &bcs_service_api::port::repo::distributed::group_round::StrictLicense,
+    kinds: Vec<EffectKind>,
+) -> Result<(), StoreError> {
+    let mut blocking = Vec::new();
+    for kind in kinds {
+        match kind {
+            EffectKind::AppendEvents { .. } | EffectKind::PublishSnapshot { .. } => {
+                candidate.feed_publications.push(FeedPublication {
+                    schema_version: 1,
+                    sid: license.sid.clone(),
+                    tid: license.tid.clone(),
+                    scope: license.scope.clone(),
+                    group: license.group.clone(),
+                    generation: license.generation,
+                    commit_id: CommitId(String::new()),
+                    commit_digest: Digest(String::new()),
+                    consumed: None,
+                    effect: EffectId {
+                        sid: license.sid.clone(),
+                        commit: candidate.commit_seq,
+                        index: NonZeroU32::MIN,
+                    },
+                    content_digest: Digest(String::new()),
+                    kind,
+                });
+            }
+            other => blocking.push(other),
+        }
+    }
+    install_effects(candidate, &license.sid, blocking)?;
     Ok(())
 }
 fn assign_events(

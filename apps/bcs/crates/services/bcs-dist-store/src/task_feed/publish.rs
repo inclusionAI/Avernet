@@ -128,7 +128,15 @@ impl StoreTaskFeed {
                     PublishOutcome::ContentConflict
                 });
             }
-            return Err(error);
+            // The strict-group paired first-write permission (plan T7 slice
+            // 2): a registered snapshot obligation stays authorized after
+            // its commit advanced the checkpoint, and its append
+            // counterpart must have completed first — the
+            // `snapshot_event_id <= completed_head` check below still
+            // refuses the publish until it did.
+            if !self.io(self.verifier.verify_paired(source, &kind)).await? {
+                return Err(error);
+            }
         }
         let key = self.layout.task(&snapshot.tid)?;
         let resolved = self

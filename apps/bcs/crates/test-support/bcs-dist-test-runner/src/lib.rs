@@ -151,6 +151,8 @@ pub fn participant() -> ParticipantBinding {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     }
 }
@@ -158,6 +160,7 @@ fn dispatch_spec(c: &EvaluationContext<'_>, tid: &Tid) -> DispatchSpec {
     let p = &c.spec.participants[0];
     DispatchSpec {
         schema_version: 1,
+        node_history: None,
         sid: c.spec.sid.clone(),
         tid: tid.clone(),
         did: dispatch_id(tid),
@@ -191,6 +194,7 @@ pub fn initial() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     }
 }

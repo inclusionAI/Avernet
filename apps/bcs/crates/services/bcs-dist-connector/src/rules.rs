@@ -25,7 +25,7 @@
 use crate::identity::{self, KeyEvent};
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::{
-    DistConnectorCoreService, Reattach, Report, ReportCursor, ResumeStep, UncertainSend,
+    DedupeRecheck, DistConnectorCoreService, Reattach, Report, ReportCursor, ResumeStep, UncertainSend,
 };
 use bcs_service_api::port::repo::distributed::inbox::{
     AppendAgentEvent, ConnectorAdmission, ConnectorEventIdentity,
@@ -50,6 +50,30 @@ impl DistConnectorRules {
             .map_or(0, |seq| seq.0)
             .saturating_add(1)
     }
+}
+
+/// Whether the recorded proof still upholds relying on the target's dedupe
+/// for a resend: proof present, within its guarantee window under a
+/// trusted clock, same target domain under the current resolution, same
+/// request semantics, same valid configuration. Anything else fails
+/// closed.
+fn proof_upholds_dedupe(recheck: &DedupeRecheck<'_>) -> bool {
+    let Some(recorded) = recheck.recorded else {
+        return false;
+    };
+    let Some(now) = recheck.now else {
+        return false;
+    };
+    if recorded.dedupe_domain.is_empty() || now >= recorded.guarantee_deadline {
+        return false;
+    }
+    let Some(domain) = recheck.resolved_domain else {
+        return false;
+    };
+    recorded.dedupe_domain == domain
+        && recorded.operation == recheck.current.operation
+        && recorded.body_digest == recheck.current.body_digest
+        && recorded.config_digest == recheck.current.config_digest
 }
 
 /// The `state` word of an inline payload, empty when absent or stored by reference.
@@ -92,11 +116,20 @@ impl DistConnectorCoreService for DistConnectorRules {
         identity::input_request_id(did, seq)
     }
 
-    /// The SENT policy for a start that may have reached the agent: resend
-    /// only if the agent declares the start idempotent, else ask the agent by
-    /// request id if it can answer that, else leave the call unresolved.
-    fn uncertain_start(&self, capabilities: &DownstreamCapabilities) -> UncertainSend {
-        if capabilities.idempotent_start {
+    /// The SENT policy for a start that may have reached the agent (B15):
+    /// resend only when the negotiated persistent dedupe upholds the
+    /// recorded proof (plan T6 — declared idempotency alone never vouches),
+    /// else ask the agent by request id if it can answer that, else leave
+    /// the call unresolved.
+    fn uncertain_start(
+        &self,
+        capabilities: &DownstreamCapabilities,
+        recheck: &DedupeRecheck<'_>,
+    ) -> UncertainSend {
+        if capabilities.persistent_dedupe
+            && capabilities.idempotent_start
+            && proof_upholds_dedupe(recheck)
+        {
             UncertainSend::Resend
         } else if capabilities.query_by_request {
             UncertainSend::AskAgent
@@ -105,10 +138,18 @@ impl DistConnectorCoreService for DistConnectorRules {
         }
     }
 
-    /// For a reply that may have reached the agent: resend only if the agent
-    /// declares inputs idempotent. There is no "ask by request id" for inputs.
-    fn uncertain_input(&self, capabilities: &DownstreamCapabilities) -> UncertainSend {
-        if capabilities.idempotent_input {
+    /// For a reply that may have reached the agent: resend only under the
+    /// same negotiated dedupe and its recorded proof (plan T6). There is no
+    /// "ask by request id" for inputs.
+    fn uncertain_input(
+        &self,
+        capabilities: &DownstreamCapabilities,
+        recheck: &DedupeRecheck<'_>,
+    ) -> UncertainSend {
+        if capabilities.persistent_dedupe
+            && capabilities.idempotent_input
+            && proof_upholds_dedupe(recheck)
+        {
             UncertainSend::Resend
         } else {
             UncertainSend::Unresolved
@@ -129,6 +170,100 @@ impl DistConnectorCoreService for DistConnectorRules {
         } else {
             Reattach::Unresolved
         }
+    }
+
+    fn send_proof(
+        &self,
+        _spec: &DispatchSpec,
+        operation: ProofOperation,
+        canonical_body: &[u8],
+        config_digest: Digest,
+    ) -> SendProof {
+        let request_id = match &operation {
+            ProofOperation::Start { request_id } | ProofOperation::Input { request_id, .. } => {
+                request_id.clone()
+            }
+        };
+        SendProof {
+            // Retain the durable attempt identity but do not claim a
+            // guarantee. The actual agent resolution exposes neither a
+            // trusted dedupe domain nor a guarantee expiry; a binding name
+            // and the dispatch timeout cannot stand in for either.
+            dedupe_domain: String::new(),
+            guarantee_deadline: TimestampMillis(0),
+            operation,
+            body_digest: identity::send_body_digest(&request_id, canonical_body),
+            config_digest,
+        }
+    }
+
+    fn completed_result(&self, snapshot: &Payload) -> Result<Payload, &'static str> {
+        let Payload::Inline(value) = snapshot else {
+            return Err("result_body_by_reference");
+        };
+        if value.get("state").and_then(|state| state.as_str()) != Some("completed") {
+            return Err("result_not_completed");
+        }
+        // What a complete result is made of: either the whole ordered
+        // artifact checklist, or a direct message answer with its parts.
+        let (what, content) = if let Some(artifacts) = value.get("artifacts") {
+            let artifacts = artifacts.as_array().ok_or("result_artifacts_invalid")?;
+            if artifacts.is_empty() {
+                return Err("result_artifacts_absent");
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for artifact in artifacts {
+                let id = artifact
+                    .get("artifactId")
+                    .and_then(|id| id.as_str())
+                    .filter(|id| !id.is_empty())
+                    .ok_or("result_artifact_identity_absent")?;
+                if !seen.insert(id.to_owned()) {
+                    return Err("result_artifact_duplicated");
+                }
+                match artifact.get("parts") {
+                    None => {}
+                    Some(parts) if parts.is_array() => {}
+                    Some(_) => return Err("result_artifact_parts_invalid"),
+                }
+            }
+            ("artifacts", serde_json::to_vec(artifacts).map_err(|_| "result_content_invalid")?)
+        } else if let Some(message) = value.get("message") {
+            let parts = message
+                .get("parts")
+                .and_then(|parts| parts.as_array())
+                .filter(|parts| !parts.is_empty())
+                .ok_or("result_message_parts_absent")?;
+            ("message", serde_json::to_vec(parts).map_err(|_| "result_content_invalid")?)
+        } else {
+            return Err("result_artifacts_absent");
+        };
+        let digest = identity::digest_fields(&[b"final-result", what.as_bytes(), &content]);
+        let verified = match value {
+            serde_json::Value::Object(object) => {
+                let mut verified = object.clone();
+                verified.insert("result_digest".to_owned(), serde_json::Value::String(digest.0));
+                serde_json::Value::Object(verified)
+            }
+            other => other.clone(),
+        };
+        // The complete result, event shell included, must fit the T1
+        // inbound budget; an over-budget read is never admitted as a
+        // Final (the stop fact stands and the failure is bounded).
+        let shell = serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "input_id": "ae:<64 hex>",
+            "business_digest": "sha256:<64 hex>",
+            "body": { "kind": "agent", "event": {
+                "kind": "final", "remote_event_id": serde_json::Value::Null,
+                "payload": &verified,
+            }},
+        }))
+        .map_err(|_| "result_content_invalid")?;
+        if shell.len() > PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES {
+            return Err("result_over_input_budget");
+        }
+        Ok(Payload::Inline(verified))
     }
 
     fn report(

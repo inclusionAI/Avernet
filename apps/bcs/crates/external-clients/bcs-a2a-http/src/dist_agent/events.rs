@@ -10,7 +10,7 @@
 //! | a whole non-terminal task | `Snapshot` | `task` (history left out) |
 //! | working / submitted status without content | nothing | — |
 //! | `input-required` / `auth-required` | `InputRequired` / `AuthRequired` | `state`, optional `message` |
-//! | `completed` | `Final` | `state`, optional `message`, `artifacts` (whole task only) |
+//! | `completed` | `Snapshot` | `state`, optional `message`, `artifacts` (whole task only) — a stop fact, never the product `Final` (plan T6) |
 //! | `failed`, `canceled`, `rejected` | `Error` | `state`, `code`, optional `message` |
 //!
 //! Rows for a state apply to a status update and to a whole task alike. A
@@ -66,8 +66,11 @@ fn state_event(state: &TaskState, message: Option<Value>, artifacts: Option<Valu
     if let Some(message) = message {
         payload["message"] = message;
     }
+    // A `completed` state observed on a stream is a stop fact only (plan
+    // T6): the Connector admits the product `Final` solely from a
+    // verified complete task read, so the adapter never mints one here.
     let (kind, word, code) = match state {
-        TaskState::Completed => (AgentEventKind::Final, "completed", None),
+        TaskState::Completed => (AgentEventKind::Snapshot, "completed", None),
         TaskState::Failed => (AgentEventKind::Error, "failed", Some("agent_failed")),
         TaskState::Canceled => (AgentEventKind::Error, "canceled", Some("agent_canceled")),
         TaskState::Rejected => (AgentEventKind::Error, "rejected", Some("agent_rejected")),

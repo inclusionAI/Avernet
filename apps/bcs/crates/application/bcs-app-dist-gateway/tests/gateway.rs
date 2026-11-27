@@ -13,6 +13,10 @@ use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::application::principal::{BotActor, CallerContext};
 use bcs_service_api::port::dist_agent::*;
 use bcs_service_api::port::repo::distributed::common::StoreError;
+use bcs_service_api::port::repo::distributed::group_listing::{
+    GroupIndexPage, GroupIndexQuery, GroupListingPort,
+};
+use bcs_service_api::port::repo::distributed::group_round::GroupRoundGrants;
 use bcs_service_api::port::repo::distributed::inbox::*;
 use bcs_test_support::contract::distributed::services::dist_gateway_service_contract_tests;
 use common::{FakeWorker, Ports, eid, ports, question, snapshot, status_event, text_event};
@@ -91,7 +95,49 @@ fn gateway_with(p: &Ports, inbox: Arc<dyn InboxProducerPort>, groups: Arc<Groups
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(10);
     config.snapshot_cover_limit = Duration::from_millis(300);
-    DistGateway::new(Arc::new(core), groups, Arc::new(TestClock), config).unwrap()
+    DistGateway::new(
+        Arc::new(core),
+        groups,
+        Arc::new(GroupDeny),
+        Arc::new(NoListing),
+        Arc::new(TestClock),
+        config,
+    )
+    .unwrap()
+}
+
+/// No group surface is hosted by the legacy-only application tests: the
+/// registered policy denies and no listing is wired.
+struct GroupDeny;
+#[async_trait]
+impl GroupGrantPolicy for GroupDeny {
+    async fn grants(&self, _: &GatewayCaller, _: &GroupId) -> GroupRoundGrants {
+        GroupRoundGrants { published: false, invoke: false, read: false, cancel: false }
+    }
+}
+
+struct NoListing;
+#[async_trait]
+impl GroupListingPort for NoListing {
+    async fn first_page(
+        &self,
+        _: &TaskScope,
+        _: &GroupId,
+        _: &GroupIndexQuery,
+        _: TimestampMillis,
+    ) -> Result<GroupIndexPage, StoreError> {
+        Err(StoreError::NotApplied { code: "group_listing_unconfigured".to_owned() })
+    }
+    async fn continue_page(
+        &self,
+        _: &TaskScope,
+        _: &GroupId,
+        _: &PageToken,
+        _: bool,
+        _: TimestampMillis,
+    ) -> Result<GroupIndexPage, StoreError> {
+        Err(StoreError::NotApplied { code: "group_listing_unconfigured".to_owned() })
+    }
 }
 
 fn gateway(p: &Ports) -> DistGateway {
@@ -104,6 +150,7 @@ fn grp() -> GroupId {
 
 fn message(id: &str, text: &str) -> SubmitInput {
     SubmitInput {
+        source: CreationSource::Rpc,
         group: grp(),
         message_id: RequestId(id.into()),
         session: None,
@@ -218,7 +265,7 @@ async fn an_unknown_outcome_names_the_request_and_the_retry_completes() {
         })
     );
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
-    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid, CreationSource::Rpc).await.unwrap().content.status, TaskStatus::Submitted);
 }
 
 #[tokio::test]
@@ -227,7 +274,7 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     let g = gateway(&p);
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let other = caller("pa-002");
-    assert_eq!(g.get_task(&other, &grp(), &receipt.tid).await, Err(GatewayError::NotFound));
+    assert_eq!(g.get_task(&other, &grp(), &receipt.tid, CreationSource::Rpc).await, Err(GatewayError::NotFound));
     let mut intrude = message("msg-9", "hi");
     intrude.session = Some(receipt.sid.clone());
     // Another caller's session is reported as absent, not as forbidden.
@@ -239,7 +286,7 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     assert_eq!(g.submit(&public, message("msg-1", "hello")).await, Err(GatewayError::AccessDenied));
     // Malformed ids are rejected before any read.
     assert!(matches!(
-        g.get_task(&me(), &grp(), &Tid("not-a-task".into())).await,
+        g.get_task(&me(), &grp(), &Tid("not-a-task".into()), CreationSource::Rpc).await,
         Err(GatewayError::Invalid { .. })
     ));
     assert_eq!(
@@ -255,7 +302,8 @@ async fn a_new_subscriber_gets_the_snapshot_then_events_and_ends_on_input_requir
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let tid = receipt.tid.clone();
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -284,7 +332,8 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     publish(&p.worker, &tid, TaskStatus::Working, Some(eid(2, 1)), &[]).await;
 
     let mut first = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { cursor, .. } = next(&mut first).await else {
@@ -296,7 +345,8 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
 
     // Resume right after the snapshot's coverage: no snapshot, only what follows.
     let mut resumed = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
+        .subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
         .await
         .unwrap();
     assert_eq!(next(&mut resumed).await, TaskStreamItem::ResumeAccepted { cursor: at_snapshot.clone() });
@@ -306,7 +356,8 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut stale = at_snapshot.clone();
     stale.token.value = "1-1".into();
     let mut restarted = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
+        .subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
         .await
         .unwrap();
     assert!(matches!(next(&mut restarted).await, TaskStreamItem::Snapshot { .. }));
@@ -315,11 +366,13 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut foreign = at_snapshot.clone();
     foreign.tid = Tid(format!("{}.ffff", foreign.sid.0));
     assert!(matches!(
-        g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
+        g.subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
         Err(GatewayError::AccessDenied)
     ));
     assert!(matches!(
-        g.subscribe(&caller("pa-002"), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
+        g.subscribe(&caller("pa-002"), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
         Err(GatewayError::NotFound)
     ));
 }
@@ -331,7 +384,8 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     publish(&p.worker, &tid, TaskStatus::Completed, Some(eid(9, 1)), &[]).await;
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -344,6 +398,7 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
 
 fn wait(tid: &Tid, until: WaitUntil, after: Option<EventId>, millis: u64) -> WaitTask {
     WaitTask {
+        source: CreationSource::Rpc,
         group: grp(),
         tid: tid.clone(),
         until,
@@ -483,6 +538,7 @@ async fn cancel_is_admitted_once_and_refused_for_a_finished_task() {
     let g = gateway(&p);
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     let request = CancelTask {
+        source: CreationSource::Rpc,
         group: grp(),
         tid: tid.clone(),
         request_id: RequestId("req-55".into()),
@@ -542,7 +598,8 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
 }
 
 async fn snapshot_stream(g: &DistGateway, tid: &Tid) -> TaskSubscription {
-    g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+    g.subscribe(&me(), SubscribeTask {
+            source: CreationSource::Rpc, group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap()
 }
@@ -660,12 +717,15 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
     answer.task = Some(tid.clone());
     assert_eq!(g.submit(&me(), answer).await, Err(GatewayError::NotFound));
     // Get, subscribe, wait, cancel and list.
-    assert_eq!(g.get_task(&me(), &other, &tid).await, Err(GatewayError::NotFound));
-    let subscribe = SubscribeTask { group: other.clone(), tid: tid.clone(), mode: SubscribeMode::Snapshot };
+    assert_eq!(g.get_task(&me(), &other, &tid, CreationSource::Rpc).await, Err(GatewayError::NotFound));
+    let subscribe = SubscribeTask {
+            source: CreationSource::Rpc, group: other.clone(), tid: tid.clone(), mode: SubscribeMode::Snapshot };
     assert!(matches!(g.subscribe(&me(), subscribe).await, Err(GatewayError::NotFound)));
-    let waiting = WaitTask { group: other.clone(), ..wait(&tid, WaitUntil::Final, None, 50) };
+    let waiting = WaitTask {
+        source: CreationSource::Rpc, group: other.clone(), ..wait(&tid, WaitUntil::Final, None, 50) };
     assert_eq!(g.wait_task(&me(), waiting).await, Err(GatewayError::NotFound));
     let cancel = CancelTask {
+        source: CreationSource::Rpc,
         group: other.clone(),
         tid: tid.clone(),
         request_id: RequestId("req-1".into()),
@@ -690,7 +750,27 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
         limit: NonZeroU32::new(10).unwrap(),
     };
     assert_eq!(g.list_tasks(&me(), listed).await.unwrap().tasks.len(), 1);
-    assert_eq!(g.get_task(&me(), &grp(), &tid).await.unwrap().content.status, TaskStatus::InputRequired);
+    assert_eq!(g.get_task(&me(), &grp(), &tid, CreationSource::Rpc).await.unwrap().content.status, TaskStatus::InputRequired);
+}
+
+#[tokio::test]
+async fn rpc_list_does_not_expose_a_group_rest_context() {
+    let p = ports();
+    let g = gateway(&p);
+    let sid = Sid("s0042.g1234567890abcdef".into());
+    let mut task = snapshot(&format!("{}.first", sid.0), TaskStatus::Working, None, common::NOW);
+    task.sid = sid.clone();
+    task.scope = TaskScope { tenant: me().tenant, principal: PrincipalId("bot:pa-001".into()) };
+    let spec = common::session_spec(&sid.0, task.scope.clone());
+    use bcs_store_api::document::DocumentStorePlugin;
+    p.model.create_document(&common::layout().spec(&sid).unwrap(), &serde_json::to_value(spec).unwrap())
+        .await.unwrap();
+    p.worker.create(&task).await;
+    let query = ListTasks {
+        group: grp(), session: Some(sid), statuses: vec![], after: None,
+        limit: NonZeroU32::MIN,
+    };
+    assert_eq!(g.list_tasks(&me(), query).await, Err(GatewayError::NotFound));
 }
 
 #[tokio::test]
@@ -705,7 +785,7 @@ async fn a_directory_answer_for_another_group_id_creates_nothing() {
     );
     // The group's own id still works, and creates the session.
     let canonical = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
-    assert_eq!(g.get_task(&me(), &grp(), &canonical.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    assert_eq!(g.get_task(&me(), &grp(), &canonical.tid, CreationSource::Rpc).await.unwrap().content.status, TaskStatus::Submitted);
 }
 
 #[tokio::test]
@@ -725,7 +805,7 @@ async fn a_retried_first_message_needs_no_directory_once_its_session_is_frozen()
     // The directory is down when the client retries: the frozen session answers.
     groups.down.store(true, Ordering::SeqCst);
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
-    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid, CreationSource::Rpc).await.unwrap().content.status, TaskStatus::Submitted);
     // A genuinely new session still needs the directory.
     assert_eq!(
         g.submit(&me(), message("msg-2", "hello")).await,

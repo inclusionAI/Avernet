@@ -5,6 +5,7 @@
 //! replacement. Validation belongs to the admitting service and repository port.
 
 pub mod dispatch;
+pub mod group_round;
 pub mod ids;
 pub mod input;
 pub mod output;
@@ -13,6 +14,7 @@ pub mod session;
 pub mod task;
 
 pub use dispatch::*;
+pub use group_round::*;
 pub use ids::*;
 pub use input::*;
 pub use output::*;

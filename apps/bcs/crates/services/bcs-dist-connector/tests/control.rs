@@ -89,16 +89,14 @@ async fn an_input_with_an_unknown_outcome_is_not_confirmed_or_resent() {
 }
 
 #[tokio::test]
-async fn an_idempotent_input_is_resent_until_accepted() {
+async fn a_definitely_unsent_input_is_retried_until_accepted() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.idempotent_input = true;
     let events = rig.agent.start_stream();
-    rig.worker.create_spec(spec).await;
+    rig.worker.create().await;
     rig.worker.notify().await;
     let _running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
-    rig.agent.on_input(Reply::Unknown);
+    rig.agent.on_input(Reply::NotSent);
     rig.agent.on_input(Reply::NotSent);
     rig.agent.on_input(Reply::Accepted);
     rig.worker.push(pending(1)).await;
@@ -132,10 +130,10 @@ async fn a_new_holder_does_not_resend_an_input_the_former_holder_may_have_sent()
     let mut rig = Rig::new().await;
     rig.worker.create().await;
     let mut old = acquire(&queue(&rig.store), &instance("conn-01")).await;
-    old.begin_send(start_op()).await.unwrap();
+    old.begin_send(start_op(), proof(&start_op())).await.unwrap();
     old.record_acceptance(accepted(start_op())).await.unwrap();
     rig.worker.push(pending(1)).await;
-    old.begin_send(input_op(1)).await.unwrap(); // intent recorded, then it died
+    old.begin_send(input_op(1), proof(&input_op(1))).await.unwrap(); // intent recorded, then it died
 
     rig.membership = Arc::new(FixedLiveness(Liveness::Dead));
     rig.agent.on_task(found(TaskStatus::InputRequired, json!({"state": "input_required"})));
@@ -239,27 +237,59 @@ async fn a_cancel_of_a_finished_task_reports_the_agents_own_result() {
     assert_eq!(doc["execution"]["cancellation"], json!({"kind": "already_finished", "outcome": "completed"}));
     assert_eq!(rig.kinds().await, vec!["final"]);
     let reported = rig.inbox_events().await;
-    assert_eq!(
-        reported[0].1.payload,
-        Payload::Inline(json!({"state": "completed", "artifacts": [{"artifactId": "a-1"}]})),
-        "the agent's own result, read on a later tick"
-    );
+    match &reported[0].1.payload {
+        Payload::Inline(value) => {
+            assert_eq!(value["state"], "completed");
+            assert_eq!(
+                value["artifacts"],
+                json!([{"artifactId": "a-1"}]),
+                "the agent's own result, read on a later tick"
+            );
+            assert!(
+                value.get("result_digest").is_some(),
+                "plan T6: the Final carries the verified content digest"
+            );
+        }
+        other => panic!("offloaded terminal payload: {other:?}"),
+    }
     assert_eq!(rig.agent.count("cancel"), 1, "the cancel is not sent again while the result is read");
 }
 
 #[tokio::test]
-async fn a_finished_task_that_is_gone_ends_on_the_cancel_answer() {
+async fn a_finished_task_that_is_gone_keeps_its_stop_fact_but_publishes_no_product() {
     let rig = Rig::new().await;
-    let (_running, _events) = accepted_call(&rig).await;
+    let (running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Completed));
-    // The agent dropped the finished task: asking again cannot help.
+    // The agent dropped the finished task: the read cannot verify a result.
     rig.agent.on_task(bcs_service_api::port::dist_agent::QueryOutcome::NotFound);
+    let _ = &running;
     rig.worker.cancel().await;
-    until("the call ends", || async { rig.phase().await == "ended" }).await;
-    assert_eq!(rig.doc().await["execution"]["outcome"], "completed");
-    assert_eq!(rig.kinds().await, vec!["final"]);
-    assert_eq!(rig.inbox_events().await[0].1.payload, Payload::Inline(json!({"state": "completed"})));
-    assert_eq!(rig.agent.count("query_task"), 1, "a definite answer is not asked for again");
+    until("observed already finished", || async {
+        rig.doc().await["execution"]["cancellation"]["kind"] == "already_finished"
+    })
+    .await;
+    settle().await;
+    // Plan T6: the stop fact stands and the cancellation is observed, but a
+    // Completed without a verified complete result never publishes a Final,
+    // so the Worker (T7) still refuses to release the call. The dispatch
+    // deadline bounds the wait with a result-incomplete failure.
+    assert_eq!(rig.phase().await, "accepted", "no product, no release");
+    assert!(
+        rig.inbox_events()
+            .await
+            .iter()
+            .all(|(_, event)| !matches!(event.kind, AgentEventKind::Final)),
+        "an empty product is never a Final"
+    );
+    assert_eq!(
+        state_of(&rig.inbox_events().await[0].1),
+        "completed",
+        "the stop fact itself stays visible"
+    );
+    assert!(running.pending_effects().await >= 1, "the verification obligation stays open");
+    // One read inside the cancel-time decision, one for the stop-fact
+    // recovery before the definite absence latches: bounded either way.
+    assert_eq!(rig.agent.count("query_task"), 2, "a definite absence is not asked for again after it latches");
 }
 
 #[tokio::test]
@@ -368,7 +398,8 @@ async fn a_waiting_call_notices_when_the_agent_moves_on_without_a_reply() {
     assert!(rig.agent.count("query_task") >= 2, "the waiting call keeps looking at the task");
 
     rig.agent.tasks.lock().unwrap().clear();
-    rig.agent.on_task(found(TaskStatus::Completed, json!({"artifacts": []})));
+    // The completed task carries a real result this time.
+    rig.agent.on_task(found(TaskStatus::Completed, json!({"artifacts": [{"artifactId": "a-9", "parts": [{"text": "done"}]}]})));
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     assert_eq!(rig.kinds().await, vec!["auth_required", "final"]);
     assert_eq!(rig.doc().await["execution"]["outcome"], "completed");
@@ -427,7 +458,7 @@ async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
     let mut rig = Rig::new().await;
     rig.worker.create().await;
     let mut old = acquire(&queue(&rig.store), &instance("conn-01")).await;
-    old.begin_send(start_op()).await.unwrap();
+    old.begin_send(start_op(), proof(&start_op())).await.unwrap();
     old.record_acceptance(accepted(start_op())).await.unwrap();
     rig.worker.cancel().await;
     old.record_cancel(CancelObservation::Sending).await.unwrap();
@@ -519,21 +550,15 @@ async fn an_unknown_cancel_is_not_resent_on_every_tick() {
 }
 
 #[tokio::test]
-async fn an_idempotent_input_is_resent_a_bounded_number_of_times() {
+async fn a_definitely_unsent_input_has_bounded_retries() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.idempotent_input = true;
-    let _events = rig.agent.start_stream();
-    rig.worker.create_spec(spec).await;
-    rig.worker.notify().await;
-    let running = rig.start();
-    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let (running, _events) = accepted_call(&rig).await;
     for _ in 0..10 {
-        rig.agent.on_input(Reply::Unknown);
+        rig.agent.on_input(Reply::NotSent);
     }
     rig.worker.push(pending(1)).await;
-    until("blocked after the last resend", || async { running.pending_effects().await == 1 }).await;
+    until("blocked after the last retry", || async { running.pending_effects().await == 1 }).await;
     settle().await;
-    assert_eq!(rig.agent.count("input"), 4, "one send and three resends");
+    assert_eq!(rig.agent.count("input"), 4, "one send and three retries");
     assert_eq!(rig.doc().await["execution"]["confirmed_input_through"], serde_json::Value::Null);
 }

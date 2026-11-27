@@ -17,7 +17,7 @@
 
 use crate::invalid;
 use bcs_dist_model::*;
-use bcs_service_api::application::dist_gateway::GatewayError;
+use bcs_service_api::application::dist_gateway::{CreationSource, GatewayError};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
@@ -40,9 +40,44 @@ pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId
     Sid(format!("s{shard:04}.{}", hex::encode(&digest[8..16])))
 }
 
+/// The group-A2A session namespace: same derivation domain and a `g`
+/// marker in the suffix, so neither entrance can recreate the other's
+/// identity for the same message key (plan T8 source isolation). The
+/// session's shard is the assembly's mounted shard, never a spread
+/// bucket: the strict round admission binding follows ONE shard record
+/// (plan T9), so a group-entrance session must always land on the licensed
+/// shard claim its rounds admit through.
+pub(crate) fn group_session_id(
+    scope: &TaskScope,
+    group: &GroupId,
+    message: &RequestId,
+    shard: u32,
+) -> Sid {
+    let digest = hash(&[
+        "group_a2a:v1",
+        &scope.tenant.0,
+        &scope.principal.0,
+        &group.0,
+        &message.0,
+    ]);
+    Sid(format!("s{shard:04}.g{}", hex::encode(&digest[8..16])))
+}
+
 pub(crate) fn task_id(sid: &Sid, message: &RequestId) -> Tid {
     let digest = hash(&["tid", &sid.0, &message.0]);
     Tid(format!("{}.{}", sid.0, hex::encode(&digest[..8])))
+}
+
+pub(crate) fn group_task_id(sid: &Sid, message: &RequestId) -> Tid {
+    let digest = hash(&["group_tid:v1", &sid.0, &message.0]);
+    Tid(format!("{}.g{}", sid.0, hex::encode(&digest[..8])))
+}
+
+/// The durable creation source encoded in a session id's namespace (the
+/// shared contract lives with `CreationSource`: plain hex = Rpc, `g`-marked
+/// hex = GroupA2a). Unknown shapes are refused, never folded into one source.
+pub fn creation_source_of_sid(sid: &Sid) -> Result<CreationSource, GatewayError> {
+    CreationSource::of_sid(sid).ok_or_else(|| invalid("session_id_format"))
 }
 
 fn input_id(fields: &[&str]) -> InputId {
@@ -53,8 +88,37 @@ pub(crate) fn user_input_id(scope: &TaskScope, group: &GroupId, sid: &Sid, messa
     input_id(&["user", &scope.tenant.0, &scope.principal.0, &group.0, &sid.0, &message.0])
 }
 
+pub(crate) fn group_user_input_id(
+    scope: &TaskScope,
+    group: &GroupId,
+    message: &RequestId,
+) -> InputId {
+    input_id(&[
+        "group_user:v2",
+        &scope.tenant.0,
+        &scope.principal.0,
+        &group.0,
+        &message.0,
+    ])
+}
+
 pub(crate) fn reply_input_id(scope: &TaskScope, tid: &Tid, sid: &Sid, message: &RequestId) -> InputId {
     input_id(&["human_reply", &scope.principal.0, &sid.0, &tid.0, &message.0])
+}
+
+pub(crate) fn group_reply_input_id(
+    scope: &TaskScope,
+    tid: &Tid,
+    sid: &Sid,
+    message: &RequestId,
+) -> InputId {
+    input_id(&[
+        "group_reply:v1",
+        &scope.principal.0,
+        &sid.0,
+        &tid.0,
+        &message.0,
+    ])
 }
 
 pub(crate) fn cancel_input_id(scope: &TaskScope, tid: &Tid, sid: &Sid, request: &RequestId) -> InputId {
@@ -142,4 +206,52 @@ pub(crate) fn check_request_id(id: &RequestId) -> Result<(), GatewayError> {
         return Err(invalid("message_id_length"));
     }
     Ok(())
+}
+
+pub(crate) fn group_cancel_input_id(
+    scope: &TaskScope,
+    tid: &Tid,
+    sid: &Sid,
+    request: &RequestId,
+) -> InputId {
+    input_id(&[
+        "group_cancel:v1",
+        &scope.principal.0,
+        &sid.0,
+        &tid.0,
+        &request.0,
+    ])
+}
+
+/// The identity derivation of one entrance: every session, task and input id
+/// of a request is derived through its own source's namespace only, so no
+/// entrance can ever recreate the other's identities for the same message key.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Derivation {
+    pub session: fn(&TaskScope, &GroupId, &RequestId, u32) -> Sid,
+    pub task: fn(&Sid, &RequestId) -> Tid,
+    pub user_input: fn(&TaskScope, &GroupId, &Sid, &RequestId) -> InputId,
+    pub reply_input: fn(&TaskScope, &Tid, &Sid, &RequestId) -> InputId,
+    pub cancel_input: fn(&TaskScope, &Tid, &Sid, &RequestId) -> InputId,
+}
+
+impl Derivation {
+    pub fn of(source: CreationSource) -> Self {
+        match source {
+            CreationSource::Rpc => Self {
+                session: session_id,
+                task: task_id,
+                user_input: user_input_id,
+                reply_input: reply_input_id,
+                cancel_input: cancel_input_id,
+            },
+            CreationSource::GroupA2a => Self {
+                session: group_session_id,
+                task: group_task_id,
+                user_input: |scope, group, _, message| group_user_input_id(scope, group, message),
+                reply_input: group_reply_input_id,
+                cancel_input: group_cancel_input_id,
+            },
+        }
+    }
 }

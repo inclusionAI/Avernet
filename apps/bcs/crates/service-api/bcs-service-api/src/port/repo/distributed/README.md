@@ -6,6 +6,19 @@ separate. The Rust declarations own the exact method shapes. See the
 [reliable Inbox provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
 for retained layout, cold-start health, resource bounds and validation limits.
 
+## Strict-group T1 candidates (Service API 8.0.0)
+
+`group_round::GroupRoundRepo` separates strict per-context admission from legacy
+Inbox admission and has a centralized `group_round_repo_contract_tests` harness.
+`RunnerInput::GroupStart` carries the explicit RoundInput. This new enum variant
+breaks exhaustive matches, hence the major version bump; legacy Start and all
+existing stored SessionSpec shapes stay unchanged. Workspace consumers rebuild
+together, and the unmerged Worker dependency must handle the new variant before
+integration. No production implementation, endpoint, or migration is installed.
+The trusted grants/profile helpers are candidates, not an authorization provider.
+See [T1 validation](../../../../../../../specs/2026-11-20-fsm-group-a2a-discussion/validation.md)
+for evidence and remaining joint-runtime limitations.
+
 ## Boundaries
 
 | Boundary | Traits | Responsibility |

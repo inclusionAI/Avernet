@@ -17,8 +17,12 @@ use bcs_dist_store::capability;
 use bcs_dist_store::codec::{decode_ev_entry, decode_json, ev_entry_tid, stream_id};
 use bcs_dist_store::error::from_read;
 use bcs_dist_store::layout::KeyLayout;
+use bcs_dist_store::task_feed::StoreTaskFeed;
+use bcs_service_api::application::dist_gateway::CreationSource;
 use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
-use bcs_service_api::port::repo::distributed::result::ResultStorePort;
+use bcs_service_api::port::repo::distributed::group_round::{StrictLicense, decode_strict_license};
+use bcs_service_api::port::repo::distributed::session::{EffectKind, FeedPublication};
+use bcs_service_api::port::repo::distributed::result::{ArchiveGrants, ArchivedTaskView, ResultStorePort, TaskArchiveRepo};
 use bcs_service_api::port::repo::distributed::task_feed::*;
 use bcs_store_api::StoreCapability;
 use bcs_store_api::document::DocumentStorePlugin;
@@ -33,15 +37,18 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 
+#[path = "strict_follow.rs"]
+mod strict_follow;
+
 /// Code of the error a subscriber gets when it reads too slowly; it resumes
 /// from its last cursor.
 pub const SUBSCRIBER_LAGGED: &str = "subscriber_lagged";
 
 /// Task snapshots read at once while listing.
-const LIST_READ_CONCURRENCY: usize = 8;
+pub(crate) const LIST_READ_CONCURRENCY: usize = 8;
 
 /// Settings of the Gateway's readers.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayStoreConfig {
     /// Identifies the store in replay tokens, e.g. `tbase`.
     pub backend: BackendId,
@@ -54,6 +61,13 @@ pub struct GatewayStoreConfig {
     /// Time a blocking read may take beyond `read_block` before it counts as
     /// a failed read.
     pub read_grace: Duration,
+    /// HMAC signing key of the list cursors. Deployment configuration:
+    /// replicas that share reads share the key; absent fails closed (no
+    /// cursor is issued or accepted).
+    pub cursor_secret: Option<Vec<u8>>,
+    /// The clock cursor expiry and snapshot deadlines read. Deployment
+    /// configuration; tests pin it.
+    pub now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
 }
 
 impl GatewayStoreConfig {
@@ -64,22 +78,33 @@ impl GatewayStoreConfig {
             read_batch: NonZeroU32::new(100).unwrap_or(NonZeroU32::MIN),
             subscriber_buffer: 256,
             read_grace: ReaderConfig::DEFAULT_GRACE,
+            cursor_secret: None,
+            now: Arc::new(|| {
+                let millis = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or_default();
+                TimestampMillis(i64::try_from(millis).unwrap_or(i64::MAX))
+            }),
         }
     }
 }
 
-struct Shared {
-    documents: Arc<dyn DocumentStorePlugin>,
-    zset: Arc<dyn ZSetStorePlugin>,
-    stream: Arc<dyn StreamStorePlugin>,
-    results: Arc<dyn ResultStorePort>,
-    layout: KeyLayout,
-    config: GatewayStoreConfig,
-    readers: SessionReaders,
+pub(crate) struct Shared {
+    pub(crate) documents: Arc<dyn DocumentStorePlugin>,
+    pub(crate) zset: Arc<dyn ZSetStorePlugin>,
+    pub(crate) stream: Arc<dyn StreamStorePlugin>,
+    pub(crate) results: Arc<dyn ResultStorePort>,
+    pub(crate) group_archives: Option<Arc<dyn TaskArchiveRepo>>,
+    group_feed: Option<Arc<StoreTaskFeed>>,
+    pub(crate) layout: KeyLayout,
+    pub(crate) config: GatewayStoreConfig,
+    pub(crate) readers: SessionReaders,
 }
 
 pub struct StoreTaskReader {
-    shared: Arc<Shared>,
+    pub(crate) projection_store: Option<Arc<dyn bcs_store_api::kv::KvStorePlugin>>,
+    pub(crate) shared: Arc<Shared>,
 }
 
 impl StoreTaskReader {
@@ -92,6 +117,40 @@ impl StoreTaskReader {
         results: Arc<dyn ResultStorePort>,
         layout: KeyLayout,
         config: GatewayStoreConfig,
+    ) -> Result<Self, StoreError> {
+        Self::build(documents, zset, stream, results, layout, config, None)
+    }
+
+    /// The mounted group gateway reads snapshots from the strict authority
+    /// cut and follows the canonical committed TaskFeed. Legacy assemblies
+    /// with no strict-round repository keep their original reader.
+    pub fn with_group_archives(
+        documents: Arc<dyn DocumentStorePlugin>,
+        zset: Arc<dyn ZSetStorePlugin>,
+        stream: Arc<dyn StreamStorePlugin>,
+        results: Arc<dyn ResultStorePort>,
+        layout: KeyLayout,
+        config: GatewayStoreConfig,
+        group: (Arc<dyn TaskArchiveRepo>, Arc<StoreTaskFeed>),
+    ) -> Result<Self, StoreError> {
+        Self::build(documents, zset, stream, results, layout, config, Some(group))
+    }
+
+    /// Enables immutable, cursor-lifetime projections for expanded group pages.
+    pub fn with_group_projections(mut self, store: Arc<dyn bcs_store_api::kv::KvStorePlugin>) -> Result<Self, StoreError> {
+        capability::require(&[(store.as_ref(), StoreCapability::Kv)])?;
+        self.projection_store = Some(store);
+        Ok(self)
+    }
+
+    fn build(
+        documents: Arc<dyn DocumentStorePlugin>,
+        zset: Arc<dyn ZSetStorePlugin>,
+        stream: Arc<dyn StreamStorePlugin>,
+        results: Arc<dyn ResultStorePort>,
+        layout: KeyLayout,
+        config: GatewayStoreConfig,
+        group: Option<(Arc<dyn TaskArchiveRepo>, Arc<StoreTaskFeed>)>,
     ) -> Result<Self, StoreError> {
         capability::require(&[
             (documents.as_ref(), StoreCapability::DocumentCas),
@@ -110,12 +169,16 @@ impl StoreTaskReader {
                 read_grace: config.read_grace,
             },
         );
+        let (group_archives, group_feed) = group.unzip();
         Ok(Self {
+            projection_store: None,
             shared: Arc::new(Shared {
                 documents,
                 zset,
                 stream,
                 results,
+                group_archives,
+                group_feed,
                 layout,
                 config,
                 readers,
@@ -140,12 +203,181 @@ impl Shared {
 
     /// The task as stored: the live snapshot, or the final record once the
     /// task key expired. Another scope's task is reported as absent.
+    ///
+    /// Strict-group tasks follow the authoritative cut (plan T7): an
+    /// archive row alone never authorizes a terminal presentation while the
+    /// round's terminal authority window is unsettled, and a stale snapshot
+    /// that still says Working is likewise not success. The retained
+    /// terminal proof sealed by the authority commit is the one cut that may
+    /// disclose the archived terminal here.
     async fn stored(&self, scope: &TaskScope, tid: &Tid) -> Result<Option<Stored>, StoreError> {
-        match self.snapshot(tid).await? {
-            Some(snapshot) if &snapshot.scope == scope => Ok(Some(Stored::Live(snapshot))),
-            Some(_) => Ok(None),
-            None => Ok(self.results.get_final(scope, tid).await?.map(Stored::Archived)),
+        if let Some(archives) = &self.group_archives
+            && let Some((sid, _)) = tid.0.rsplit_once('.')
+        {
+            let sid = Sid(sid.to_owned());
+            if CreationSource::of_sid(&sid) == Some(CreationSource::GroupA2a) {
+                return self.strict_stored(archives.as_ref(), scope, &sid, tid).await;
+            }
         }
+        match self.snapshot(tid).await? {
+            Some(snapshot) if &snapshot.scope == scope => {
+                if is_terminal(snapshot.content.status)
+                    && !self.strict_terminal_viewable(&snapshot.sid, tid).await?
+                {
+                    return Ok(None);
+                }
+                Ok(Some(Stored::Live(snapshot)))
+            }
+            Some(_) => Ok(None),
+            None => match self.results.get_final(scope, tid).await? {
+                Some(record)
+                    if !self.strict_terminal_viewable(&record.sid, tid).await? =>
+                {
+                    Ok(None)
+                }
+                Some(record) => Ok(Some(Stored::Archived(record))),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// Read a strict group's authority from a single checkpoint version.
+    /// A feed pre-write is not an acceptance; a terminal feed snapshot is
+    /// not a confirmed result. Active reads use the exact license; terminal
+    /// reads use the archive even if the feed is lagging or absent.
+    async fn strict_stored(
+        &self,
+        archives: &dyn TaskArchiveRepo,
+        scope: &TaskScope,
+        sid: &Sid,
+        tid: &Tid,
+    ) -> Result<Option<Stored>, StoreError> {
+        let Some(doc) = self.documents.read_document(&self.layout.ckpt(sid)?).await
+            .map_err(|e| from_read(&e))? else {
+            return Ok(None);
+        };
+        let Some(runner) = doc.value.pointer("/checkpoint/runner_state/state/value") else {
+            return Ok(None);
+        };
+        let Some(license) = decode_strict_license(runner).filter(|license| {
+            license.schema_version == 1 && license.sid == *sid && license.scope == *scope
+        }) else {
+            return Ok(None);
+        };
+        let active = license.tid == *tid;
+        let retained = if active {
+            runner.get("group_terminal").cloned().map(decode_json::<TerminalProof>).transpose()?
+        } else {
+            None
+        };
+        let cold = !active && runner.get("group_cold").and_then(serde_json::Value::as_array)
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry.get("schema_version").and_then(serde_json::Value::as_u64) == Some(1)
+                    && entry.get("tid").and_then(serde_json::Value::as_str) == Some(tid.0.as_str())
+            }));
+        if retained.is_some() || cold {
+            let grants = ArchiveGrants { read: true };
+            if let Some(proof) = archives.get_terminal_proof(&grants, scope, &license.group, tid).await? {
+                if proof.schema_version != RoundSchemaVersion::V1
+                    || proof.key.scope != *scope || proof.key.sid != *sid
+                    || proof.key.group != license.group || proof.key.tid != *tid
+                    || (active && (proof.key != license.round_key() || retained.as_ref() != Some(&proof)))
+                    || (cold && proof.key.generation >= license.generation)
+                {
+                    return Err(invalid("group_terminal_authority_mismatch"));
+                }
+                let Some(ArchivedTaskView::Committed { archive, check }) =
+                    archives.get_archived(&grants, scope, &license.group, tid).await?
+                else {
+                    return Err(not_applied("group_terminal_archive_missing"));
+                };
+                let record = archive.record;
+                if archive.round != proof.key || record.scope != *scope || record.sid != *sid || record.tid != *tid
+                    || record.status != proof.status || record.source_commit.0 >= proof.commit_seq.0
+                    || archive.result_digest != proof.result_ref.digest
+                    || bcs_dist_store::archive::result_blob_reference(&record)? != proof.result_ref
+                    || (proof.status == TerminalStatus::Completed && !check.fits)
+                {
+                    return Err(invalid("group_terminal_archive_mismatch"));
+                }
+                return Ok(Some(Stored::StrictArchived(record, proof.result_ref)));
+            }
+        }
+        if !active {
+            return Ok(None);
+        }
+        let Some(snapshot) = self.snapshot(tid).await?.filter(|snapshot| {
+            snapshot.scope == *scope && snapshot.sid == *sid && snapshot.tid == *tid
+        }) else {
+            return Err(not_applied("group_accepted_snapshot_missing"));
+        };
+        let finalizing_at = group_finalizing_at(&doc.value, &license);
+        let commit = doc.value.pointer("/checkpoint/commit_seq")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| invalid("group_checkpoint_commit_missing"))?;
+        if !is_terminal(snapshot.content.status)
+            && snapshot.source_commit.0 <= commit
+            && finalizing_at.is_none_or(|sequence| snapshot.source_commit.0 < sequence)
+        {
+            return Ok(Some(Stored::Live(snapshot)));
+        }
+        // A Working snapshot can already hold the final answer: Show and
+        // SaveResult are sealed in the same decision. Rewind either snapshot
+        // until the terminal is confirmed. A snapshot newer than the
+        // checkpoint read can also belong to an unseen finalizing decision.
+        let before = finalizing_at.unwrap_or(snapshot.source_commit.0);
+        let previous = previous_group_snapshot(&doc.value, &license, before)?;
+        Ok(Some(Stored::Live(previous.unwrap_or_else(|| {
+            let mut safe = snapshot;
+            safe.content = TaskContent {
+                status: TaskStatus::Working,
+                interactions: Vec::new(),
+                snapshot: Payload::Inline(serde_json::json!({"format_version": DISPLAY_FORMAT_VERSION, "units": []})),
+                result_ref: None,
+            };
+            safe.snapshot_event_id = None;
+            safe.updated_at = safe.created_at;
+            safe
+        }))))
+    }
+
+    /// May this task's terminal be disclosed on the old read path? For
+    /// strictly claimed sessions only through the authoritative cut
+    /// (plan T17 ruling 4(b)): the current licensed round through its
+    /// retained hot terminal (`group_terminal` sealed by the terminal CAS,
+    /// cold-confirmed by the spine), and every closed predecessor through
+    /// the session's cold index — an entry the install chain only writes
+    /// after the owner-fenced window closed and the cold proof was
+    /// confirmed and read back. Every other strict state — an archive row
+    /// alone, an old snapshot, a guessable pre-write — stays invisible as
+    /// success. Non-strict sessions keep the generic behavior.
+    async fn strict_terminal_viewable(&self, sid: &Sid, tid: &Tid) -> Result<bool, StoreError> {
+        let retained =
+            bcs_dist_store::group_admission::probe_strict_license(&self.documents, &self.layout, sid)
+                .await?;
+        if retained.is_none() {
+            return Ok(true);
+        }
+        if bcs_dist_store::group_terminal::probe_retained_terminal(
+            &self.documents,
+            &self.layout,
+            sid,
+        )
+        .await?
+        .is_some_and(|proof| proof.key.tid == *tid)
+        {
+            return Ok(true);
+        }
+        // Superseded rounds stay publicly resolvable through the cold cut
+        // the successor's install condensed into the session checkpoint.
+        Ok(bcs_dist_store::group_terminal::probe_cold_index(
+            &self.documents,
+            &self.layout,
+            sid,
+            tid,
+        )
+        .await?
+        .is_some())
     }
 
     /// Id of the newest entry of a stream; `None` when it has none.
@@ -185,11 +417,66 @@ impl Shared {
     fn cursor(&self, sid: &Sid, tid: &Tid, id: StreamId) -> TaskCursor {
         position::cursor(&self.config.backend, sid, tid, id)
     }
+
+    /// The frozen group of a session, or `None` for another scope's or an
+    /// absent session. One bounded document read.
+    pub(crate) async fn session_group(&self, scope: &TaskScope, sid: &Sid) -> Result<Option<GroupId>, StoreError> {
+        let key = self.layout.spec(sid)?;
+        let Some(doc) = self.documents.read_document(&key).await.map_err(|e| from_read(&e))? else {
+            return Ok(None);
+        };
+        let spec: SessionSpec = decode_json(doc.value)?;
+        Ok((&spec.scope == scope).then_some(spec.group))
+    }
 }
 
-enum Stored {
+fn group_finalizing_at(document: &serde_json::Value, license: &StrictLicense) -> Option<u64> {
+    document.pointer("/checkpoint/tasks")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|tasks| tasks.iter().find(|task| task.get("tid").and_then(serde_json::Value::as_str) == Some(&license.tid.0)))
+        .and_then(|task| task.pointer("/finalization/record/source_commit"))
+        .and_then(serde_json::Value::as_u64)
+}
+
+fn previous_group_snapshot(
+    document: &serde_json::Value,
+    license: &StrictLicense,
+    finalizing_at: u64,
+) -> Result<Option<TaskSnapshot>, StoreError> {
+    let checkpoint = document.get("checkpoint");
+    let Some(entries) = checkpoint
+        .and_then(|value| value.get("feed_publications"))
+        .and_then(serde_json::Value::as_array)
+    else { return Ok(None) };
+    for entry in entries.iter().rev() {
+        if entry.get("tid").and_then(serde_json::Value::as_str) != Some(&license.tid.0)
+            || entry.pointer("/kind/kind").and_then(serde_json::Value::as_str) != Some("publish_snapshot")
+            || entry.pointer("/kind/snapshot/source_commit").and_then(serde_json::Value::as_u64)
+                .is_none_or(|sequence| sequence >= finalizing_at)
+        {
+            continue;
+        }
+        let publication: FeedPublication = decode_json(entry.clone())?;
+        if publication.schema_version != 1 || publication.sid != license.sid
+            || publication.group != license.group || publication.scope != license.scope
+            || publication.generation != license.generation
+        {
+            continue;
+        }
+        if let EffectKind::PublishSnapshot { snapshot } = publication.kind
+            && snapshot.scope == license.scope && snapshot.tid == license.tid
+            && snapshot.sid == license.sid && !is_terminal(snapshot.content.status)
+        {
+            return Ok(Some(snapshot));
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) enum Stored {
     Live(TaskSnapshot),
     Archived(FinalTaskRecord),
+    StrictArchived(FinalTaskRecord, BlobRef),
 }
 
 fn is_terminal(status: TaskStatus) -> bool {
@@ -234,17 +521,58 @@ fn archived_view(record: FinalTaskRecord) -> TaskView {
     }
 }
 
-fn stored_view(stored: Stored) -> TaskView {
+pub(crate) fn stored_view(stored: Stored) -> TaskView {
     match stored {
         Stored::Live(snapshot) => live_view(snapshot),
         Stored::Archived(record) => archived_view(record),
+        Stored::StrictArchived(record, result_ref) => {
+            let mut view = archived_view(record);
+            view.content.result_ref = Some(result_ref);
+            view
+        }
     }
 }
 
-fn invalid(code: &str) -> StoreError {
+pub(crate) fn invalid(code: &str) -> StoreError {
     StoreError::Invalid {
         code: code.to_owned(),
     }
+}
+
+/// Wire-independent lower-case names of task states, shared by cursor claims
+/// and materialized cut rows.
+pub(crate) fn status_name(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Submitted => "submitted",
+        TaskStatus::Working => "working",
+        TaskStatus::InputRequired => "input_required",
+        TaskStatus::AuthRequired => "auth_required",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Canceled => "canceled",
+        TaskStatus::Rejected => "rejected",
+    }
+}
+
+pub(crate) fn status_of_name(name: &str) -> Option<TaskStatus> {
+    Some(match name {
+        "submitted" => TaskStatus::Submitted,
+        "working" => TaskStatus::Working,
+        "input_required" => TaskStatus::InputRequired,
+        "auth_required" => TaskStatus::AuthRequired,
+        "completed" => TaskStatus::Completed,
+        "failed" => TaskStatus::Failed,
+        "canceled" => TaskStatus::Canceled,
+        "rejected" => TaskStatus::Rejected,
+        _ => return None,
+    })
+}
+
+/// The deterministic status-filter key bound into cursors and cut identities.
+pub(crate) fn status_key(statuses: &[TaskStatus]) -> String {
+    let mut names: Vec<&str> = statuses.iter().map(|status| status_name(*status)).collect();
+    names.sort_unstable();
+    names.join(",")
 }
 
 fn in_session(sid: &Sid, tid: &Tid) -> bool {
@@ -268,15 +596,21 @@ impl TaskReaderPort for StoreTaskReader {
     ) -> Result<Option<RestoredTask>, StoreError> {
         Ok(match self.shared.stored(scope, tid).await? {
             None => None,
-            Some(Stored::Archived(record)) => Some(RestoredTask::Final(archived_view(record))),
+            Some(stored @ (Stored::Archived(_) | Stored::StrictArchived(_, _))) => {
+                Some(RestoredTask::Final(stored_view(stored)))
+            }
             Some(Stored::Live(snapshot)) if is_terminal(snapshot.content.status) => {
                 Some(RestoredTask::Final(live_view(snapshot)))
             }
             Some(Stored::Live(snapshot)) => {
                 // No coverage yet: start before the first entry, so the first
                 // events of the task are never skipped.
-                let at = snapshot.snapshot_event_id.map_or(START, stream_id);
-                let cursor = self.shared.cursor(&snapshot.sid, &snapshot.tid, at);
+                let cursor = if let Some(feed) = self.shared.group_feed_for(&snapshot.sid) {
+                    feed.cursor(&snapshot.sid, &snapshot.tid, snapshot.snapshot_event_id)?
+                } else {
+                    let at = snapshot.snapshot_event_id.map_or(START, stream_id);
+                    self.shared.cursor(&snapshot.sid, &snapshot.tid, at)
+                };
                 Some(RestoredTask::Live {
                     view: live_view(snapshot),
                     cursor,
@@ -292,6 +626,9 @@ impl TaskReaderPort for StoreTaskReader {
     ) -> Result<ResumeCheck, StoreError> {
         if !in_session(&cursor.sid, &cursor.tid) {
             return Ok(ResumeCheck::InvalidScope);
+        }
+        if let Some(feed) = self.shared.group_feed_for(&cursor.sid) {
+            return self.shared.validate_group_resume(feed, scope, cursor).await;
         }
         let Some(at) = position::parse(&self.shared.config.backend, &cursor.token) else {
             return Ok(ResumeCheck::Gap);
@@ -314,6 +651,9 @@ impl TaskReaderPort for StoreTaskReader {
         scope: TaskScope,
         after: TaskCursor,
     ) -> BoxStream<'static, Result<FollowItem, StoreError>> {
+        if let Some(feed) = self.shared.group_feed_for(&after.sid) {
+            return strict_follow::follow(self.shared.clone(), feed, scope, after);
+        }
         let follow = Follow {
             shared: self.shared.clone(),
             scope,
@@ -334,7 +674,31 @@ impl TaskReaderPort for StoreTaskReader {
         let Some(sid) = &filter.sid else {
             return Err(invalid("session_filter_required"));
         };
-        let after = page.after.as_ref().map(page::decode).transpose()?;
+        let after = match &page.after {
+            None => None,
+            Some(token) => match page::decode(token, &shared.config.cursor_secret) {
+                Ok(claims) => {
+                    let statuses = status_key(&filter.statuses);
+                    page::verify(
+                        &claims,
+                        "list",
+                        &scope.tenant.0,
+                        &scope.principal.0,
+                        &sid.0,
+                        Some(statuses.as_str()),
+                        "created_at:asc,tid:asc",
+                        (shared.config.now)().0,
+                    )
+                    // The legacy binding answers one unchanged wire code.
+                    .map_err(|_| invalid("page_token"))?;
+                    Some(page::entry_of(&claims))
+                }
+                // The store rejected the token's format: invalid input, not a
+                // failed dependency a client should retry. Same wire contract
+                // as the unsigned v1 token.
+                Err(_) => return Err(invalid("page_token")),
+            },
+        };
         let index = shared
             .zset
             .range(
@@ -348,9 +712,29 @@ impl TaskReaderPort for StoreTaskReader {
             )
             .await
             .map_err(|e| from_read(&e))?;
-        let next = (index.len() >= page.limit.get() as usize)
-            .then(|| index.last().map(page::encode))
-            .flatten();
+        let next = match index.last().filter(|_| index.len() >= page.limit.get() as usize) {
+            Some(last) => {
+                let claims = page::CursorClaims {
+                    surface: "list".to_owned(),
+                    tenant: scope.tenant.0.clone(),
+                    principal: scope.principal.0.clone(),
+                    binding: sid.0.clone(),
+                    statuses: status_key(&filter.statuses),
+                    sort: "created_at:asc,tid:asc".to_owned(),
+                    cut: "live".to_owned(),
+                    last_score: last.score as i64,
+                    last_member: last.member.clone(),
+                    expires_at_ms: (shared.config.now)().0 + (page::CURSOR_LIFETIME_MILLIS as i64),
+                };
+                match page::encode(&claims, &shared.config.cursor_secret) {
+                    Ok(token) => Some(token),
+                    // No cursor is ever issued unsigned; a reader without a
+                    // key stops the pagination instead of degrading it.
+                    Err(_) => return Err(not_applied("cursor_secret_unconfigured")),
+                }
+            }
+            None => None,
+        };
         let reads: Vec<_> = index
             .iter()
             .map(|entry| read_stored(shared.clone(), scope.clone(), Tid(entry.member.clone())))
@@ -373,7 +757,7 @@ impl TaskReaderPort for StoreTaskReader {
     }
 }
 
-async fn read_stored(
+pub(crate) async fn read_stored(
     shared: Arc<Shared>,
     scope: TaskScope,
     tid: Tid,
@@ -539,7 +923,7 @@ impl Follow {
     }
 }
 
-fn not_applied(code: &str) -> StoreError {
+pub(crate) fn not_applied(code: &str) -> StoreError {
     StoreError::NotApplied {
         code: code.to_owned(),
     }

@@ -6,6 +6,9 @@ use async_trait::async_trait;
 use bcs_app_dist_gateway::{Clock, DistGateway, DistGatewayConfig};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
+use bcs_service_api::port::repo::distributed::group_listing::{GroupIndexPage, GroupIndexQuery, GroupListingPort};
+use bcs_service_api::port::repo::distributed::common::StoreError;
+use bcs_service_api::port::repo::distributed::group_round::GroupRoundGrants;
 use bcs_service_api::application::principal::{BotActor, CallerContext};
 use bcs_service_api::core::dist_gateway::*;
 use bcs_service_api::port::dist_agent::*;
@@ -110,7 +113,47 @@ async fn a_wait_that_keeps_hitting_gaps_pauses_between_attempts() {
     let core = Arc::new(AlwaysGap::default());
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(50);
-    let gateway = DistGateway::new(core.clone(), Arc::new(NoGroups), Arc::new(TestClock), config).unwrap();
+    // No group surface here: the registered policy denies and no listing is
+    // wired (the legacy wait path only).
+    struct GroupDeny;
+    #[async_trait]
+    impl GroupGrantPolicy for GroupDeny {
+        async fn grants(&self, _: &GatewayCaller, _: &GroupId) -> GroupRoundGrants {
+            GroupRoundGrants { published: false, invoke: false, read: false, cancel: false }
+        }
+    }
+    struct NoListing;
+    #[async_trait]
+    impl GroupListingPort for NoListing {
+        async fn first_page(
+            &self,
+            _: &TaskScope,
+            _: &GroupId,
+            _: &GroupIndexQuery,
+            _: TimestampMillis,
+        ) -> Result<GroupIndexPage, StoreError> {
+            Err(StoreError::NotApplied { code: "group_listing_unconfigured".to_owned() })
+        }
+        async fn continue_page(
+            &self,
+            _: &TaskScope,
+            _: &GroupId,
+            _: &PageToken,
+            _: bool,
+            _: TimestampMillis,
+        ) -> Result<GroupIndexPage, StoreError> {
+            Err(StoreError::NotApplied { code: "group_listing_unconfigured".to_owned() })
+        }
+    }
+    let gateway = DistGateway::new(
+        core.clone(),
+        Arc::new(NoGroups),
+        Arc::new(GroupDeny),
+        Arc::new(NoListing),
+        Arc::new(TestClock),
+        config,
+    )
+    .unwrap();
     let caller = GatewayCaller {
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
@@ -118,6 +161,7 @@ async fn a_wait_that_keeps_hitting_gaps_pauses_between_attempts() {
         }),
     };
     let wait = WaitTask {
+        source: CreationSource::Rpc,
         group: group(),
         tid: Tid(TID.into()),
         until: WaitUntil::Final,

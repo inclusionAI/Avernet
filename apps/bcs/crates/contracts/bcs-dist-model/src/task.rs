@@ -1,6 +1,41 @@
 use crate::ids::*;
-use crate::{ArtifactUpdate, OutputLimits, OutputUsage};
+use crate::{ArtifactUpdate, OutputLimits, OutputUsage, RoundPart};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
+
+/// One ordered artifact part of a task's terminal products. The part order is
+/// the caller's stable publication order; identity is unique per
+/// `(tid, artifact_id)` and never renumbered by storage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactPart {
+    pub artifact_id: ArtifactId,
+    pub order: NonZeroU32,
+    pub part: RoundPart,
+}
+
+impl ArtifactPart {
+    /// Expand a final answer's typed parts into the archive's flat, ordered
+    /// rows. The length prefix and index distinguish each part without losing
+    /// the originating artifact's identity.
+    pub fn from_final_answer(
+        artifact: &ArtifactId,
+        content: &serde_json::Value,
+        offset: usize,
+    ) -> Option<Vec<Self>> {
+        let parts: Vec<RoundPart> = serde_json::from_value(content.get("parts").unwrap_or(content).clone()).ok()?;
+        if parts.is_empty() {
+            return None;
+        }
+        parts.into_iter().enumerate().map(|(index, part)| {
+            let order = offset.checked_add(index)?.checked_add(1)?;
+            Some(Self {
+                artifact_id: ArtifactId(format!("final:{}:{}:{index}", artifact.0.len(), artifact.0)),
+                order: NonZeroU32::new(u32::try_from(order).ok()?)?,
+                part,
+            })
+        }).collect()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -81,6 +116,9 @@ pub enum OutputClass {
     Output,
     Tool,
     Thinking,
+    /// Final-node output. An original artifact carries `{artifact_id, parts}`;
+    /// a direct message or legacy snapshot carries just the ordered `RoundPart`s.
+    FinalAnswer,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

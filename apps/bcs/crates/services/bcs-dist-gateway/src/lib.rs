@@ -43,6 +43,12 @@ impl DistGatewayCore {
 
 #[async_trait]
 impl DistGatewayCoreService for DistGatewayCore {
+    async fn lookup_group_start(
+        &self, scope: &TaskScope, group: &GroupId, id: &InputId,
+    ) -> Result<GroupStartLookup, DistGatewayCoreError> {
+        self.inbox.lookup_group_start(scope, group, id).await.map_err(read_error)
+    }
+
     async fn admit(
         &self,
         scope: &TaskScope,

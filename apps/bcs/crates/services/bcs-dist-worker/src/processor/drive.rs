@@ -2,7 +2,7 @@ use super::{commit::*, effects::*, engine::*};
 use crate::runtime::{err, store_error};
 use bcs_dist_model::*;
 use bcs_service_api::{
-    port::repo::distributed::{inbox::*, session::*},
+    port::repo::distributed::{group_round::decode_strict_license, inbox::*, session::*},
     types::dist_runtime::RuntimeError,
 };
 
@@ -40,8 +40,18 @@ impl WorkerProcessor {
             }
             return Ok(());
         }
-        self.refresh_control(slot).await?;
+        if let Err(error) = self.refresh_control(slot).await {
+            if error.code == "control_head_conflict" && self.reload_strict_head(slot).await? {
+                return Ok(());
+            }
+            return Err(error);
+        }
         self.reconcile_control_fence(slot)?;
+        // The strict-group publication follower lane (plan T7 slice 2):
+        // deliver sealed feed obligations in stable ID order — never a
+        // synchronous precondition of any transition below — and let its
+        // bounded housekeeping commit retire proven obligations.
+        self.sweep_feed_publications(slot).await?;
         if slot.risk_outcome.is_some() {
             self.finish_risk(slot).await?;
             return Ok(());
@@ -194,6 +204,9 @@ impl WorkerProcessor {
                 Ok(())
             }
             Err(error) if error.code == "processor_preparing" => Ok(()),
+            // Closing strict authority can replace the slot with a fresh acquisition.
+            // Its runtime phase is Recovering, not the Running phase we entered.
+            Ok(None) if slot.recovering && !slot.round_started => Ok(()),
             result => {
                 self.runtime.round_aborted(&owner)?;
                 slot.round_started = false;
@@ -224,10 +237,78 @@ impl WorkerProcessor {
                 self.runtime.forget_fenced(&request.owner).await?;
                 Err(err("commit_fenced"))
             }
-            CommitOutcome::CommitSeqConflict => Err(err("commit_head_conflict")),
+            CommitOutcome::CommitSeqConflict => {
+                if self.reload_strict_head(slot).await? {
+                    Ok(())
+                } else {
+                    Err(err("commit_head_conflict"))
+                }
+            }
             CommitOutcome::ContentConflict => Err(err("commit_content_conflict")),
         }
     }
+    /// Strict admission is another fenced checkpoint writer under this
+    /// same owner. A resident slot can adopt its durable successor rather
+    /// than endlessly retrying against the old Done head. In particular, an
+    /// uncertain local CAS is only discarded when the next position is
+    /// provably occupied by a different commit.
+    async fn reload_strict_head(&self, slot: &mut Slot) -> Result<bool, RuntimeError> {
+        let prior = &slot.acquired.envelope.checkpoint;
+        let Some(license) = prior.runner_state.as_ref()
+            .and_then(|runner| decode_strict_license(&runner.state.value))
+        else {
+            return Ok(false);
+        };
+        let owner = slot.acquired.ownership.clone();
+        let envelope = self.io(self.runtime.sessions.load(&owner.sid)).await?
+            .ok_or_else(|| err("session_envelope_missing"))?;
+        if envelope.owner != owner.owner {
+            self.runtime.forget_fenced(&owner).await?;
+            return Err(err("commit_fenced"));
+        }
+        if envelope.checkpoint.commit_seq.0 <= prior.commit_seq.0 {
+            return Ok(false);
+        }
+        let next = envelope.checkpoint.runner_state.as_ref()
+            .and_then(|runner| decode_strict_license(&runner.state.value));
+        if next.is_none_or(|next| {
+            next.sid != owner.sid || next.group != license.group || next.scope != license.scope
+                || next.generation < license.generation
+        }) {
+            return Ok(false);
+        }
+        let batch = envelope.checkpoint.outbox.as_ref()
+            .ok_or_else(|| err("checkpoint_proof_missing"))?;
+        if let Some(pending) = &slot.pending
+            && (batch.source_commit != pending.candidate.commit_seq || batch.commit_id == pending.commit_id)
+        {
+            return Ok(false);
+        }
+        let Some(receipt) = (match self.io(self.runtime.sessions.resolve_commit(
+            &owner, &batch.commit_id, &batch.content_digest,
+        )).await? {
+            CommitResolution::Committed(receipt) => Some(receipt),
+            CommitResolution::Fenced => {
+                self.runtime.forget_fenced(&owner).await?;
+                return Err(err("commit_fenced"));
+            }
+            _ => None,
+        }) else {
+            // The captured head may have advanced again during resolution.
+            return Ok(false);
+        };
+        if receipt.sid != owner.sid || receipt.owner != owner.owner {
+            return Err(err("checkpoint_receipt_mismatch"));
+        }
+        verify_checkpoint(&envelope.checkpoint, &receipt).map_err(store_error)?;
+        let acquired = AcquiredSession { ownership: owner.clone(), envelope, last_commit: Some(receipt) };
+        self.runtime.refresh_local_reacquire(&owner, acquired.clone())?;
+        // Recovery re-watches from the sealed consumed cursor, not from an
+        // uncommitted local batch this replacement may be discarding.
+        *slot = Slot::new(acquired);
+        Ok(true)
+    }
+
     fn confirm(
         &self,
         slot: &mut Slot,
@@ -306,7 +387,19 @@ impl WorkerProcessor {
             .as_ref()
             .ok_or_else(|| err("settlement_missing"))?
             .clone();
-        let release = slot.input.is_none()
+        // A Done-phase strict task still owns an open terminal-authority
+        // window (plan T7 slice 2): the spine must close it before the
+        // session may yield residency. Parked windows would strand the
+        // round's own commit.
+        let done_window_open = slot
+            .acquired
+            .envelope
+            .checkpoint
+            .tasks
+            .iter()
+            .any(|task| matches!(task.phase, TaskPhase::Done));
+        let release = !done_window_open
+            && slot.input.is_none()
             && (slot.commits_since_yield >= self.config.max_commits_per_turn
                 || request.next_check.is_none_or(|at| at > (self.ports.now)()));
         match self.io(self.runtime.scheduling.settle(request)).await? {

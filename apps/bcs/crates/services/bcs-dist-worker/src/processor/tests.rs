@@ -155,6 +155,7 @@ fn sealed_commit_digest_covers_checkpoint_and_rejects_corrupted_late_effects() {
         deadline_history: Default::default(),
         view_drafts: BTreeMap::new(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: Some(CommittedBatch {
             created_at: None,
             commit_id: CommitId(String::new()),
@@ -243,6 +244,7 @@ fn initial() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: BTreeMap::new(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     }
 }

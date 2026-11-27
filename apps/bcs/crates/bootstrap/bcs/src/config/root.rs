@@ -382,6 +382,13 @@ pub struct BcsConfig {
     #[serde(default)]
     pub uplink: bcs_config_api::UplinkConfig,
 
+    /// Opt-in `[group_a2a]` seams of the FSM-Group-as-A2A-Agent surface
+    /// (plan T9). Default disabled: nothing mounts, no existing route
+    /// changes. Enabling without the persistent coordination provider is a
+    /// startup failure, never a runtime degradation.
+    #[serde(default)]
+    pub group_a2a: super::group_a2a::GroupA2aConfig,
+
     /// Switch for Provider 2.0 SSE gray-list mode.
     /// When false, Provider downlink rolls out to SSE for all Provider 2.0 bots.
     #[serde(default = "default_provider_stream_gray_enabled")]
@@ -542,6 +549,7 @@ impl Default for BcsConfig {
             session_files: SessionFilesConfig::default(),
             allowed_switch_provider_ids: Vec::new(),
             uplink: Default::default(),
+            group_a2a: Default::default(),
             provider_stream_gray_enabled: default_provider_stream_gray_enabled(),
             provider_stream_gray_created_by: Vec::new(),
         }

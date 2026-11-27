@@ -1,5 +1,6 @@
 use super::ContractResult;
 use bcs_dist_model::*;
+use bcs_domain::collaboration::StateMachineDefinition;
 use bcs_service_api::{
     application::{dist_gateway::*, dist_runtime::*},
     core::{dist_connector::*, dist_gateway::*, dist_runner::*},
@@ -18,6 +19,21 @@ pub fn dist_runner_core_service_contract_tests(
     assert_eq!(
         runner.reduce(context, state, inputs)?,
         runner.reduce(context, state, inputs)?
+    );
+    Ok(())
+}
+
+/// Pure publication gate: identical inputs reproduce identical validation
+/// outcomes, so a rejection is deterministic and never time- or IO-dependent.
+pub fn fsm_validator_core_service_contract_tests(
+    validator: &dyn FsmValidatorCoreService,
+    frozen: &SessionSpec,
+    workflow: &StateMachineDefinition,
+    supported: &FsmCapabilities,
+) -> ContractResult {
+    assert_eq!(
+        validator.validate(frozen, workflow, supported),
+        validator.validate(frozen, workflow, supported)
     );
     Ok(())
 }
@@ -56,17 +72,25 @@ pub async fn dist_gateway_service_contract_tests(
     let receipt = gateway.submit(caller, request.clone()).await?;
     assert_eq!(gateway.submit(caller, request).await?, receipt);
     assert_eq!(
-        gateway.get_task(caller, &group, &receipt.tid).await?.tid,
+        gateway
+            .get_task(caller, &group, &receipt.tid, CreationSource::Rpc)
+            .await?
+            .tid,
         receipt.tid
     );
     assert!(matches!(
-        gateway.get_task(unauthorized, &group, &receipt.tid).await,
+        gateway.get_task(unauthorized, &group, &receipt.tid, CreationSource::Rpc).await,
         Err(GatewayError::AccessDenied | GatewayError::NotFound)
     ));
     // A task is reached only through the group it was created for.
     let another = GroupId(format!("{}-another", group.0));
     assert_eq!(
-        gateway.get_task(caller, &another, &receipt.tid).await,
+        gateway.get_task(caller, &another, &receipt.tid, CreationSource::Rpc).await,
+        Err(GatewayError::NotFound)
+    );
+    // A task of one source is never reached through another entrance.
+    assert_eq!(
+        gateway.get_task(caller, &group, &receipt.tid, CreationSource::GroupA2a).await,
         Err(GatewayError::NotFound)
     );
     Ok(())
@@ -110,6 +134,20 @@ pub async fn dist_runtime_control_port_contract_tests(
 }
 
 /// Fixture adapter scripts definite pre-send failure, ambiguous send, cancel timeout.
+/// Every operation goes through its `CallAuthority`: the harness pins the
+/// operation vocabulary, so an adapter cannot drop or fake the call
+/// identity it was asked under.
+pub fn contract_authority(target: &AgentBinding) -> CallAuthority {
+    CallAuthority {
+        round: "contract-round".into(),
+        node: NodeId("contract-node".into()),
+        attempt: 1,
+        binding: target.clone(),
+        operation: CallOperation::Start,
+        remote_ref: None,
+    }
+}
+
 pub async fn dist_agent_client_port_contract_tests(
     client: &dyn DistAgentClientPort,
     target: &AgentBinding,
@@ -118,16 +156,20 @@ pub async fn dist_agent_client_port_contract_tests(
     remote: &RemoteTaskRef,
     cancellation_id: RequestId,
 ) -> ContractResult {
+    let start = contract_authority(target);
     assert!(matches!(
-        client.start(target, not_sent).await,
+        client.start(&start, not_sent).await,
         SendOutcome::NotSent { .. }
     ));
     assert!(matches!(
-        client.start(target, ambiguous).await,
+        client.start(&start, ambiguous).await,
         SendOutcome::OutcomeUnknown { .. }
     ));
+    let mut cancel = start.clone();
+    cancel.operation = CallOperation::Cancel;
+    cancel.remote_ref = Some(remote.clone());
     assert!(matches!(
-        client.cancel(target, remote, cancellation_id).await,
+        client.cancel(&cancel, remote, cancellation_id).await,
         CancelOutcome::OutcomeUnknown { .. }
     ));
     Ok(())

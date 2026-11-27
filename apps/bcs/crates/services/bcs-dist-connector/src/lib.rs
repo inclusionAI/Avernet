@@ -55,6 +55,7 @@
 mod call;
 mod control;
 mod report;
+mod node_history;
 mod send;
 
 pub mod config;

@@ -6,7 +6,7 @@ use axum::routing::post;
 use bcs_a2a_http::dist_agent::{A2aDistAgentClient, DistAgentResolver, ResolvedAgent};
 use bcs_dist_model::*;
 use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::port::dist_agent::StableSendRequest;
+use bcs_service_api::port::dist_agent::{CallAuthority, StableSendRequest};
 use bcs_service_api::types::a2a::A2aUpdateMode;
 use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface};
 use bcs_test_support::contract::distributed::services::dist_agent_client_port_contract_tests;
@@ -21,7 +21,7 @@ struct FailsOnce {
 
 #[async_trait]
 impl DistAgentResolver for FailsOnce {
-    async fn resolve(&self, _: &AgentBinding) -> Result<ResolvedAgent, String> {
+    async fn resolve(&self, _: &CallAuthority) -> Result<ResolvedAgent, String> {
         if !self.failed.swap(true, Ordering::SeqCst) {
             return Err("target_unresolved".into());
         }
@@ -56,6 +56,9 @@ async fn conformance_a2a_dist_agent_client() {
     };
     let request = |id: &str| StableSendRequest {
         request_id: RequestId(id.into()),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        frozen_history: None,
         context_id: None,
         payload: Payload::Inline(serde_json::json!({"parts": [{"text": "hi"}]})),
     };

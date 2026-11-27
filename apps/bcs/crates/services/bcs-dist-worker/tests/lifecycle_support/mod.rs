@@ -64,6 +64,8 @@ pub fn session() -> SessionSpec {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     }];
     s
@@ -92,6 +94,7 @@ impl DistRunnerCoreService for Runner {
                     let p = &c.spec.participants[0];
                     actions.push(ActionIntent::StartDispatch(DispatchSpec {
                         schema_version: 1,
+                        node_history: None,
                         sid: c.spec.sid.clone(),
                         tid: tid.clone(),
                         did: dispatch_id(tid),
@@ -318,6 +321,8 @@ pub fn processor_with_blob(
             blobs,
             results,
             dispatch,
+            rounds: None,
+            archives: None,
             now: {
                 let c: Arc<ClockAt> = f.clock.clone();
                 Arc::new(move || c.now())

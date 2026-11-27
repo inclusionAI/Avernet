@@ -76,13 +76,13 @@ async fn conformance_held_input_survives_dequeue() {
     f.board.push_input(input.clone()).await.unwrap();
     // Held is the real private holder implementation returned by claim.
     let mut held = f.claim().await;
-    held.begin_send(start()).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
     held.record_acceptance(acceptance(start())).await.unwrap();
     let operation = SendOperation::Input {
         seq: InputSeq(1),
         request_id: RequestId("input-one".into()),
     };
-    held.begin_send(operation.clone()).await.unwrap();
+    held.begin_send(operation.clone(), proof(&operation)).await.unwrap();
     held_dispatch_port_contract_tests(held.as_mut(), &f.board, input, acceptance(operation))
         .await
         .unwrap();

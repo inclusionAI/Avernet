@@ -126,9 +126,11 @@ impl DispatchControlPort for StoreDispatch {
         Ok(self.document(did).await?.map(|mut d| {
             d.value.discard_confirmed();
             DispatchRecord {
-            view: d.value.view,
+            view: d.value.view.clone(),
             revision: Revision(d.version.0.to_string()),
             terminal_evidence: d.value.connector.and_then(|c| c.finish_evidence),
+            verification: d.value.view.execution.verification.clone(),
+            quarantined: d.value.view.execution.quarantined.clone(),
         }
         }))
     }
@@ -177,6 +179,39 @@ impl DispatchControlPort for StoreDispatch {
         } else {
             RecheckOutcome::Applied
         })
+    }
+
+    /// Registers a due verification entry in the queue index (plan T7) —
+    /// the same key the Connector's board writes, over the same shared
+    /// index plugin and layout. Idempotent upsert; the index may list too
+    /// much, never too little.
+    async fn index_verification(
+        &self,
+        did: &Did,
+        due: TimestampMillis,
+    ) -> Result<(), StoreError> {
+        self.layout.disp(did)?;
+        if due.0 < 0 {
+            return Err(invalid("verification_due"));
+        }
+        let key = self.layout.verify_queue();
+        let entry = ZSetEntry {
+            member: did.0.clone(),
+            score: due.0 as f64,
+        };
+        self.io(
+            async {
+                self.stores
+                    .index
+                    .add(&key, &[entry], ZAddMode::Upsert)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| crate::error::from_write(&e, &key))
+            },
+            true,
+            &key,
+        )
+        .await
     }
 }
 impl StoreDispatch {

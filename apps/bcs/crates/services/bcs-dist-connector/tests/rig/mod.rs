@@ -62,6 +62,9 @@ pub struct ScriptedAgent {
     pub by_request: Mutex<VecDeque<QueryOutcome>>,
     pub cancels: Mutex<VecDeque<CancelOutcome>>,
     pub subscriptions: Mutex<VecDeque<Result<mpsc::UnboundedReceiver<Result<RemoteEvent, AgentReadError>>, AgentReadError>>>,
+    /// Remote tasks the `n`-th accepted send returns, in order; absent
+    /// entries answer `remote()`. Two nodes of one bot never share one.
+    pub remotes: Mutex<VecDeque<RemoteTaskRef>>,
     /// When set, the next `start` waits for it before answering.
     start_gate: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
@@ -87,6 +90,10 @@ impl ScriptedAgent {
     }
     pub fn on_start(&self, reply: Reply) {
         self.starts.lock().unwrap().push_back(reply);
+    }
+    /// The next accepted send hands out this remote task.
+    pub fn on_remote(&self, remote: RemoteTaskRef) {
+        self.remotes.lock().unwrap().push_back(remote);
     }
     pub fn on_input(&self, reply: Reply) {
         self.inputs.lock().unwrap().push_back(reply);
@@ -132,14 +139,15 @@ impl ScriptedAgent {
         };
         self.calls.lock().unwrap().push(format!("{what} {durable}"));
     }
-    fn outcome(reply: Option<Reply>) -> SendOutcome {
+    fn outcome(&self, reply: Option<Reply>) -> SendOutcome {
+        let remote = self.remotes.lock().unwrap().pop_front().unwrap_or_else(remote);
         match reply {
             Some(Reply::Stream(rx)) => SendOutcome::Accepted {
-                remote: remote(),
+                remote,
                 events: Some(stream_of(rx)),
             },
             Some(Reply::Accepted) => SendOutcome::Accepted {
-                remote: remote(),
+                remote,
                 events: None,
             },
             Some(Reply::Completed(result)) => SendOutcome::Completed { result },
@@ -164,32 +172,44 @@ fn payload_text(payload: &Payload) -> String {
 
 #[async_trait]
 impl DistAgentClientPort for ScriptedAgent {
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
-        self.log(format!("start {} agent={} payload={}", request.request_id.0, target.agent.0, payload_text(&request.payload)))
-            .await;
+    async fn start(&self, authority: &CallAuthority, request: StableSendRequest) -> SendOutcome {
+        self.log(format!(
+            "start {} agent={} context={:?} payload={} node={} attempt={} op={:?}",
+            request.request_id.0,
+            authority.binding.agent.0,
+            request.context_id,
+            payload_text(&request.payload),
+            request.node.0,
+            request.attempt,
+            authority.operation
+        ))
+        .await;
         let gate = self.start_gate.lock().unwrap().take();
         if let Some(gate) = gate {
             let _ = gate.await;
         }
         let reply = self.starts.lock().unwrap().pop_front();
-        Self::outcome(reply)
+        self.outcome(reply)
     }
-    async fn send_input(&self, _: &AgentBinding, remote: &RemoteTaskRef, request: StableSendRequest) -> SendOutcome {
+    async fn send_input(&self, authority: &CallAuthority, remote: &RemoteTaskRef, request: StableSendRequest) -> SendOutcome {
         self.log(format!(
-            "input {} task={} context={:?} payload={}",
+            "input {} task={} context={:?} payload={} node={} attempt={} op={:?}",
             request.request_id.0,
             remote.task_id,
             request.context_id,
-            payload_text(&request.payload)
+            payload_text(&request.payload),
+            request.node.0,
+            request.attempt,
+            authority.operation
         ))
         .await;
         let reply = self.inputs.lock().unwrap().pop_front();
-        Self::outcome(reply)
+        self.outcome(reply)
     }
-    async fn query(&self, _: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
+    async fn query(&self, authority: &CallAuthority, query: RemoteQuery) -> QueryOutcome {
         let (queue, what) = match &query {
             RemoteQuery::ByRequest(id) => (&self.by_request, format!("query_request {}", id.0)),
-            RemoteQuery::ByTask(remote) => (&self.tasks, format!("query_task {}", remote.task_id)),
+            RemoteQuery::ByTask(remote) => (&self.tasks, format!("query_task {} op={:?}", remote.task_id, authority.operation)),
         };
         self.log(what).await;
         let mut queue = queue.lock().unwrap();
@@ -201,19 +221,19 @@ impl DistAgentClientPort for ScriptedAgent {
     }
     async fn subscribe(
         &self,
-        _: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
-        self.log(format!("subscribe {} after={}", remote.task_id, after.is_some())).await;
+        self.log(format!("subscribe {} after={} op={:?}", remote.task_id, after.is_some(), authority.operation)).await;
         match self.subscriptions.lock().unwrap().pop_front() {
             Some(Ok(rx)) => Ok(stream_of(rx)),
             Some(Err(error)) => Err(error),
             None => Err(AgentReadError { code: "unscripted".into() }),
         }
     }
-    async fn cancel(&self, _: &AgentBinding, remote: &RemoteTaskRef, request_id: RequestId) -> CancelOutcome {
-        self.log(format!("cancel {} task={}", request_id.0, remote.task_id)).await;
+    async fn cancel(&self, authority: &CallAuthority, remote: &RemoteTaskRef, request_id: RequestId) -> CancelOutcome {
+        self.log(format!("cancel {} task={} op={:?}", request_id.0, remote.task_id, authority.operation)).await;
         self.cancels
             .lock()
             .unwrap()
@@ -238,7 +258,10 @@ pub fn delta(text: &str) -> Result<RemoteEvent, AgentReadError> {
 }
 
 pub fn final_event() -> Result<RemoteEvent, AgentReadError> {
-    event(AgentEventKind::Final, json!({"state": "completed"}))
+    event(
+        AgentEventKind::Final,
+        json!({"state": "completed", "artifacts": [{"artifactId": "a-1", "parts": [{"text": "done"}]}]}),
+    )
 }
 
 pub fn input_required() -> Result<RemoteEvent, AgentReadError> {
@@ -313,7 +336,14 @@ impl Rig {
             )
             .await
             .unwrap();
-        let mut config = ConnectorConfig::new(instance("conn-03"), pool());
+        let mut config = {
+            let mut config = ConnectorConfig::new(instance("conn-03"), pool());
+            // Deterministic deadline and dedupe-window decisions.
+            config.clock = Arc::new(FixedWallClock);
+            config
+        };
+        // The rig's inbox clock is fixed; keep the holder clock fixed too.
+
         config.poll_interval = Duration::from_millis(25);
         config.receive_timeout = Duration::from_millis(30);
         config.backoff_min = Duration::from_millis(5);
@@ -361,6 +391,7 @@ impl Rig {
             agent: self.agent.clone(),
             membership: self.membership.clone(),
             blobs: self.blobs.clone(),
+            node_history: None,
             rules: Arc::new(DistConnectorRules),
         }
     }
@@ -457,6 +488,15 @@ impl Running {
     }
     pub async fn pending_effects(&self) -> u64 {
         self.engine.snapshot().await.unwrap().pending_effects
+    }
+}
+
+/// The rig's wall clock: fixed like the inbox producer's (`FixedClock` is
+/// the store fixture's inbox clock already re-exported here).
+struct FixedWallClock;
+impl bcs_dist_connector::config::WallClock for FixedWallClock {
+    fn now(&self) -> i64 {
+        NOW
     }
 }
 

@@ -23,11 +23,33 @@ fn invalid(code: &str) -> HolderError {
 }
 
 #[tokio::test]
+async fn a_send_proof_that_does_not_match_the_intent_is_refused() {
+    // Plan T6: the durable proof is written with the intent it belongs to —
+    // an input proof (or a request id that says something else) must never
+    // be recorded as the proof of a start, nor the other way around.
+    let (store, _worker, mut held) = held().await;
+    assert_eq!(
+        held.begin_send(start_op(), proof(&input_op(1))).await,
+        Err(invalid("send_proof_mismatch")),
+        "an input proof never vouches for a start"
+    );
+    assert_eq!(held.begin_send(input_op(1), proof(&start_op())).await, Err(invalid("send_proof_mismatch")));
+    // Nothing was written: the document is untouched and the start intent
+    // alone still records nothing.
+    let (_doc, version) = stored(&store).await;
+    assert_eq!(version, 1_000_000_000, "a refused proof writes nothing");
+    assert_eq!(held.view().execution.send_proof, None);
+    // The matching proof still writes normally.
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
+    assert!(held.view().execution.send_proof.is_some());
+}
+
+#[tokio::test]
 async fn one_call_from_send_to_end() {
     let (store, _worker, mut held) = held().await;
     let base = 1_000_000_000;
 
-    let permit = held.begin_send(start_op()).await.unwrap();
+    let permit = held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     assert_eq!(permit.operation, start_op());
     assert_eq!(&permit.holder, held.holder());
     assert_eq!(permit.did, did());
@@ -35,7 +57,7 @@ async fn one_call_from_send_to_end() {
     assert_eq!((doc["execution"]["phase"].as_str(), version), (Some("sending"), base + 1));
 
     // Send intent is already durable: a repeat is a fenced read, no write.
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     assert_eq!(stored(&store).await.1, base + 1);
 
     assert_eq!(held.record_acceptance(accepted(start_op())).await.unwrap(), None);
@@ -81,7 +103,7 @@ async fn one_call_from_send_to_end() {
 async fn transitions_out_of_order_are_refused_without_a_write() {
     let (store, worker, mut held) = held().await;
     assert_eq!(held.record_acceptance(accepted(start_op())).await, Err(invalid("acceptance_not_allowed_in_phase")));
-    assert_eq!(held.begin_send(input_op(1)).await, Err(invalid("input_not_allowed_in_phase")));
+    assert_eq!(held.begin_send(input_op(1), proof(&input_op(1))).await, Err(invalid("input_not_allowed_in_phase")));
     assert_eq!(held.record_acceptance(accepted(input_op(1))).await, Err(invalid("acceptance_of_input")));
     assert_eq!(
         held.confirm_input(InputSeq(1), accepted(start_op())).await,
@@ -93,16 +115,16 @@ async fn transitions_out_of_order_are_refused_without_a_write() {
     );
     assert_eq!(stored(&store).await.1, 1_000_000_000);
 
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     held.record_acceptance(accepted(start_op())).await.unwrap();
-    assert_eq!(held.begin_send(start_op()).await, Err(invalid("start_not_allowed_in_phase")));
+    assert_eq!(held.begin_send(start_op(), proof(&start_op())).await, Err(invalid("start_not_allowed_in_phase")));
     let mut elsewhere = accepted(start_op());
     elsewhere.remote.task_id = "rt-other".into();
     assert_eq!(held.record_acceptance(elsewhere).await, Err(invalid("remote_task_mismatch")));
-    assert_eq!(held.begin_send(input_op(1)).await, Err(invalid("input_not_pending")));
+    assert_eq!(held.begin_send(input_op(1), proof(&input_op(1))).await, Err(invalid("input_not_pending")));
     worker.push(pending(1)).await;
     worker.push(pending(2)).await;
-    assert_eq!(held.begin_send(input_op(2)).await, Err(invalid("input_out_of_order")));
+    assert_eq!(held.begin_send(input_op(2), proof(&input_op(2))).await, Err(invalid("input_out_of_order")));
     assert_eq!(
         held.confirm_input(InputSeq(2), accepted(input_op(2))).await,
         Err(invalid("input_gap")),
@@ -113,17 +135,17 @@ async fn transitions_out_of_order_are_refused_without_a_write() {
 #[tokio::test]
 async fn inputs_are_confirmed_as_a_gap_free_prefix() {
     let (store, worker, mut held) = held().await;
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     held.record_acceptance(accepted(start_op())).await.unwrap();
     worker.push(pending(1)).await;
     worker.push(pending(2)).await;
     let view = held.refresh().await.unwrap();
     assert_eq!(view.control.pending_input.len(), 2);
 
-    held.begin_send(input_op(1)).await.unwrap();
+    held.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
     let (doc, before) = stored(&store).await;
     assert_eq!(doc["connector"]["input_sending"], 1);
-    held.begin_send(input_op(1)).await.unwrap();
+    held.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
     assert_eq!(stored(&store).await.1, before, "repeat needs no write");
 
     assert_eq!(
@@ -143,7 +165,7 @@ async fn inputs_are_confirmed_as_a_gap_free_prefix() {
         IdempotentWrite::AlreadyApplied
     );
 
-    held.begin_send(input_op(2)).await.unwrap();
+    held.begin_send(input_op(2), proof(&input_op(2))).await.unwrap();
     held.confirm_input(InputSeq(2), accepted(input_op(2))).await.unwrap();
     let (doc, _) = stored(&store).await;
     assert_eq!(doc["execution"]["confirmed_input_through"], 2);
@@ -154,7 +176,7 @@ async fn inputs_are_confirmed_as_a_gap_free_prefix() {
 #[tokio::test]
 async fn acceptance_returns_a_cancel_written_meanwhile() {
     let (store, worker, mut held) = held().await;
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     // The Worker writes the cancel while the call is on the wire.
     assert!(worker.cancel().await);
     assert_eq!(stored(&store).await.1, 1_000_000_002);
@@ -225,7 +247,7 @@ async fn refresh_shows_worker_writes_and_fences() {
 async fn a_rejected_write_is_redone_from_a_fresh_read() {
     let (store, _worker, mut held) = held().await;
     store.reject_json(2);
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     let (doc, version) = stored(&store).await;
     assert_eq!((doc["execution"]["phase"].as_str(), version), (Some("sending"), 1_000_000_001));
     let calls = store.calls();
@@ -246,7 +268,7 @@ async fn every_write_survives_a_lost_response() {
     let (store, worker, mut held) = held().await;
 
     store.lose_write(1);
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     assert_eq!(stored(&store).await.1, 1_000_000_001, "applied once, not twice");
 
     store.lose_write(1);
@@ -255,7 +277,7 @@ async fn every_write_survives_a_lost_response() {
 
     worker.push(pending(1)).await; // +1
     store.lose_write(1);
-    held.begin_send(input_op(1)).await.unwrap();
+    held.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
     assert_eq!(stored(&store).await.1, 1_000_000_004);
 
     store.lose_write(1);
@@ -291,9 +313,9 @@ async fn every_write_reports_a_definite_failure() {
     };
 
     store.fail_write(1);
-    failed(held.begin_send(start_op()).await.map(|_| ()));
+    failed(held.begin_send(start_op(), proof(&start_op())).await.map(|_| ()));
     assert_eq!(stored(&store).await.1, 1_000_000_000);
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
 
     store.fail_write(1);
     failed(held.record_acceptance(accepted(start_op())).await.map(|_| ()));
@@ -301,8 +323,8 @@ async fn every_write_reports_a_definite_failure() {
 
     worker.push(pending(1)).await;
     store.fail_write(1);
-    failed(held.begin_send(input_op(1)).await.map(|_| ()));
-    held.begin_send(input_op(1)).await.unwrap();
+    failed(held.begin_send(input_op(1), proof(&input_op(1))).await.map(|_| ()));
+    held.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
 
     store.fail_write(1);
     failed(held.confirm_input(InputSeq(1), accepted(input_op(1))).await.map(|_| ()));
@@ -352,13 +374,13 @@ async fn an_input_intent_of_a_former_holder_is_reported_as_maybe_sent() {
     use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
     use bcs_service_api::port::repo::distributed::ownership::Liveness;
     let (store, worker, mut first) = held().await;
-    first.begin_send(start_op()).await.unwrap();
+    first.begin_send(start_op(), proof(&start_op())).await.unwrap();
     first.record_acceptance(accepted(start_op())).await.unwrap();
     worker.push(pending(1)).await;
     worker.push(pending(2)).await;
-    first.begin_send(input_op(1)).await.unwrap();
+    first.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
     // The same handle may ask again: its own intent.
-    first.begin_send(input_op(1)).await.unwrap();
+    first.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
 
     // The holder dies after recording intent; another Connector takes over.
     let q = queue_with(&store, Arc::new(FixedLiveness(Liveness::Dead)), config(1));
@@ -366,11 +388,11 @@ async fn an_input_intent_of_a_former_holder_is_reported_as_maybe_sent() {
         panic!("no takeover");
     };
     let before = stored(&store).await.1;
-    assert_eq!(second.begin_send(input_op(1)).await, Err(invalid(INPUT_MAYBE_SENT)));
+    assert_eq!(second.begin_send(input_op(1), proof(&input_op(1))).await, Err(invalid(INPUT_MAYBE_SENT)));
     assert_eq!(stored(&store).await.1, before, "no write");
     // Once it is confirmed, the next input is a fresh send for the new holder.
     second.confirm_input(InputSeq(1), accepted(input_op(1))).await.unwrap();
-    second.begin_send(input_op(2)).await.unwrap();
+    second.begin_send(input_op(2), proof(&input_op(2))).await.unwrap();
     assert_eq!(stored(&store).await.0["connector"]["input_sending"], 2);
 }
 
@@ -378,7 +400,7 @@ async fn an_input_intent_of_a_former_holder_is_reported_as_maybe_sent() {
 async fn a_write_that_did_not_land_is_made_again() {
     let (store, _worker, mut held) = held().await;
     store.drop_write(1); // not applied, outcome unknown
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     let (doc, version) = stored(&store).await;
     assert_eq!((doc["execution"]["phase"].as_str(), version), (Some("sending"), 1_000_000_001));
     assert_eq!(store.count("json.mutate"), 2);
@@ -413,7 +435,7 @@ async fn a_failed_read_after_an_unknown_write_stays_unknown() {
 #[tokio::test]
 async fn an_input_the_worker_never_queued_cannot_be_confirmed() {
     let (store, _worker, mut held) = held().await;
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     held.record_acceptance(accepted(start_op())).await.unwrap();
     assert_eq!(
         held.confirm_input(InputSeq(1), accepted(input_op(1))).await,

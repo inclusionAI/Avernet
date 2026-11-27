@@ -48,6 +48,17 @@ impl WorkerProcessor {
         event: &AgentEvent,
     ) -> Result<Checkpoint, RuntimeError> {
         let mut candidate = next_checkpoint(base, slot.completed.as_ref()).map_err(store_error)?;
+        // Strict FSM-group rounds discharge ephemeral thinking here (plan T7
+        // slice 2, fix round I4): the traffic is display-only, outside the
+        // paired publication contract and the frozen public frame set, and
+        // installing it as a blocking outbox append would re-introduce the
+        // feed wedge this slice removed — a wedged feed must never stall a
+        // strict round through its display traffic. The consumed event frame
+        // never exists; the candidate is the same no-op transition the
+        // thinking budget already produces below.
+        if task_license(base, &metadata.tid).is_some() {
+            return Ok(candidate);
+        }
         if !self
             .thinking_budget
             .lock()

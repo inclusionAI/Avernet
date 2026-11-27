@@ -2,7 +2,7 @@
 
 use bcs_dist_model::InputId;
 use bcs_service_api::core::dist_gateway::DistGatewayCoreError;
-use bcs_service_api::port::repo::distributed::common::StoreError;
+use bcs_service_api::port::repo::distributed::{common::StoreError, inbox::STRICT_CANCEL_NOT_ACTIVE};
 
 /// Error of a read: nothing changed, so it is never "outcome unknown".
 pub(crate) fn read_error(error: StoreError) -> DistGatewayCoreError {
@@ -15,6 +15,9 @@ pub(crate) fn admit_error(error: StoreError, input_id: &InputId) -> DistGatewayC
         StoreError::OutcomeUnknown { .. } => DistGatewayCoreError::OutcomeUnknown {
             input_id: input_id.clone(),
         },
+        StoreError::NotApplied { code } if code == STRICT_CANCEL_NOT_ACTIVE => {
+            DistGatewayCoreError::InvalidTransition
+        }
         other => DistGatewayCoreError::Unavailable { code: code_of(other) },
     }
 }

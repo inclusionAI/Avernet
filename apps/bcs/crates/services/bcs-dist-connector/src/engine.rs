@@ -42,7 +42,7 @@ use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::dispatch::{
     ClaimOutcome, CommandDelivery, CommandFeedPort, DispatchClaimRequest, HeldDispatchPort,
-    ResumeOwnedDispatch,
+    ResumeOwnedDispatch, VerificationClaimOutcome, VerificationClaimRequest,
 };
 use bcs_service_api::port::repo::distributed::ownership::{MembershipLease, Renewal, RuntimeRole};
 use bcs_service_api::types::dist_runtime::{DrainOutcome, RuntimeError, RuntimeSnapshot};
@@ -79,6 +79,10 @@ struct Inner {
     /// may belong to a finished task until the next `reap` removes it, so
     /// "live" always also checks `task.is_finished()`.
     actors: Mutex<HashMap<Did, Actor>>,
+    /// Verifier actors of handed-off calls, keyed by did (plan T7): kept
+    /// on their own concurrency line — a verifier never occupies a normal
+    /// claim slot and a normal claim never displaces a verifier.
+    verifiers: Mutex<HashMap<Did, Actor>>,
     /// This process's membership registration. `Some` once `register`
     /// succeeded and never cleared; `None` when it never registered (stub
     /// membership, or a drain that came before the registration).
@@ -113,6 +117,9 @@ struct Inner {
     /// second, concurrent drain must not retire while the first is still
     /// waiting for the actors it aborted: those may still act until then.
     stopping: tokio::sync::Mutex<()>,
+    /// Wakes the low-frequency verification lane early (a late hint for a
+    /// verification-mode dispatch arrived).
+    verify_wake: Notify,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -140,11 +147,19 @@ impl ConnectorEngine {
         if config.max_active_calls == 0 || config.poll_interval.is_zero() || config.backoff_min.is_zero() {
             return Err(failed("connector_config_invalid"));
         }
+        // The verification lane may be disabled (0) but never misshapen.
+        if (config.max_verifications > 0 && config.verification_interval.is_zero())
+            || config.verification_backoff_min.is_zero()
+            || config.verification_backoff_max < config.verification_backoff_min
+        {
+            return Err(failed("connector_verification_config_invalid"));
+        }
         Ok(Self {
             inner: Arc::new(Inner {
                 config: Arc::new(config),
                 ports,
                 actors: Mutex::new(HashMap::new()),
+                verifiers: Mutex::new(HashMap::new()),
                 lease: Mutex::new(None),
                 orphans: Mutex::new(Vec::new()),
                 draining: AtomicBool::new(false),
@@ -154,6 +169,7 @@ impl ConnectorEngine {
                 wake: Notify::new(),
                 stop: Notify::new(),
                 stopping: tokio::sync::Mutex::new(()),
+                verify_wake: Notify::new(),
             }),
         })
     }
@@ -207,6 +223,7 @@ impl ConnectorEngine {
         inner.ready.store(true, Ordering::SeqCst);
         let mut renewed_at = Instant::now();
         let mut backoff = Backoff::new(&config);
+        let mut next_verify = Instant::now() + config.verification_interval;
         loop {
             if inner.draining.load(Ordering::SeqCst) {
                 return Ok(());
@@ -218,6 +235,14 @@ impl ConnectorEngine {
                 }
             }
             self.reap().await;
+            self.reap_verifiers().await;
+            // The low-frequency verification lane (plan T7): independent
+            // concurrency and capacity, and waken early by a hint that the
+            // claim routed because the dispatch is in verification mode.
+            if Instant::now() >= next_verify {
+                self.verify_pass().await;
+                next_verify = Instant::now() + config.verification_interval;
+            }
             let free = config.max_active_calls.saturating_sub(self.live());
             // `let … else`: when `free` is zero (or does not fit a u32) the
             // `else` block runs and must leave this pass with `continue`.
@@ -235,6 +260,11 @@ impl ConnectorEngine {
             let received = tokio::select! {
                 received = feed.receive(free, config.receive_timeout) => received,
                 _ = inner.stop.notified() => continue,
+                _ = inner.verify_wake.notified() => {
+                    self.verify_pass().await;
+                    next_verify = Instant::now() + config.verification_interval;
+                    continue;
+                }
             };
             match received {
                 Ok(deliveries) => {
@@ -297,6 +327,17 @@ impl ConnectorEngine {
                 }
             }
             Ok(ClaimOutcome::HeldByOther(_) | ClaimOutcome::Ended | ClaimOutcome::NotFound) => {}
+            // Routed to the verification queue (plan T7): a verification-mode
+            // dispatch never answers a normal hint with an execution actor.
+            // The index is repaired from the authoritative state and the
+            // verification lane wakes early.
+            Ok(ClaimOutcome::Verification) => {
+                let due = TimestampMillis(self.inner.config.clock.now());
+                if let Err(error) = self.inner.ports.queue.index_verification(&did, due).await {
+                    tracing::warn!(did = %did.0, ?error, "verification index repair failed");
+                }
+                self.inner.verify_wake.notify_one();
+            }
             Err(error) => {
                 // No decision, no ack: the hint stays pending and comes back.
                 tracing::warn!(did = %did.0, ?error, "claim failed; hint left pending");
@@ -495,6 +536,107 @@ impl ConnectorEngine {
             .count()
     }
 
+    /// Forgets finished verifier actors (plan T7). One that died with the
+    /// claim still durable is taken back by the next sweep: the re-claim
+    /// advances the verification epoch and fences the crashed handle.
+    async fn reap_verifiers(&self) {
+        lock(&self.inner.verifiers).retain(|_, actor| !actor.task.is_finished());
+    }
+
+    /// One low-frequency verification sweep (plan T7): the due page of the
+    /// verification queue index, bounded by the lane's own capacity. The
+    /// index is a repairable over-approximation: every claim re-checks the
+    /// authoritative document, so a stale entry is harmless.
+    async fn verify_pass(&self) {
+        let inner = &self.inner;
+        let config = inner.config.clone();
+        if config.max_verifications == 0 || inner.draining.load(Ordering::SeqCst) {
+            return;
+        }
+        let live = lock(&inner.verifiers)
+            .values()
+            .filter(|actor| !actor.task.is_finished())
+            .count();
+        let Some(free) = u32::try_from(config.max_verifications.saturating_sub(live))
+            .ok()
+            .and_then(NonZeroU32::new)
+        else {
+            return;
+        };
+        let now = TimestampMillis(config.clock.now());
+        let Ok(page) = inner
+            .ports
+            .queue
+            .due_verifications(
+                now,
+                bcs_service_api::port::repo::distributed::common::PageRequest {
+                    after: None,
+                    limit: free,
+                },
+            )
+            .await
+        else {
+            return;
+        };
+        for did in page.items {
+            // Never steal the epoch out from under a live local verifier.
+            if lock(&inner.verifiers)
+                .get(&did)
+                .is_some_and(|actor| !actor.task.is_finished())
+            {
+                continue;
+            }
+            let request = VerificationClaimRequest {
+                did: did.clone(),
+                me: config.me.clone(),
+                request_id: self.claim_request_id(&did),
+            };
+            match inner.ports.queue.claim_verification(request).await {
+                Ok(VerificationClaimOutcome::Acquired(held)) => self.spawn_verifier(held).await,
+                Ok(
+                    VerificationClaimOutcome::ClaimedBy(_)
+                    | VerificationClaimOutcome::Ended
+                    | VerificationClaimOutcome::NotFound,
+                ) => {}
+                Err(error) => {
+                    tracing::warn!(did = %did.0, ?error, "verification claim failed");
+                }
+            }
+        }
+    }
+
+    /// Spawns the verifier actor of one handed-off call. The restricted
+    /// handle fences every write by the verification claim epoch; the actor
+    /// ends when the call finished, the claim was superseded, or the state
+    /// became unactionable.
+    async fn spawn_verifier(&self, held: Box<dyn HeldDispatchPort>) {
+        let inner = self.inner.clone();
+        let did = held.view().spec.did.clone();
+        let holder = held.holder().clone();
+        let status = Arc::new(CallStatus::default());
+        let poke = Arc::new(Notify::new());
+        let call = Call::new(
+            inner.ports.clone(),
+            inner.config.clone(),
+            held,
+            status.clone(),
+            poke.clone(),
+        )
+        .into_verifier();
+        let task = tokio::spawn(async move {
+            call.run().await;
+        });
+        lock(&inner.verifiers).insert(
+            did,
+            Actor {
+                holder,
+                status,
+                poke,
+                task,
+            },
+        );
+    }
+
     /// Registers this instance before anything is claimed.
     ///
     /// Only the answer of the "no provider wired" stub lets the Connector run
@@ -645,6 +787,16 @@ impl DistRuntimeControlPort for ConnectorEngine {
                 (active + 1, pending + u64::from(unsettled))
             })
         };
+        // A handed-off call remains pending work: the verification lane
+        // owns it now (plan T7).
+        let (verify_active, verify_pending) = {
+            let verifiers = lock(&inner.verifiers);
+            let live = verifiers.values().filter(|actor| !actor.task.is_finished());
+            live.fold((0u64, 0u64), |(active, pending), actor| {
+                let unsettled = actor.status.pending_effect.load(Ordering::SeqCst);
+                (active + 1, pending + u64::from(unsettled))
+            })
+        };
         // A held call waiting for its resume is unsettled work too.
         let orphans = lock(&inner.orphans).len() as u64;
         let (active, pending) = (active + orphans, pending + orphans);
@@ -652,8 +804,8 @@ impl DistRuntimeControlPort for ConnectorEngine {
             instance: inner.config.me.clone(),
             ready: inner.ready.load(Ordering::SeqCst) && !inner.draining.load(Ordering::SeqCst),
             draining: inner.draining.load(Ordering::SeqCst),
-            active_work: active,
-            pending_effects: pending,
+            active_work: active + verify_active,
+            pending_effects: pending + verify_pending,
         })
     }
 

@@ -110,6 +110,7 @@ fn validate_snapshot(
         let class = match unit.class {
             OutputClass::Output => 0,
             OutputClass::Tool => 1,
+            OutputClass::FinalAnswer => 2,
             OutputClass::Thinking => return Err(invalid_snapshot("thinking_in_snapshot")),
         };
         if !identities.insert((&unit.node.0, &unit.artifact_id.0, class)) {

@@ -100,7 +100,10 @@ pub mod held;
 pub mod held_index;
 pub mod membership;
 pub mod queue;
+pub mod verify_held;
 
+mod node_history;
 mod shared;
+mod verify_index;
 
 pub use queue::{DispatchBoardConfig, StoreDispatchQueue};

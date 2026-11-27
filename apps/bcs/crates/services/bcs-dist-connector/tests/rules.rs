@@ -9,6 +9,9 @@ use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::*;
 use common::*;
 
+/// Any moment before the fixture spec's deadline.
+const NOW: i64 = 1_794_371_205_200;
+
 fn cursor(epoch: u64) -> ReportCursor {
     ReportCursor {
         holder_epoch: HolderEpoch(epoch),
@@ -196,6 +199,34 @@ fn resume_step_per_phase() {
 #[test]
 fn sent_policy_follows_declared_capabilities() {
     let rules = DistConnectorRules;
+    let view = in_phase(DispatchPhase::Sending);
+    let request_id = RequestId(format!("{}:start", view.spec.did.0));
+    let body = match &view.spec.request {
+        Payload::Inline(value) => serde_json::to_vec(value).unwrap(),
+        Payload::Ref(reference) => reference.key.as_bytes().to_vec(),
+    };
+    let mut current = rules.send_proof(
+        &view.spec,
+        ProofOperation::Start { request_id: request_id.clone() },
+        &body,
+        Digest("sha256:fixture-config".into()),
+    );
+    assert!(current.dedupe_domain.is_empty(), "intent alone is not a dedupe guarantee");
+    assert!(current.guarantee_deadline <= TimestampMillis(NOW));
+    // Inject trusted evidence to exercise the pure predicate; the current
+    // actor has no such evidence source and never uses this resend path.
+    current.dedupe_domain = "verified-test-domain".into();
+    current.guarantee_deadline = TimestampMillis(NOW + 1_000);
+    let recorded = current.clone();
+    // A recheck that upholds the proof: in window, same domain, same
+    // semantics (plan T6).
+    let upheld = DedupeRecheck {
+        recorded: Some(&recorded),
+        current: &current,
+        now: Some(TimestampMillis(NOW)),
+        resolved_domain: Some(recorded.dedupe_domain.as_str()),
+    };
+
     let none = DownstreamCapabilities {
         idempotent_start: false,
         idempotent_input: false,
@@ -204,23 +235,42 @@ fn sent_policy_follows_declared_capabilities() {
         subscribe: false,
         resume_events: false,
         cancel: false,
+        isolated_memory: false,
+        persistent_dedupe: false,
     };
-    assert_eq!(rules.uncertain_start(&none), UncertainSend::Unresolved);
-    assert_eq!(rules.uncertain_input(&none), UncertainSend::Unresolved);
+    // No query and no dedupe: the call stays unresolved, whatever the proof.
+    assert_eq!(rules.uncertain_start(&none, &upheld), UncertainSend::Unresolved);
+    assert_eq!(rules.uncertain_input(&none, &upheld), UncertainSend::Unresolved);
     assert_eq!(rules.reattach(&none), Reattach::Unresolved);
 
     let ask = DownstreamCapabilities { query_by_request: true, ..none.clone() };
-    assert_eq!(rules.uncertain_start(&ask), UncertainSend::AskAgent);
-    assert_eq!(rules.uncertain_input(&ask), UncertainSend::Unresolved);
+    assert_eq!(rules.uncertain_start(&ask, &upheld), UncertainSend::AskAgent);
+    assert_eq!(rules.uncertain_input(&ask, &upheld), UncertainSend::Unresolved);
 
+    // Declared idempotency alone never resends (plan T6).
     let idem = DownstreamCapabilities {
         idempotent_start: true,
         idempotent_input: true,
         query_by_request: true,
         ..none.clone()
     };
-    assert_eq!(rules.uncertain_start(&idem), UncertainSend::Resend, "idempotency wins over asking");
-    assert_eq!(rules.uncertain_input(&idem), UncertainSend::Resend);
+    assert_eq!(rules.uncertain_start(&idem, &upheld), UncertainSend::AskAgent, "no durable dedupe: the request can only be asked for");
+
+    // The negotiated persistent dedupe, inside the recorded proof, resends.
+    let durable = DownstreamCapabilities {
+        persistent_dedupe: true,
+        ..idem.clone()
+    };
+    assert_eq!(rules.uncertain_start(&durable, &upheld), UncertainSend::Resend, "a durable dedupe inside its window wins");
+    assert_eq!(rules.uncertain_input(&durable, &upheld), UncertainSend::Resend);
+    // An input idempotent only in name — no negotiated durable dedupe and
+    // no query to ask — stays unresolved.
+    let quiet = DownstreamCapabilities {
+        idempotent_input: true,
+        persistent_dedupe: false,
+        ..durable.clone()
+    };
+    assert_eq!(rules.uncertain_input(&quiet, &upheld), UncertainSend::Unresolved);
 
     let poll = DownstreamCapabilities { query_by_task: true, ..none.clone() };
     assert_eq!(rules.reattach(&poll), Reattach::Poll);

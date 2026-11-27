@@ -55,7 +55,16 @@ impl StoreTaskFeed {
                 self.finish_append(&request.source, &completion).await?;
                 return self.append_replay_outcome(&request.source, last).await;
             }
-            return Err(error);
+            // The strict-group paired first-write permission (plan T7 slice 2):
+            // a registered feed obligation stays authorized after its commit
+            // advanced the checkpoint. Sessions without a register keep the
+            // original current-head error untouched.
+            if !self
+                .io(self.verifier.verify_paired(&request.source, &kind))
+                .await?
+            {
+                return Err(error);
+            }
         }
         let mut previous = request.previous;
         let mut tasks = BTreeMap::new();

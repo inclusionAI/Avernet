@@ -132,6 +132,7 @@ fn candidate_with_text(length: usize) -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: BTreeMap::from([(task().tid, content)]),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: Some(CommittedBatch {
             created_at: None,
             commit_id: CommitId("candidate".into()),

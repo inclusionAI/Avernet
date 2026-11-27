@@ -59,6 +59,7 @@ async fn conformance_membership_shard_and_checkpoint() {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     };
     let AcquireOutcome::Acquired(acquired) = port

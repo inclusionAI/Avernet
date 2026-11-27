@@ -43,6 +43,7 @@ use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
 use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, StoreError};
 use bcs_service_api::port::repo::distributed::dispatch::{
     AcceptanceEvidence, HeldDispatchPort, HolderError, SendOperation, SendPermit,
+    VerificationHandoffDraft,
 };
 use bcs_store_api::Version;
 use std::sync::Arc;
@@ -213,13 +214,17 @@ impl HeldDispatchPort for StoreHeldDispatch {
         Ok(self.view.clone())
     }
 
-    /// Records send intent before any network call to the agent (B3) and
-    /// returns the permit to send.
+    /// Records send intent — with the durable `SendProof` of exactly what
+    /// this attempt is (plan T6) — before any network call to the agent (B3),
+    /// and returns the permit to send. The proof must say the same request
+    /// id (and input seq) as the operation it is written with, or the write
+    /// is refused (`send_proof_mismatch`).
     ///
     /// - `Start` (the first message): `claimed -> sending`. Finding `sending`
-    ///   already gives the permit without a write (intent is durable). A new
-    ///   holder that finds `sending` after its claim must first resolve the
-    ///   start (B15); that decision is the actor's, not this handle's.
+    ///   already gives the permit without a write (intent and proof are
+    ///   durable). A new holder that finds `sending` after its claim must
+    ///   first resolve the start (B15); that decision is the actor's, not
+    ///   this handle's.
     /// - `Input { seq }` (a human reply, B12): allowed only in `accepted`,
     ///   for `seq = confirmed + 1`, while the Worker still has `seq` queued
     ///   in `/control/pending_input`. Writes `/connector/input_sending = seq`.
@@ -229,12 +234,29 @@ impl HeldDispatchPort for StoreHeldDispatch {
     /// seq is not yet confirmed. `!confirmed` keeps a false "maybe sent"
     /// away from an input the agent definitely accepted: such a request is
     /// refused as `input_out_of_order` by the transition instead.
-    async fn begin_send(&mut self, operation: SendOperation) -> Result<SendPermit, HolderError> {
+    async fn begin_send(
+        &mut self,
+        operation: SendOperation,
+        proof: SendProof,
+    ) -> Result<SendPermit, HolderError> {
         let permit = SendPermit {
             did: self.view.spec.did.clone(),
             holder: self.holder.clone(),
             operation: operation.clone(),
         };
+        // The proof is written with the intent it belongs to: request id
+        // (and input seq) must say the same thing as the operation.
+        match (&operation, &proof.operation) {
+            (
+                SendOperation::Start { request_id },
+                ProofOperation::Start { request_id: proved },
+            ) if request_id == proved => {}
+            (
+                SendOperation::Input { seq, request_id },
+                ProofOperation::Input { seq: proved_seq, request_id: proved },
+            ) if seq == proved_seq && request_id == proved => {}
+            _ => return invalid("send_proof_mismatch"),
+        }
         if let SendOperation::Input { seq, .. } = &operation {
             // Intent recorded by a former holder generation: the input may
             // already have reached the agent, so no fresh permit is given.
@@ -259,6 +281,14 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     DispatchPhase::Claimed => {
                         let mut next = execution.clone();
                         next.phase = DispatchPhase::Sending;
+                        // The proof of the first attempt is durable with the
+                        // intent, before any network call (plan T6).
+                        next.send_proof = Some(proof.clone());
+                        if doc.view.spec.node_history.is_some() {
+                            // This fenced intent is the exact point the input
+                            // starts carrying an ambiguous delivery obligation.
+                            next.node_input_delivery = Some(DeliveryState::Unknown);
+                        }
                         Ok(Step::Write(Box::new(next), doc.connector.clone(), permit.clone()))
                     }
                     // Intent is already durable: a fenced read is enough.
@@ -284,12 +314,52 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     }
                     let mut connector = doc.connector.clone();
                     connector.input_sending = Some(*seq);
-                    Ok(Step::Write(Box::new(execution.clone()), connector, permit.clone()))
+                    let mut next = execution.clone();
+                    next.send_proof = Some(proof.clone());
+                    Ok(Step::Write(Box::new(next), connector, permit.clone()))
                 }
             }
         })
         .await?;
         Ok(permit)
+    }
+
+    async fn record_node_start(
+        &mut self,
+        delivery: DeliveryState,
+        retry_not_sent: bool,
+    ) -> Result<(), HolderError> {
+        if delivery == DeliveryState::Unknown || (retry_not_sent && delivery != DeliveryState::Undelivered) {
+            return invalid("node_start_observation");
+        }
+        self.transition(None, |doc| {
+            let execution = &doc.view.execution;
+            let phase = if retry_not_sent { DispatchPhase::Claimed } else { DispatchPhase::Sending };
+            if doc.view.spec.node_history.is_none() {
+                return invalid("node_start_unconfigured");
+            }
+            if execution.node_input_delivery == Some(delivery) && execution.phase == phase {
+                return Ok(Step::Keep(()));
+            }
+            if execution.phase != DispatchPhase::Sending
+                || execution.node_input_delivery != Some(DeliveryState::Unknown)
+            {
+                return invalid("node_start_observation");
+            }
+            let mut next = execution.clone();
+            next.node_input_delivery = Some(delivery);
+            next.phase = phase;
+            Ok(Step::Write(Box::new(next), doc.connector.clone(), ()))
+        }).await
+    }
+
+    async fn record_node_response(&mut self, response: NodeResponseEvidence) -> Result<(), HolderError> {
+        self.transition(None, |doc| {
+            match crate::node_history::record_response(&doc.view, &response)? {
+                Some(next) => Ok(Step::Write(Box::new(next), doc.connector.clone(), ())),
+                None => Ok(Step::Keep(())),
+            }
+        }).await
     }
 
     /// Records that the agent accepted the first message and stores its task
@@ -318,6 +388,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     let mut next = execution.clone();
                     next.phase = DispatchPhase::Accepted;
                     next.remote = Some(evidence.remote.clone());
+                    if doc.view.spec.node_history.is_some() {
+                        next.node_input_delivery = Some(DeliveryState::Delivered);
+                    }
                     Ok(Step::Write(Box::new(next), doc.connector.clone(), cancel))
                 }
                 DispatchPhase::Accepted
@@ -411,6 +484,93 @@ impl HeldDispatchPort for StoreHeldDispatch {
             Ok(Step::Write(Box::new(next), doc.connector.clone(), IdempotentWrite::Applied))
         })
         .await
+    }
+
+    /// The claim-fenced handoff CAS (plan T7). One merge — at the fencing
+    /// version of this handle — moves the holder line one generation past
+    /// this holder (a write of the old handle is refused from then on) and
+    /// registers the verification mode, the attempt identity, the stable
+    /// query key, the approved method, the next due time and backoff,
+    /// together with the `due` obligation. An unknown write outcome is
+    /// resolved by reading the document back: the handoff is only reported
+    /// successful once it is visibly durable.
+    async fn hand_off_verification(
+        &mut self,
+        draft: VerificationHandoffDraft,
+    ) -> Result<IdempotentWrite, HolderError> {
+        let did = self.view.spec.did.clone();
+        let handoff = VerificationHandoff {
+            claim: None,
+            attempt: draft.attempt,
+            key: draft.key,
+            method: draft.method,
+            next_due: draft.next_due,
+            backoff_ms: draft.backoff_ms,
+        };
+        let mut unknown = false;
+        for _ in 0..self.shared.config.write_attempts {
+            let doc = match self.read_fenced().await {
+                Err(HolderError::Store(_)) if unknown => {
+                    return Err(HolderError::Store(StoreError::OutcomeUnknown {
+                        operation_id: did.0,
+                    }));
+                }
+                other => other?,
+            };
+            match &doc.view.execution.verification {
+                Some(registered) if registered.key == handoff.key
+                    && registered.method == handoff.method =>
+                {
+                    // An earlier attempt landed: the read-back confirms it.
+                    return Ok(IdempotentWrite::AlreadyApplied);
+                }
+                Some(_) => {
+                    return invalid("verification_already_handed_off");
+                }
+                None => {}
+            }
+            if doc.view.execution.phase == DispatchPhase::Ended {
+                return invalid("handoff_ended_dispatch");
+            }
+            let holder = Holder {
+                instance: self.holder.instance.clone(),
+                epoch: HolderEpoch(self.holder.epoch.0.checked_add(1).ok_or_else(|| {
+                    HolderError::Store(StoreError::Invalid {
+                        code: "holder_epoch_overflow".into(),
+                    })
+                })?),
+            };
+            let next = version::next(doc.version)?;
+            let mutation = crate::doc::handoff_write(&holder, &handoff);
+            match self.shared.mutate(&did, next, mutation).await? {
+                Wrote::Applied(_) => {
+                    return Ok(IdempotentWrite::Applied);
+                }
+                Wrote::Rejected => {}
+                Wrote::Unknown => unknown = true,
+            }
+        }
+        Err(HolderError::Store(if unknown {
+            StoreError::OutcomeUnknown {
+                operation_id: did.0,
+            }
+        } else {
+            StoreError::NotApplied {
+                code: "disp_write_contended".into(),
+            }
+        }))
+    }
+
+    /// Quarantine is written only through the verification claim line; a
+    /// normal holder never crosses the terminal threshold on its own.
+    async fn record_quarantine(
+        &mut self,
+        _at: TimestampMillis,
+        _reason: &str,
+    ) -> Result<IdempotentWrite, HolderError> {
+        Err(HolderError::InvalidTransition {
+            code: "verification_mode".into(),
+        })
     }
 
     /// Ends the call: phase `ended` with its outcome, and the evidence string

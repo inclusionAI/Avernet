@@ -58,7 +58,10 @@ jobs:
             ${{ runner.os }}-cargo-arch-${{ env.RUSTUP_TOOLCHAIN }}-
 
       - name: Install architecture check tools
-        run: cargo install cargo-machete cargo-public-api --locked
+        run: |
+          cargo install cargo-machete --locked
+          cargo install cargo-public-api --version 0.52.0 --locked
+          python3 scripts/ci/test_public_api_gate.py
 
       - name: Write pull request body
         if: github.event_name == 'pull_request'

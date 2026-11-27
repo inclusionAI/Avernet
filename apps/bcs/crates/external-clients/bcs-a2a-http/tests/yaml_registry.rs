@@ -17,6 +17,20 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
+/// The lookup authority of one test operation (plan T6): the resolver takes
+/// the trusted per-operation authority, and the static registry keys its
+/// lookup on the authority's approved binding.
+fn authority_for_binding(binding: &AgentBinding) -> bcs_service_api::port::dist_agent::CallAuthority {
+    bcs_service_api::port::dist_agent::CallAuthority {
+        round: "registry-round".into(),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        binding: binding.clone(),
+        operation: bcs_service_api::port::dist_agent::CallOperation::Start,
+        remote_ref: None,
+    }
+}
+
 fn binding(agent: &str) -> AgentBinding {
     AgentBinding {
         agent: AgentId(agent.into()),
@@ -67,7 +81,7 @@ async fn a_registered_agent_resolves_to_its_selected_interface() {
     let yaml = file(&[entry("order-agent-001", "JSONRPC", "https://agents.example.com/order/a2a", "")]);
     let registry = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap();
     assert_eq!(registry.len(), 1);
-    let agent = registry.resolve(&binding("order-agent-001")).await.unwrap();
+    let agent = registry.resolve(&authority_for_binding(&binding("order-agent-001"))).await.unwrap();
     assert_eq!(agent.interface.binding, A2aBinding::JsonRpc);
     assert_eq!(agent.interface.url, "https://agents.example.com/order/a2a");
     assert_eq!(agent.interface.update_mode, A2aUpdateMode::Stream);
@@ -79,7 +93,7 @@ async fn a_registered_agent_resolves_to_its_selected_interface() {
 async fn an_unknown_agent_is_not_registered() {
     let yaml = file(&[entry("order-agent-001", "HTTP+JSON", "https://agents.example.com/order", "")]);
     let registry = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap();
-    assert_eq!(registry.resolve(&binding("other")).await.unwrap_err(), "agent_not_registered");
+    assert_eq!(registry.resolve(&authority_for_binding(&binding("other"))).await.unwrap_err(), "agent_not_registered");
 }
 
 #[tokio::test]
@@ -92,7 +106,7 @@ async fn the_token_comes_from_the_named_environment_variable() {
     )]);
     let env = |name: &str| (name == "ORDER_AGENT_TOKEN").then(|| " secret-token ".to_owned());
     let registry = YamlAgentResolver::from_yaml(&yaml, &guard(), None, env).unwrap();
-    let agent = registry.resolve(&binding("order-agent-001")).await.unwrap();
+    let agent = registry.resolve(&authority_for_binding(&binding("order-agent-001"))).await.unwrap();
     assert_eq!(agent.bearer.as_deref(), Some("secret-token"));
     assert!(!format!("{registry:?}").contains("secret"), "the token is never printed");
 
@@ -138,7 +152,7 @@ async fn the_registry_is_read_from_a_file() {
     let path = dir.join("agents.yaml");
     std::fs::write(&path, file(&[entry("a", "HTTP+JSON", "https://agents.example.com/a", "")])).unwrap();
     let registry = YamlAgentResolver::load(&path, &guard(), None).unwrap();
-    assert!(registry.resolve(&binding("a")).await.is_ok());
+    assert!(registry.resolve(&authority_for_binding(&binding("a"))).await.is_ok());
     assert_eq!(
         YamlAgentResolver::load(&dir.join("missing.yaml"), &guard(), None).unwrap_err(),
         "agent_registry_unreadable"
@@ -164,7 +178,7 @@ fn errors_never_quote_values_from_the_file() {
 async fn a_non_streaming_agent_gets_no_streaming_only_extension() {
     let yaml = file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "").replace("streaming: true", "streaming: false")]);
     let registry = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap();
-    let agent = registry.resolve(&binding("a")).await.unwrap();
+    let agent = registry.resolve(&authority_for_binding(&binding("a"))).await.unwrap();
     assert_eq!(agent.interface.update_mode, A2aUpdateMode::Poll);
     assert!(agent.extensions.is_empty(), "the tools extension is streaming-only");
 }

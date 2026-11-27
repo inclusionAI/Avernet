@@ -128,6 +128,33 @@ impl References {
         for content in candidate.view_drafts.values_mut() {
             one!(&mut content.snapshot);
         }
+        // The paired publication register travels with the sealed candidate
+        // (plan T7 slice 2): retained obligations externalize with the same
+        // blob/digest machinery as the outbox era, or a wedged feed would
+        // accumulate over-threshold inline artifacts until the candidate
+        // could never fit its sealed budget again. Registered content is
+        // still pre-seal here — the entry's digest is computed by
+        // `seal_candidate` over whatever form remains, exactly like a batch
+        // effect's.
+        for publication in &mut candidate.feed_publications {
+            match &mut publication.kind {
+                EffectKind::AppendEvents { events, .. } => {
+                    for event in events {
+                        if let OutputBody::Artifact { update, .. } = &mut event.body {
+                            let value = match update {
+                                ArtifactUpdate::Upsert { content } => content,
+                                ArtifactUpdate::AppendText { delta } => delta,
+                            };
+                            one!(value);
+                        }
+                    }
+                }
+                EffectKind::PublishSnapshot { snapshot } => {
+                    one!(&mut snapshot.content.snapshot)
+                }
+                _ => {}
+            }
+        }
         if let Some(batch) = &mut candidate.outbox {
             for effect in &mut batch.effects {
                 match &mut effect.kind {

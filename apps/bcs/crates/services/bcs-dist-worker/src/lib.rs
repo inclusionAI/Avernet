@@ -21,6 +21,7 @@ mod scan_resources;
 pub mod supervisor;
 
 mod admission;
+mod node_history;
 pub use admission::WorkerTaskAdmission;
 mod output;
 pub use output::WorkerOutputReader;

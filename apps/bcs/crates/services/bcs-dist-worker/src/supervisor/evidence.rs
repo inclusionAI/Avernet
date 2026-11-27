@@ -66,6 +66,7 @@ impl Facts {
         {
             return Err(invalid("supervisor_holder_identity"));
         }
+        let verification = record.verification;
         Ok(Self {
             sid: spec.sid.clone(),
             tid: spec.tid.clone(),
@@ -74,6 +75,7 @@ impl Facts {
             holder,
             deadline: spec.deadline,
             terminal,
+            verification,
         })
     }
     pub(super) fn request(

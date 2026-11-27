@@ -30,8 +30,10 @@ use crate::delayed::UnresolvedKind;
 use crate::report::Admitted;
 use crate::send::RemoteRead;
 use bcs_dist_model::*;
-use bcs_service_api::core::dist_connector::{INPUT_MAYBE_SENT, UncertainSend};
-use bcs_service_api::port::dist_agent::{CancelOutcome, SendOutcome, StableSendRequest};
+use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
+use bcs_service_api::port::dist_agent::{
+    CallOperation, CancelOutcome, SendOutcome, StableSendRequest,
+};
 use bcs_service_api::port::repo::distributed::dispatch::{
     AcceptanceEvidence, HolderError, SendOperation,
 };
@@ -46,8 +48,8 @@ impl Call {
     /// Returns without sending when no remote task id is stored yet.
     pub async fn send_input(&mut self, input: PendingInput) -> Flow {
         let did = self.did().clone();
-        let target = self.spec().target.clone();
-        let capabilities = self.spec().capabilities.clone();
+        let spec = self.spec().clone();
+        let capabilities = spec.capabilities.clone();
         let Some(remote) = self.held.view().execution.remote.clone() else {
             return Ok(());
         };
@@ -56,22 +58,25 @@ impl Call {
             seq: input.seq,
             request_id: request_id.clone(),
         };
-        let resend_allowed = self.ports.rules.uncertain_input(&capabilities) == UncertainSend::Resend;
-        // A resend after an unknown outcome waits out its backoff.
-        if self.input_resends > 0 && self.backing_off() {
-            return Ok(());
-        }
-        match self.held.begin_send(operation.clone()).await {
+        let Some(payload) = self.load(&input.payload).await? else {
+            return self.block_input(UnresolvedKind::NotSent, "input_unavailable").await;
+        };
+        let current = self.ports.rules.send_proof(
+            &spec,
+            ProofOperation::Input {
+                seq: input.seq,
+                request_id: request_id.clone(),
+            },
+            &crate::send::canonical_body(&payload),
+            self.config.send_fingerprint(&capabilities),
+        );
+        match self.held.begin_send(operation.clone(), current).await {
             Ok(_) => {}
             Err(HolderError::Lost) => return Err(Stop::Lost),
-            // A former holder recorded intent for this input and it is not
-            // confirmed: it may already be with the agent. Intent is durable;
-            // only an idempotent agent gets it again (then the code falls
-            // through and resends it).
+            // A former holder's input intent may already have reached the
+            // agent. A frozen capability is not a downstream dedupe proof.
             Err(HolderError::InvalidTransition { code }) if code == INPUT_MAYBE_SENT => {
-                if !resend_allowed {
-                    return self.block_input(UnresolvedKind::Uncertain, "input_maybe_sent").await;
-                }
+                return self.uncertain_reply("input_maybe_sent").await;
             }
             // A temporary store error or another refusal: nothing was sent,
             // try again on the next tick.
@@ -80,15 +85,16 @@ impl Call {
                 return Ok(());
             }
         }
-        let Some(payload) = self.load(&input.payload).await? else {
-            return self.block_input(UnresolvedKind::NotSent, "input_unavailable").await;
-        };
+        let authority = self.authority_now(CallOperation::Continue, Some(remote.clone()), &spec);
         let send = StableSendRequest {
             request_id,
             context_id: remote.context_id.clone(),
             payload,
+            node: spec.node.clone(),
+            attempt: spec.attempt,
+            frozen_history: None,
         };
-        match self.ports.agent.send_input(&target, &remote, send).await {
+        match self.ports.agent.send_input(&authority, &remote, send).await {
             SendOutcome::Accepted { remote, events } => {
                 self.confirm(input.seq, operation, remote).await?;
                 match events {
@@ -99,10 +105,17 @@ impl Call {
             }
             SendOutcome::Completed { result } => {
                 self.confirm(input.seq, operation, remote).await?;
-                if self.report(AgentEventKind::Final, None, result).await? == Admitted::Yes {
-                    self.finish(FinalDispatchOutcome::Completed, "sync_result").await?;
+                match self.ports.rules.completed_result(&result) {
+                    Ok(verified) => {
+                        if self.report(AgentEventKind::Final, None, verified).await? == Admitted::Yes {
+                            self.finish(FinalDispatchOutcome::Completed, "sync_result").await?;
+                        }
+                        Ok(())
+                    }
+                    Err(code) => {
+                        self.end_with_error("failed", code, FinalDispatchOutcome::Failed, code).await
+                    }
                 }
-                Ok(())
             }
             // The agent definitely did not take it: not confirmed.
             SendOutcome::Rejected { code } => self.block_input(UnresolvedKind::NotSent, &code).await,
@@ -113,21 +126,22 @@ impl Call {
                 }
                 Ok(()) // retried on the next tick
             }
-            SendOutcome::OutcomeUnknown { code } => {
-                if !resend_allowed {
-                    return self.block_input(UnresolvedKind::Uncertain, &code).await;
-                }
-                // An idempotent input is sent again, with backoff and a bound
-                // like the start's resend.
-                self.input_resends += 1;
-                if self.input_resends > self.config.not_sent_retries {
-                    return self.block_input(UnresolvedKind::Uncertain, "resend_exhausted").await;
-                }
-                tracing::warn!(did = %did.0, code, "input outcome unknown; resending after a backoff");
-                self.back_off();
-                Ok(())
-            }
+            SendOutcome::OutcomeUnknown { code } => self.uncertain_reply(&code).await,
         }
+    }
+
+    /// An ambiguous reply never authorizes another send or skips its
+    /// sequence. Keep following the known remote when possible; otherwise
+    /// pass the stop obligation to verification (including cancel-only).
+    async fn uncertain_reply(&mut self, code: &str) -> Flow {
+        let capabilities = &self.spec().capabilities;
+        if self.events.is_none() && (self.blind || !(capabilities.query_by_task || capabilities.subscribe)) {
+            let key = self.held.view().execution.remote.as_ref()
+                .filter(|_| capabilities.cancel)
+                .map_or(VerificationKey::Retained, |remote| VerificationKey::ByTask { remote: remote.clone() });
+            return self.hand_off(code, key).await;
+        }
+        self.block_input(UnresolvedKind::Uncertain, code).await
     }
 
     /// Records that the agent definitely accepted input `seq`
@@ -139,7 +153,6 @@ impl Call {
         held_write!(self, "input confirmation", self.held.confirm_input(seq, evidence.clone()));
         self.awaiting_input = false;
         self.input_not_sent = 0;
-        self.input_resends = 0;
         self.reset_backoff();
         // The polled state is deliberately kept: until a poll observes
         // something else, an identical read is the question just answered
@@ -196,7 +209,6 @@ impl Call {
         if view.execution.cancellation != CancelObservation::NotSent && self.backing_off() {
             return Ok(());
         }
-        let target = view.spec.target.clone();
         if !view.spec.capabilities.cancel {
             let refused = CancelObservation::Rejected {
                 code: "cancel_unsupported".into(),
@@ -205,7 +217,12 @@ impl Call {
             return Ok(());
         }
         held_write!(self, "cancel intent", self.held.record_cancel(CancelObservation::Sending));
-        let outcome = self.ports.agent.cancel(&target, &remote, intent.request_id.clone()).await;
+        let authority = self.authority_now(CallOperation::Cancel, Some(remote.clone()), &view.spec);
+        let outcome = self
+            .ports
+            .agent
+            .cancel(&authority, &remote, intent.request_id.clone())
+            .await;
         let observed = match &outcome {
             CancelOutcome::RequestAccepted => CancelObservation::RequestAccepted,
             CancelOutcome::ConfirmedCanceled => CancelObservation::ConfirmedCanceled,
@@ -273,15 +290,15 @@ impl Call {
             self.finished_reads = u32::MAX;
             self.reset_backoff();
         }
-        // No task read, or it did not give the result: the cancel answer
-        // said definitely how the call ended, so report that.
+        // No task read, or it did not verify a complete result: the cancel
+        // answer said the task completed, but a Completed without a
+        // verified product is only a stop fact — the recovery continues
+        // until the rules admit a verified Final or the deadline bounds
+        // the call (plan T6).
         match finished {
             FinalDispatchOutcome::Completed => {
                 let payload = Payload::Inline(serde_json::json!({ "state": "completed" }));
-                if self.report(AgentEventKind::Final, None, payload).await? == Admitted::Yes {
-                    self.finish(finished, "already_finished").await?;
-                }
-                Ok(())
+                self.stop_fact("result_not_recovered", payload).await
             }
             FinalDispatchOutcome::Failed => {
                 self.end_with_error("failed", "agent_failed", finished, "already_finished").await

@@ -178,6 +178,7 @@ pub fn checkpoint() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: Some(event_id()),
+        feed_publications: Vec::new(),
         outbox: Some(CommittedBatch {
             created_at: None,
             commit_id: proof().commit_id,
@@ -211,6 +212,8 @@ pub fn capabilities() -> DownstreamCapabilities {
         subscribe: true,
         resume_events: true,
         cancel: true,
+        isolated_memory: true,
+        persistent_dedupe: true,
     }
 }
 
@@ -252,6 +255,7 @@ pub fn dispatch_view() -> DispatchView {
     DispatchView {
         spec: DispatchSpec {
             schema_version: 1,
+            node_history: None,
             sid: owner().sid,
             tid: input().tid,
             did: Did("dispatch-a".into()),
@@ -274,6 +278,11 @@ pub fn dispatch_view() -> DispatchView {
             confirmed_input_through: Some(InputSeq(1)),
             cancellation: CancelObservation::NotSent,
             outcome: None,
+            send_proof: None,
+            node_input_delivery: None,
+            node_responses: Vec::new(),
+            verification: None,
+            quarantined: None,
         },
     }
 }

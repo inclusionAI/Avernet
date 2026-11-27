@@ -14,12 +14,15 @@ pub fn caps() -> DownstreamCapabilities {
         subscribe: true,
         resume_events: false,
         cancel: true,
+        isolated_memory: false,
+        persistent_dedupe: false,
     }
 }
 
 pub fn spec() -> DispatchSpec {
     DispatchSpec {
         schema_version: 1,
+        node_history: None,
         sid: Sid("s0042.7f3a9c".into()),
         tid: Tid("s0042.7f3a9c.b21e".into()),
         did: Did(DID.into()),
@@ -59,6 +62,11 @@ pub fn created() -> DispatchView {
             confirmed_input_through: None,
             cancellation: CancelObservation::NotSent,
             outcome: None,
+            send_proof: None,
+            node_input_delivery: None,
+            node_responses: Vec::new(),
+            verification: None,
+            quarantined: None,
         },
     }
 }

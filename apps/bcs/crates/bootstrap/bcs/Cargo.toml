@@ -35,25 +35,33 @@ test = false
 
 [features]
 default = ["prometheus-metrics"]
-worker-runtime-e2e = ["dep:bcs-dist-connector-store", "dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
+# Kept for the bcs-worker-e2e companion binary; the distributed role crates
+# themselves are now unconditional dependencies (plan T9 composition root).
+worker-runtime-e2e = ["dep:bcs-dist-test-runner"]
 metrics = ["prometheus-metrics"]
 a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
-bcs-dist-model = { workspace = true, optional = true }
-bcs-app-dist-gateway = { workspace = true, optional = true }
-bcs-dist-gateway = { workspace = true, optional = true }
-bcs-dist-gateway-http = { workspace = true, optional = true }
-bcs-dist-a2a-output = { workspace = true, optional = true }
-bcs-dist-connector-store = { workspace = true, optional = true }
-bcs-dist-store = { workspace = true, optional = true }
-bcs-dist-projection = { workspace = true, optional = true }
-bcs-dist-worker = { workspace = true, optional = true }
+# Distributed FSN-group execution roles (plan T9 composition root). These are
+# unconditional so the production wiring seams compile in every default build;
+# the joint assembly itself stays behind an explicit opt-in config switch.
+bcs-dist-model = { workspace = true }
+bcs-app-dist-gateway = { workspace = true }
+bcs-dist-gateway = { workspace = true }
+bcs-dist-gateway-http = { workspace = true }
+bcs-dist-gateway-store = { workspace = true }
+bcs-dist-a2a-output = { workspace = true }
+bcs-dist-connector = { workspace = true }
+bcs-dist-connector-store = { workspace = true }
+bcs-dist-store = { workspace = true }
+bcs-dist-projection = { workspace = true }
+bcs-dist-worker = { workspace = true }
+bcs-dist-runner-fsm = { workspace = true }
 bcs-dist-test-runner = { workspace = true, optional = true }
-bcs-app-dist-runtime = { workspace = true, optional = true }
-bcs-store-api = { workspace = true, optional = true }
+bcs-app-dist-runtime = { workspace = true }
+bcs-store-api = { workspace = true }
 bcs-app-identity-api.workspace = true
 bcs-a2a-binding-api = { workspace = true, optional = true }
 a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
@@ -247,11 +255,14 @@ clap = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-a2a-http = { workspace = true, features = ["dist-agent"] }
 log = "0.4"
 dirs = "5.0"
 futures-util = "0.3"
 rsa = { workspace = true }
 bcs = { path = ".", features = ["test-utils"] }
+bcs-dist-test-runner = { workspace = true }
+bcs-dist-encoding = { workspace = true }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }

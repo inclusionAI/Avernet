@@ -552,7 +552,7 @@ async fn encoded_remote_and_terminal_evidence_respect_reserved_capacity() {
     let f = Fixture::new().await;
     f.create().await;
     let mut held = f.claim().await;
-    held.begin_send(start()).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
     let mut remote = acceptance(start());
     remote.remote.task_id = "\u{0001}".repeat(1024);
     assert!(held.record_acceptance(remote).await.is_err());
@@ -881,7 +881,10 @@ async fn delayed_dispatch_scan_keeps_its_fixed_cut_while_the_journal_grows() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(cursor.value["cut"], 1);
+    // The per-round upper bound is a stable directory key (schema 2): the
+    // round never swallows rows appended after the arm, whatever later
+    // reclaim removes from the arrays below.
+    assert_eq!(cursor.value["upper"], 1);
     let mut second = spec();
     second.did = Did(format!("{}.d2", common::TID));
     let source = f

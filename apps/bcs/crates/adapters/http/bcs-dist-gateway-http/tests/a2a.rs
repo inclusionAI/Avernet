@@ -14,6 +14,13 @@ use axum::http::{Request, StatusCode};
 use bcs_app_dist_gateway::{Clock, DistGateway, DistGatewayConfig};
 use bcs_dist_gateway::DistGatewayCore;
 use bcs_dist_gateway_http::{GatewayCaller, GatewayHttpConfig, cursor, router};
+use bcs_service_api::port::repo::distributed::group_listing::{
+    GroupIndexPage, GroupIndexQuery, GroupListingPort,
+};
+use bcs_service_api::port::repo::distributed::group_round::GroupRoundGrants;
+use bcs_service_api::application::dist_gateway::{
+    GroupCard, GroupDiscoveryService, GroupGrantPolicy,
+};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::application::principal::{BotActor, CallerContext};
@@ -27,6 +34,62 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
+
+
+/// Nothing of the group surface is hosted by the legacy test stack: its
+/// policy denies, its listing is unconfigured and no card is published.
+struct GroupHttpStub;
+#[async_trait]
+impl GroupGrantPolicy for GroupHttpStub {
+    async fn grants(
+        &self,
+        _: &GatewayCaller,
+        _: &GroupId,
+    ) -> GroupRoundGrants {
+        GroupRoundGrants {
+            published: false,
+            invoke: false,
+            read: false,
+            cancel: false,
+        }
+    }
+}
+#[async_trait]
+impl GroupListingPort for GroupHttpStub {
+    async fn first_page(
+        &self,
+        _: &TaskScope,
+        _: &GroupId,
+        _: &GroupIndexQuery,
+        _: TimestampMillis,
+    ) -> Result<GroupIndexPage, bcs_service_api::port::repo::distributed::common::StoreError> {
+        Err(bcs_service_api::port::repo::distributed::common::StoreError::NotApplied {
+            code: "group_listing_unconfigured".to_owned(),
+        })
+    }
+    async fn continue_page(
+        &self,
+        _: &TaskScope,
+        _: &GroupId,
+        _: &PageToken,
+        _: bool,
+        _: TimestampMillis,
+    ) -> Result<GroupIndexPage, bcs_service_api::port::repo::distributed::common::StoreError> {
+        Err(bcs_service_api::port::repo::distributed::common::StoreError::NotApplied {
+            code: "group_listing_unconfigured".to_owned(),
+        })
+    }
+}
+#[async_trait]
+impl GroupDiscoveryService for GroupHttpStub {
+    async fn card(
+        &self,
+        _: &GatewayCaller,
+        _: &GroupId,
+    ) -> Result<GroupCard, GatewayError> {
+        Err(GatewayError::AccessDenied)
+    }
+}
 
 struct Groups;
 #[async_trait]
@@ -77,7 +140,7 @@ fn app_over(gateway: Arc<dyn DistGatewayService>) -> Router {
     let mut config = GatewayHttpConfig::new("https://gw.example");
     config.blocking_send_wait = Duration::from_secs(5);
     config.cancel_wait = Duration::from_millis(100);
-    router(gateway, config).layer(Extension(caller()))
+    router(gateway, Arc::new(GroupHttpStub), config).layer(Extension(caller()))
 }
 
 fn app(p: &Ports) -> Router {
@@ -85,7 +148,15 @@ fn app(p: &Ports) -> Router {
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(10);
     config.snapshot_cover_limit = Duration::from_millis(300);
-    let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), config).unwrap();
+    let gateway = DistGateway::new(
+        Arc::new(core),
+        Arc::new(Groups),
+        Arc::new(GroupHttpStub),
+        Arc::new(GroupHttpStub),
+        Arc::new(TestClock),
+        config,
+    )
+    .unwrap();
     app_over(Arc::new(gateway))
 }
 
@@ -516,8 +587,16 @@ async fn protocol_errors_are_reported_as_json_rpc_errors() {
 
     // Without a resolved caller the request is refused.
     let core = gateway_core(&p);
-    let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), DistGatewayConfig::new(64)).unwrap();
-    let bare = router(Arc::new(gateway), GatewayHttpConfig::new("https://gw.example"));
+    let gateway = DistGateway::new(
+        Arc::new(core),
+        Arc::new(Groups),
+        Arc::new(GroupHttpStub),
+        Arc::new(GroupHttpStub),
+        Arc::new(TestClock),
+        DistGatewayConfig::new(64),
+    )
+    .unwrap();
+    let bare = router(Arc::new(gateway), Arc::new(GroupHttpStub), GatewayHttpConfig::new("https://gw.example"));
     let response = bare.oneshot(rpc("GetTask", json!({ "id": "x" }))).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
@@ -529,7 +608,13 @@ impl DistGatewayService for Failing {
     async fn submit(&self, _: &GatewayCaller, _: SubmitInput) -> Result<AdmissionReceipt, GatewayError> {
         Err(self.0.clone())
     }
-    async fn get_task(&self, _: &GatewayCaller, _: &GroupId, _: &Tid) -> Result<TaskView, GatewayError> {
+    async fn get_task(
+        &self,
+        _: &GatewayCaller,
+        _: &GroupId,
+        _: &Tid,
+        _: CreationSource,
+    ) -> Result<TaskView, GatewayError> {
         Err(self.0.clone())
     }
     async fn subscribe(&self, _: &GatewayCaller, _: SubscribeTask) -> Result<TaskSubscription, GatewayError> {
@@ -542,6 +627,19 @@ impl DistGatewayService for Failing {
         Err(self.0.clone())
     }
     async fn list_tasks(&self, _: &GatewayCaller, _: ListTasks) -> Result<TaskPage, GatewayError> {
+        Err(self.0.clone())
+    }
+    async fn group_send(&self, _: &GatewayCaller, _: SubmitInput) -> Result<AdmissionReceipt, GatewayError> {
+        Err(self.0.clone())
+    }
+    async fn group_list_tasks(
+        &self,
+        _: &GatewayCaller,
+        _: GroupTaskList,
+    ) -> Result<GroupIndexPage, GatewayError> {
+        Err(self.0.clone())
+    }
+    async fn group_wait_task(&self, _: &GatewayCaller, _: WaitTask) -> Result<(TaskView, bool), GatewayError> {
         Err(self.0.clone())
     }
 }
