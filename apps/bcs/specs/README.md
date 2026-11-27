@@ -8,6 +8,8 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 ## Existing change records
 
+- [Direct A2A implementation amendment](2026-11-26-distributed-runner-spi/implementation.md) — SPEC #4469 delivery scope for PR #4509; production authorization remains deferred under #4544.
+
 - [2026-11-20 retained membership](2026-11-20-retained-membership-lease/spec.md) — adopted CAS termination, synchronized client clock and 30-day retention amendment.
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.

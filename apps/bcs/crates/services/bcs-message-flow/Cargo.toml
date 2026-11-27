@@ -27,8 +27,6 @@ regex = { workspace = true }
 tokio = { workspace = true }
 
 bcs-domain = { workspace = true }
-bcs-dist-model = { workspace = true }
-bcs-dist-encoding = { workspace = true }
 bcs-channel-api = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-service-api = { workspace = true }

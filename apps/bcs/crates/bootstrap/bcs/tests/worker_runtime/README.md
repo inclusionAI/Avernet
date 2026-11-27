@@ -51,7 +51,7 @@ python3 apps/bcs/scripts/e2e-test/worker_runtime_story.py \
 instrumented companion (or accepts `--run-only` after
 `build_e2e_companions.sh worker`), removes only its own profiles, and invalidates
 stale success evidence before starting. BCS runs it in its coverage story phase,
-before profile aggregation. The wrapper requires a report containing all 17
+before profile aggregation. The wrapper requires a report containing all 18
 scenarios and the explicit in-memory Store and SQLite archive declarations.
 The validated report is printed into the existing Singlebox `bcs/e2e.log`; on
 failure the same log records diagnostics, and the BCS story phase fails.

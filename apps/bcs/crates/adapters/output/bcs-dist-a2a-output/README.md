@@ -27,6 +27,13 @@ AppendText values. It performs no storage, network, identity generation or quota
 accounting. Formatting does not modify the neutral snapshot or event, and its
 JSON result is never used as a persisted `ArtifactUpdate`.
 
+Explicit parts are also validated with the same a2a-lf Part decoder as the HTTP
+consumer. Missing content fields, wrong content types and invalid raw encoding
+return an output adapter error before HTTP could silently drop artifacts. The
+original objects are preserved after validation, including extension fields.
+An empty parts array remains accepted by that SDK. Shared projection performs
+only protocol-neutral object checks and imports no A2A schema.
+
 ## Message sources and limits
 
 `DisplaySnapshot` has no message history or status-message fields. Ordinary

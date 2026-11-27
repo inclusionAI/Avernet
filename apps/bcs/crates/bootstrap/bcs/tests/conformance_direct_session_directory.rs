@@ -1,7 +1,8 @@
+#![cfg(feature = "dist-direct-a2a")]
 #![allow(clippy::unwrap_used, reason = "test fixtures and assertions")]
 use async_trait::async_trait;
 use bcs_dist_model::*;
-use bcs_message_flow::a2a_chat::DirectSessionDirectory;
+use bcs::dist_direct_a2a::DirectSessionDirectory;
 use bcs_service_api::port::dist_agent::{
     DirectoryError, DistSessionAuthorizerPort, DistSessionDirectoryPort,
 };

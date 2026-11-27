@@ -53,6 +53,40 @@ async fn terminal(f: &Fixture, app: &Router, tid: &Tid) -> Value {
 }
 
 #[tokio::test(start_paused = true)]
+async fn working_snapshot_clears_waiting_state_in_get_task_and_follow() {
+    for auth in [false, true] {
+        let (f, app, tid) = setup().await;
+        let kind = if auth { AgentEventKind::AuthRequired { interaction: InteractionId("q".into()) } }
+            else { AgentEventKind::InputRequired { interaction: InteractionId("q".into()) } };
+        report(&f, &tid, 1, kind, json!({"state":if auth {"auth_required"} else {"input_required"},
+            "message":{"parts":[{"text":"Confirm"}]}})).await;
+        let waiting = if auth { "TASK_STATE_AUTH_REQUIRED" } else { "TASK_STATE_INPUT_REQUIRED" };
+        let task = wait_for(&app, &f, &tid.0, waiting).await;
+        let sid = task["contextId"].as_str().unwrap();
+        let scope = TaskScope { tenant: TenantId("t".into()), principal: PrincipalId("bot:caller".into()) };
+        let reader = WorkerOutputReader::new(f.feed.clone(), f.archive.clone(), Arc::new(bcs_dist_a2a_output::A2aOutputAdapter));
+        let Some(RestoredTask::Live { cursor, .. }) = reader.restore(&scope, &tid).await.unwrap() else { panic!() };
+        report(&f, &tid, 2, AgentEventKind::Snapshot,
+            json!({"task":{"status":{"state":"TASK_STATE_WORKING"},"artifacts":[]}})).await;
+        let working = wait_for(&app, &f, &tid.0, "TASK_STATE_WORKING").await;
+        assert!(working["status"].get("message").is_none());
+        let Some(RestoredTask::Live { view, .. }) = reader.restore(&scope, &tid).await.unwrap() else { panic!() };
+        assert!(view.content.interactions.is_empty());
+        let mut follow = reader.follow(scope, cursor);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let item = follow.next().await.unwrap().unwrap();
+                let FormattedFollowItem::Events { events, .. } = item else { panic!("unexpected gap") };
+                if events.iter().any(|event| matches!(&event.body,
+                    FormattedOutputBody::Status { status: TaskStatus::Working, interactions } if interactions.is_empty())) { break; }
+            }
+        }).await.unwrap();
+        let stale = send(&app, "late reply", Some(sid), Some(&tid.0)).await;
+        assert!(stale.get("error").is_some(), "stale interaction was accepted: {stale}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn mixed_output_survives_blob_storage_follow_and_final_restore() {
     let (f, app, tid) = setup().await;
     let scope = TaskScope { tenant: TenantId("t".into()), principal: PrincipalId("bot:caller".into()) };

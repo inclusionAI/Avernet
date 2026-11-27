@@ -351,7 +351,7 @@ With the `dist-direct-a2a` feature, [DirectA2aStores](src/dist_direct_a2a.rs)
 assembles the Gateway router, Worker runtime, processor and dispatch supervisor,
 and Connector engine for an embedding host. Mount the router behind a layer
 that supplies the authenticated GatewayCaller. Direct targets use
-`/a2a/agents/{target}`. The composition installs `DirectSessionDirectory` for
+`/a2a/agents/{target}`. The feature-gated [DirectSessionDirectory](src/dist_direct_a2a/directory.rs) provides
 tenant/target validation and immutable Direct configuration. The host must inject
 `DistSessionAuthorizerPort`; Gateway invokes the directory's authorization method
 before admitting each send or reply, and the directory forwards the unchanged
@@ -368,6 +368,11 @@ registered agent endpoint and credentials when it calls the agent. Give each
 independent registry a distinct Connector pool when logical agent IDs overlap. Enable this
 composition in the distributed host. The standalone server keeps its existing
 Direct and group deployments.
+
+The Direct directory has no dependency on single-process message-flow services.
+Its conformance tests run with `cargo test -p bcs --features dist-direct-a2a
+--test conformance_direct_session_directory`. See the [implementation amendment](../../../specs/2026-11-26-distributed-runner-spi/implementation.md)
+for the explicitly deferred production authorization scope.
 
 This assembly does not install the monolith's outbound content interception or
 audit chain. Before accepting production traffic, the host must integrate those

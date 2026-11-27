@@ -347,3 +347,76 @@ async fn conformance_direct_a2a_replays_the_same_start() {
     collaboration_mode_runner_service_contract_tests(&DirectA2aRunner, &spec(), &tid(), &[input])
         .await.unwrap();
 }
+
+#[tokio::test]
+async fn a_working_snapshot_closes_an_out_of_band_question() {
+    for auth in [false, true] {
+        let mut task = Task::new().await;
+        task.start().await;
+        let id = InteractionId("question".into());
+        let kind = if auth { AgentEventKind::AuthRequired { interaction: id.clone() } }
+            else { AgentEventKind::InputRequired { interaction: id.clone() } };
+        task.reduce(event(kind, json!({"message":{"parts":[{"text":"Confirm"}]}}))).await;
+        for snapshot in [json!({"task":{"artifacts":[]}}),
+            json!({"task":{"status":{"state":"TASK_STATE_UNSPECIFIED"}}})] {
+            assert!(task.reduce(event(AgentEventKind::Snapshot, snapshot)).await.actions.is_empty());
+            assert_eq!(serde_json::to_value(&task.state).unwrap()["awaiting"], "question");
+        }
+        let working = json!({"task":{"status":{"state":"TASK_STATE_WORKING"}}});
+        let decision = task.reduce(event(AgentEventKind::Snapshot, working.clone())).await;
+        assert!(matches!(decision.actions.as_slice(),
+            [ActionIntent::SetStatus { status: TaskStatus::Working, interactions, .. }] if interactions.is_empty()));
+        assert!(serde_json::to_value(&task.state).unwrap()["awaiting"].is_null());
+        assert!(task.reduce(event(AgentEventKind::Snapshot, working)).await.actions.is_empty());
+        let stale = RunnerInput::HumanReply { tid: tid(), interaction: id,
+            responder: PrincipalId("caller".into()), payload: Payload::Inline(json!("late")) };
+        assert!(task.reduce(stale).await.actions.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn multiple_text_parts_keep_their_boundaries() {
+    let parts = json!([{"text":"first"},{"text":"second"}]);
+    for (kind, payload) in [
+        (AgentEventKind::Delta, json!({"artifact":{"artifactId":"a","parts":parts},"append":false})),
+        (AgentEventKind::Snapshot, json!({"task":{"artifacts":[{"artifactId":"a","parts":parts}]}})),
+        (AgentEventKind::Final, json!({"state":"completed","message":{"parts":parts}})),
+    ] {
+        let mut task = Task::new().await;
+        task.start().await;
+        let decision = task.reduce(event(kind, payload)).await;
+        assert_show(&decision.actions[0], ArtifactUpdate::UpsertParts { content: Payload::Inline(parts.clone()) });
+    }
+}
+
+#[tokio::test]
+async fn format_switches_stay_consistent_with_projection_after_restore() {
+    use bcs_dist_projection::OutputProjectionService;
+    use bcs_service_api::core::dist_projection::OutputProjectionCoreService;
+    let mut task = Task::new().await;
+    task.start().await;
+    let mut display = DisplaySnapshot { format_version: 1, units: vec![] };
+    for (index, (parts, append, snapshot)) in [
+        (json!([{"text":"start"}]), false, false),
+        (json!([{"url":"https://example.com/file"}]), true, false),
+        (json!([{"text":"caption"}]), true, false),
+        (json!([{"text":"reset"}]), false, true),
+        (json!([{"text":"tail"}]), true, false),
+        (json!([{"data":{"n":1}}]), false, true),
+        (json!([{"text":"end"}]), true, false),
+    ].into_iter().enumerate() {
+        let artifact = json!({"artifactId":"a","parts":parts});
+        let (kind, payload) = if snapshot { (AgentEventKind::Snapshot, json!({"task":{"artifacts":[artifact]}})) }
+            else { (AgentEventKind::Delta, json!({"artifact":artifact,"append":append})) };
+        let decision = task.reduce(event(kind, payload)).await;
+        for action in decision.actions {
+            let ActionIntent::Show { source, artifact_id, class, update, .. } = action else { panic!() };
+            display = OutputProjectionService.fold_committed(&display,
+                &[ArtifactChange { source, artifact_id, class, update }], &PHASE_ONE_OUTPUT_LIMITS).unwrap();
+        }
+        let expected = if (3..=4).contains(&index) || index == 0 { DisplayContentFormat::Json }
+            else { DisplayContentFormat::Parts };
+        assert_eq!(display.units[0].content_format, expected);
+    }
+    assert_eq!(display.units[0].content, json!([{"data":{"n":1}},{"text":"end"}]));
+}

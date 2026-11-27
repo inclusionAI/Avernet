@@ -35,10 +35,9 @@ fn parts_content(source: &Value) -> Option<Value> {
 }
 
 fn plain_text(parts: &Value) -> Option<String> {
-    let parts = parts.as_array()?;
-    parts.iter().all(|part| part.as_object().is_some_and(|object| object.len() == 1)
-        && part.get("text").is_some_and(Value::is_string))
-        .then(|| parts.iter().filter_map(|part| part["text"].as_str()).collect())
+    let [part] = parts.as_array()?.as_slice() else { return None };
+    if part.as_object()?.len() != 1 { return None; }
+    part.get("text")?.as_str().map(str::to_owned)
 }
 
 fn show(

@@ -150,6 +150,13 @@ impl CollaborationModeRunnerService for DirectA2aRunner {
                     match &event.kind {
                         AgentEventKind::Delta | AgentEventKind::Tool | AgentEventKind::Snapshot => {
                             state.artifacts.update(tid, &event.kind, value, &mut actions);
+                            // A whole-task snapshot can confirm an out-of-band
+                            // authorization/input completion without HumanReply.
+                            if event.kind == AgentEventKind::Snapshot && state.awaiting.is_some()
+                                && value.pointer("/task/status/state").and_then(Value::as_str) == Some("TASK_STATE_WORKING") {
+                                state.awaiting = None;
+                                status(&mut actions, tid, TaskStatus::Working, vec![]);
+                            }
                         }
                         AgentEventKind::Thinking => {} // Worker handles this before reduction.
                         AgentEventKind::InputRequired { interaction }

@@ -3,6 +3,8 @@
 //! Production admission also requires the host's content interception/audit
 //! integration before Inbox admission, for both initial messages and replies.
 //! This assembly does not install that policy. Use a Direct-only namespace.
+mod directory;
+pub use directory::DirectSessionDirectory;
 use crate::dist_agent_registry::RegisteredAgentResolver;
 use bcs_a2a_http::{dist_agent::A2aDistAgentClient, grpc_mesh::GrpcMeshConfig};
 use bcs_app_dist_gateway::{DistGateway, DistGatewayConfig};
@@ -28,7 +30,6 @@ use bcs_dist_worker::{
     ProcessorConfig, ProcessorPorts, RunnerRegistry, WorkerConfig, WorkerOutputReader,
     WorkerProcessor, WorkerRuntime, WorkerTaskAdmission,
 };
-use bcs_message_flow::a2a_chat::DirectSessionDirectory;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::{
     BotRegistryCoreService,
@@ -51,6 +52,8 @@ pub struct DirectA2aStores {
 impl DirectA2aStores {
     /// The Direct directory checks targets and builds configuration. The host
     /// must supply its authorization interface; no policy is installed here.
+    /// Do not expose this router to production traffic until the host supplies
+    /// its production authorizer and content interception/audit integration.
     pub fn gateway(
         &self,
         authorizer: Arc<dyn DistSessionAuthorizerPort>,

@@ -32,6 +32,10 @@ fn artifact(source: &CorrelationKey, id: &ArtifactId, class: OutputClass, format
             if !value.as_array().is_some_and(|parts| parts.iter().all(Value::is_object)) {
                 return Err(invalid("output_parts_require_objects"));
             }
+            // Match the HTTP consumer's SDK without re-encoding the original
+            // objects: preserve extension fields and per-part metadata.
+            serde_json::from_value::<Vec<a2a::Part>>(value.clone())
+                .map_err(|_| invalid("output_parts_invalid_a2a"))?;
             value.clone()
         }
     };

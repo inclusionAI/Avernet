@@ -114,3 +114,21 @@ fn invalid_neutral_content_is_rejected_instead_of_dropped() {
         content: Payload::Ref(BlobRef { key: "x".into(), digest: Digest("sha256:x".into()) }),
     })).is_err());
 }
+
+#[test]
+fn invalid_a2a_parts_are_rejected_before_http_decoding() {
+    for parts in [json!([{}]), json!([{"text":123}]), json!([{"url":false}]),
+        json!([{"raw":"%not-base64"}]), json!([{"text":"valid"},{}])] {
+        let mut saved = snapshot(parts.clone());
+        saved["units"][0]["content_format"] = json!("parts");
+        assert!(A2aOutputAdapter.snapshot(&saved).is_err(), "accepted {parts}");
+        for update in [ArtifactUpdate::UpsertParts { content: Payload::Inline(parts.clone()) },
+            ArtifactUpdate::AppendParts { delta: Payload::Inline(parts.clone()) }] {
+            assert!(A2aOutputAdapter.artifact(&change(OutputClass::Output, update)).is_err());
+        }
+    }
+    // An empty Vec<Part> is accepted by the same SDK used by the HTTP consumer.
+    let mut empty = snapshot(json!([]));
+    empty["units"][0]["content_format"] = json!("parts");
+    assert_eq!(A2aOutputAdapter.snapshot(&empty).unwrap()["artifacts"][0]["parts"], json!([]));
+}
