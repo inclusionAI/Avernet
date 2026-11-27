@@ -37,7 +37,7 @@ describe('GroupSidebar', () => {
     // 「+」位于搜索工具行（input 的 relative 包裹层的父行）。
     const toolRow = searchInput.closest('div.relative')?.parentElement;
     expect(toolRow).toContainElement(actionButton);
-    // 设计稿搜索行下直接是群列表，无组标题行。
+    // 搜索行下展示参与方式 Tab，不再额外展示「协作群」组标题行。
     expect(screen.queryByText('协作群')).not.toBeInTheDocument();
     fireEvent.click(actionButton);
     expect(onCreateGroup).toHaveBeenCalled();
