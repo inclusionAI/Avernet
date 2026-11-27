@@ -477,6 +477,7 @@ class DoneOutputDTO(BaseModel):
 class LatestTaskContextDTO(BaseModel):
     spec: TaskSpecDTO
     all_done_output: list[DoneOutputDTO] = Field(default_factory=list)
+    reusable_facts: list[dict[str, Any]] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
 
 
@@ -516,6 +517,7 @@ def task_context_to_dto(context) -> LatestTaskContextDTO:
             for item in context.all_done_output
         ],
         gaps=list(context.gaps),
+        reusable_facts=list(context.reusable_facts),
     )
 
 

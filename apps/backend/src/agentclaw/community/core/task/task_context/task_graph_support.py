@@ -52,6 +52,28 @@ DEFAULT_BBS_MAX_DEPTH = 3
 MAX_GRAPH_VERSION_RETRIES = 3
 
 
+def _reusable_facts(done_outputs: list[DoneOutput]) -> list[dict[str, Any]]:
+    """Project compact, accepted predecessor reuse facts for later batons."""
+    facts: list[dict[str, Any]] = []
+    for done_output in done_outputs:
+        raw = done_output.output.get("reusable_facts", [])
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            fact = {
+                key: item[key]
+                for key in ("subject", "claim_type", "value", "created_at")
+                if key in item
+            }
+            if not {"subject", "claim_type", "value"}.issubset(fact):
+                continue
+            fact["source_node_id"] = done_output.node_id
+            facts.append(fact)
+    return facts
+
+
 def _used_executor_ids(graph: TaskExecutionGraph) -> list[str]:
     """Project reserved/executed Bot identities, never collaboration group IDs.
 
@@ -736,6 +758,7 @@ def get_task_context(self, task_id: str) -> TaskContext:
             spec=root.task_spec,
             all_done_output=outputs,
             gaps=[str(item) for item in graph.extend_props.get("gaps", [])],
+            reusable_facts=_reusable_facts(outputs),
         )
 
 
@@ -827,6 +850,7 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
             else None,
             accepted_execution_patch=accepted_patch,
             accepted_plan_report=_accepted_plan_report(graph, node_id),
+            reusable_facts=_reusable_facts(outputs),
         )
 
 

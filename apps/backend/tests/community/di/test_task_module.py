@@ -305,6 +305,16 @@ def test_task_module_keeps_semantic_only_when_semantic_port_is_absent(monkeypatc
         assert isinstance(discover, SemanticKeywordBotDiscover)
 
 
+def test_task_module_keeps_semantic_search_in_pre(monkeypatch):
+    class _BotPublic:
+        def search_catalog_public_bots_by_keyword(self, **_kwargs):
+            return {"total": 0, "items": []}
+
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    discover = TaskModule._resolve_discover(bot_public=_BotPublic())
+    assert isinstance(discover, SemanticKeywordBotDiscover)
+
+
 def test_task_module_uses_semantic_hybrid_when_semantic_port_is_available():
     class _BotPublic:
         def search_catalog_public_bots_by_keyword(self, **_kwargs):

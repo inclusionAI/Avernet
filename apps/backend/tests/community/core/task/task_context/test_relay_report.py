@@ -194,6 +194,37 @@ def _record_relay_search(service, *, bot_ids, relay_token="attempt-1"):
     )
 
 
+
+def test_reusable_facts_project_to_successor_context() -> None:
+    service = _graph_service()
+    execution = _execution()
+    execution.event.output_patch["reusable_facts"] = [
+        {
+            "subject": "uctcore:risk_profile_s6",
+            "claim_type": "query_result",
+            "value": {"status": "healthy"},
+            "created_at": 1710000000,
+        },
+        {"invalid": True},
+    ]
+
+    service.apply_relay_report(execution)
+    plan = service.apply_relay_report(
+        _planned_single_bot_command(event_id="plan-facts", assignee="bot-2")
+    )
+
+    context = service.get_node_context("task-1", plan.target_node_id)
+    assert context.reusable_facts == [
+        {
+            "subject": "uctcore:risk_profile_s6",
+            "claim_type": "query_result",
+            "value": {"status": "healthy"},
+            "created_at": 1710000000,
+            "source_node_id": "task-1",
+        }
+    ]
+    assert service.get_task_context("task-1").reusable_facts == context.reusable_facts
+
 def test_successor_plan_requires_a_current_generation_search() -> None:
     service = _graph_service()
     service.apply_relay_report(_execution())
