@@ -566,6 +566,8 @@ TECLAW_DEFAULT_MCP_CODES = (
     "mcp.ant.arkai.dimamcpserver",
     "mcp.ant.homistudio.recordmcp",
     "mcp.ant.rpc.dcanttouch.adminservice",
+    "mcp.ant.antitmcp.antmailmcp",
+    "mcp.ant.homistudio.meetmcp",
     "mcp.ant.ecb.ecb-knowledge-mcp-service",
     "hitl",
 )
