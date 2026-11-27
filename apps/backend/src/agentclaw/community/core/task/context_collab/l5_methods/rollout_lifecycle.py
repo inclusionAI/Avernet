@@ -83,8 +83,12 @@ def affected_stages(snapshot: RuntimeSnapshot, selected: tuple[str, ...]) -> set
         affected = expanded
 
 
-def aggregate(snapshot: RuntimeSnapshot) -> None:
-    rollout = snapshot.current()
+def aggregate(snapshot: RuntimeSnapshot, rollout_id: int = 0) -> None:
+    rollout = next(
+        r
+        for r in snapshot.rollouts
+        if r.rollout_id == (rollout_id or snapshot.current_rollout_id)
+    )
     states = {s.status for s in rollout.stages}
     if S.RUN_FAILED in states:
         status = S.RUN_FAILED
@@ -101,6 +105,11 @@ def aggregate(snapshot: RuntimeSnapshot) -> None:
     snapshot.rollouts[snapshot.rollouts.index(rollout)] = replace(
         rollout, status=status
     )
+    if snapshot.multi:
+        from .multi_rollout_state import project
+
+        project(snapshot)
+        return
     # Stage acceptance cannot impersonate a separate owner's root acceptance.
     collet_status = (
         S.RUN_FINISHED
@@ -111,7 +120,9 @@ def aggregate(snapshot: RuntimeSnapshot) -> None:
 
 
 def replace_stage(snapshot: RuntimeSnapshot, stage: StageRollout) -> None:
-    rollout = snapshot.current()
+    from .multi_rollout_state import stage_rollout
+
+    rollout = stage_rollout(snapshot, stage.stage_rollout_id)
     stages = [
         stage if s.stage_rollout_id == stage.stage_rollout_id else s
         for s in rollout.stages
@@ -121,16 +132,15 @@ def replace_stage(snapshot: RuntimeSnapshot, stage: StageRollout) -> None:
     snapshot.rollouts[snapshot.rollouts.index(rollout)] = replace(
         rollout, stages=stages
     )
-    aggregate(snapshot)
+    aggregate(snapshot, rollout.rollout_id)
 
 
 def apply_progress(snapshot: RuntimeSnapshot, event: ProgressEvent) -> None:
+    from .multi_rollout_state import stage_rollout
+
+    rollout = stage_rollout(snapshot, event.stage_rollout_id)
     stage = next(
-        (
-            s
-            for s in snapshot.current().stages
-            if s.stage_rollout_id == event.stage_rollout_id
-        ),
+        (s for s in rollout.stages if s.stage_rollout_id == event.stage_rollout_id),
         None,
     )
     if stage is None or snapshot.stopped or stage.status in TERMINAL:

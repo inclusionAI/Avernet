@@ -1,6 +1,6 @@
 """L5 四种基础方法与 MethodBinding 值对象。
 
-``MethodKind`` 只包含 Single / Group / Swarm / Open。产品组合不是新的
+``MethodKind`` 包含四个核心方法及本地 MultiRollout 扩展。产品组合不是新的
 方法种类;产品选择及历史绑定中的组合 wire 字符串由 ``parse_method_kinds``
 单独校验、投影,新组合拓扑通过独立 MethodBinding 与组合边表达。
 
@@ -25,12 +25,13 @@ _COMPOSITE_SEPARATOR = " + "
 
 
 class MethodKind(str, Enum):
-    """L5 的四种基础方法;产品组合不能成为枚举成员。"""
+    """L5 四种核心方法及显式本地扩展;产品组合不是枚举成员。"""
 
     SINGLE = "Single"
     GROUP = "Group"
     SWARM = "Swarm"
     OPEN = "Open"
+    MULTI_ROLLOUT = "MultiRollout"
 
     @staticmethod
     def from_wire(value: str) -> "MethodKind":

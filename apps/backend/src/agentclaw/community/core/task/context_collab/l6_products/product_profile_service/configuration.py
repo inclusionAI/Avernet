@@ -52,7 +52,13 @@ from agentclaw.community.core.task.context_collab.l6_products.relation_storage i
     from_legacy_relation_fields,
 )
 
+from ...l5_methods.multi_rollout_policy import (
+    MULTI_POLICY_TYPES,
+    MultiRolloutMethodPolicy,
+)
+
 COMPOSITION_TYPES = (
+    *MULTI_POLICY_TYPES,
     *WORKFLOW_TYPES,
     AgentRef,
     MethodProfile,
@@ -96,6 +102,7 @@ def validate_configuration(composition, stages, execution):
             if policy is not None and (
                 type(policy)
                 not in {
+                    MultiRolloutMethodPolicy,
                     SwarmStagesPolicy,
                     SwarmWorkflowPolicy,
                     OpenMethodPolicy,
@@ -132,6 +139,22 @@ def validate_configuration(composition, stages, execution):
         raise Invalid("duplicate or cyclic Method relations")
     if len(kinds) > 1 and {k for pair in pairs for k in pair} != set(kinds):
         raise Invalid("selected Methods require explicit connected relations")
+    if "MultiRollout" in kinds:
+        roots = [d for d in required if d.profile.method_kind == "MultiRollout"]
+        outgoing = [
+            r for r in composition.relations if r.source_method == "MultiRollout"
+        ]
+        if (
+            type(roots[0].policy) is not MultiRolloutMethodPolicy
+            or len(outgoing) != 1
+            or outgoing[0].relation is not CompositionRelation.NEST
+            or outgoing[0].target_method != "Swarm"
+            or set(kinds) != {"MultiRollout", "Swarm"}
+            or len(composition.relations) != 1
+        ):
+            raise Invalid(
+                "MultiRollout requires exactly one executable NEST Swarm body"
+            )
     specs = compile_stages(stages)
     # Never silently choose YAML over an independently writable legacy DAG.
     if any(isinstance(d.policy, SwarmWorkflowPolicy) for d in (*required, *optional)):
@@ -163,4 +186,15 @@ def decode_profile(data: dict) -> ProductProfile:
         data["name"],
         decode_composition(from_legacy_relation_fields(data["composition"])),
         data["stages"],
+    )
+
+
+def multi_policy(composition):
+    return next(
+        (
+            d.policy
+            for d in composition.required_methods
+            if d.profile.method_kind == "MultiRollout"
+        ),
+        None,
     )

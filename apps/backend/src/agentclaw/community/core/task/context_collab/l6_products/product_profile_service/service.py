@@ -53,6 +53,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     validate_configuration,
+    multi_policy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.ports import (
     ProductProfileRepository,
@@ -60,6 +61,10 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.snapshot_codec import (
     canonical,
 )
+
+
+from ...l5_methods.multi_rollout_projection import control_metadata
+from ...l5_methods.multi_rollout_controller import MultiRolloutController
 
 
 class ProductProfileService(ProductProfileServiceProtocol):
@@ -71,6 +76,7 @@ class ProductProfileService(ProductProfileServiceProtocol):
         execution: RolloutExecutionPort,
         interaction: RolloutInteractionPort,
         messages: StageSessionMessagesPort,
+        multi_rollout: MultiRolloutController | None = None,
     ) -> None:
         self._repository = repository
         self._publisher = publisher
@@ -78,6 +84,7 @@ class ProductProfileService(ProductProfileServiceProtocol):
         self._execution = execution
         self._interaction = interaction
         self._messages = messages
+        self._multi_rollout = multi_rollout
 
     async def create_product_profile(
         self,
@@ -89,9 +96,10 @@ class ProductProfileService(ProductProfileServiceProtocol):
         text(name, maximum=256)
         # Keep the existing independently configured management authority.
         self._publisher.check_publish(name, 1, context)
-        await asyncio.to_thread(
+        specs, execution_policy = await asyncio.to_thread(
             validate_configuration, composition, stages, self._execution
         )
+        await self._multi_setup(composition, specs, execution_policy, context)
         return await asyncio.to_thread(
             self._repository.create_profile,
             name,
@@ -109,16 +117,36 @@ class ProductProfileService(ProductProfileServiceProtocol):
             self._repository.get_profile, profile_id
         )
         self._authorization.check("create", context, owner)
-        await asyncio.to_thread(
-            validate_configuration,
-            profile.composition,
-            profile.stages,
-            self._execution,
+        specs, execution_policy = await asyncio.to_thread(
+            validate_configuration, profile.composition, profile.stages, self._execution
         )
+        setup = await self._multi_setup(
+            profile.composition, specs, execution_policy, context
+        )
+        kwargs = {"multi_setup": setup} if setup else {}
         snapshot = await asyncio.to_thread(
-            self._repository.create_collet, profile, content, context, uuid4().hex
+            self._repository.create_collet,
+            profile,
+            content,
+            context,
+            uuid4().hex,
+            **kwargs
         )
         return snapshot.collet
+
+    async def _multi_setup(self, composition, specs, execution_policy, context):
+        policy = multi_policy(composition)
+        if policy is None:
+            return None
+        if self._multi_rollout is None:
+            raise Invalid("MultiRollout host capabilities are not configured")
+        return await asyncio.to_thread(
+            self._multi_rollout.configure,
+            policy,
+            specs,
+            execution_policy.execution_ref,
+            context,
+        )
 
     async def query_collet_rollout(
         self, collet_id: int, all_rollout: bool = True
@@ -135,7 +163,11 @@ class ProductProfileService(ProductProfileServiceProtocol):
             else [snapshot.current()]
         )
         return RolloutList(
-            values, snapshot.revision, snapshot.current_rollout_id, snapshot.stopped
+            values,
+            snapshot.revision,
+            snapshot.current_rollout_id,
+            snapshot.stopped,
+            multi_rollout_control=control_metadata(snapshot),
         )
 
     async def interactive(
@@ -163,6 +195,24 @@ class ProductProfileService(ProductProfileServiceProtocol):
             return InteractiveResult(A(replay["type"]), replay["message"])
         if snapshot.current_rollout_id != collet_rollout_id:
             raise Conflict("stale rollout")
+        if snapshot.multi:
+            if self._multi_rollout is None:
+                raise Invalid("MultiRollout controller is not installed")
+            try:
+                result = await self._multi_rollout.interactive(
+                    snapshot, interactive_uuid, interactive_context, context
+                )
+            except Conflict:
+                result = await asyncio.to_thread(
+                    self._repository.replay,
+                    interactive_uuid,
+                    "interactive",
+                    payload,
+                    context,
+                )
+                if result is None:
+                    raise
+            return InteractiveResult(A(result["type"]), result["message"])
         revision = snapshot.revision
         adjustment = await self._interaction.propose(
             deepcopy(snapshot), interactive_context, context

@@ -5,6 +5,7 @@
 (profile_version / composable_relations / primitives_used)与
 ``get_profile`` 查询/拒绝。
 """
+
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
@@ -49,26 +50,45 @@ def test_parse_method_kinds_rejects_unknown(wire):
 
 
 def test_registry_covers_four_core_methods():
-    assert set(METHOD_PROFILE_REGISTRY) == {"Single", "Group", "Open", "Swarm"}
+    assert set(METHOD_PROFILE_REGISTRY) == {
+        "Single",
+        "Group",
+        "Open",
+        "Swarm",
+        "MultiRollout",
+    }
 
 
 def test_profile_declares_composition_relations_and_primitives():
     for name, profile in METHOD_PROFILE_REGISTRY.items():
-        assert profile.profile_version == "0.2"
+        assert profile.profile_version == ("1.0" if name == "MultiRollout" else "0.2")
         assert profile.composable_relations  # 非空，与 Task 3 矩阵行一致（Task 3 再钉）
-        assert set(profile.primitives_used) <= {"Task", "Message", "Artifact", "Decision", "Query", "Activity"}
+        assert set(profile.primitives_used) <= {
+            "Task",
+            "Message",
+            "Artifact",
+            "Decision",
+            "Query",
+            "Activity",
+        }
 
 
 def test_profile_declares_participation_model_and_capabilities():
     for name, profile in METHOD_PROFILE_REGISTRY.items():
-        assert profile.participation_model in {"selected", "roster", "stage", "admission"}
+        assert profile.participation_model in {
+            "selected",
+            "roster",
+            "stage",
+            "admission",
+            "body",
+        }
         assert profile.method_kind == name
         assert profile.capabilities
 
 
 def test_get_profile_returns_registry_entry():
     for name, profile in METHOD_PROFILE_REGISTRY.items():
-        assert get_profile(name) is profile
+        assert get_profile(name, profile.profile_version) is profile
 
 
 def test_get_profile_rejects_unknown_method():

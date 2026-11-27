@@ -1,6 +1,6 @@
 """Product runtime v2 tables. One CAS snapshot is the sole aggregate authority."""
 
-from sqlalchemy import Column, String, Index, ForeignKey
+from sqlalchemy import Column, String, Index, ForeignKey, Integer
 from sqlalchemy.dialects import mysql
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
@@ -77,6 +77,54 @@ class ProductIntentRow(Axes, Base):
     kind = Column(exact(16), nullable=False)
     payload_json = Column(_medium_text(), nullable=False)
     state = Column(exact(16), nullable=False, default="pending")
+    logical_key = Column(exact(64), nullable=True)
+    claim_owner = Column(exact(64), nullable=False, default="")
+    lease_until = Column(AutoIncrementBigInteger, nullable=False, default=0)
+    __table_args__ = (
+        Index(
+            "uk_product_intent_v2_key",
+            "avernet_tenant",
+            "env",
+            "logical_key",
+            unique=True,
+        ),
+        Index(
+            "ix_product_intent_v2_ready",
+            "avernet_tenant",
+            "env",
+            "state",
+            "lease_until",
+        ),
+    )
+
+
+class ProductCandidateSlotRow(Axes, Base):
+    """Tenant-wide admission, not an expiring process-local semaphore.
+
+    Unknown dispatch and unconfirmed cancellation MUST retain their slots.
+    """
+
+    __tablename__ = "ac_product_candidate_slot_v1"
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    ordinal = Column(Integer, nullable=False)
+    collet_id = Column(AutoIncrementBigInteger, nullable=False)
+    rollout_id = Column(AutoIncrementBigInteger, nullable=False)
+    __table_args__ = (
+        Index(
+            "uk_product_candidate_slot_v1",
+            "avernet_tenant",
+            "env",
+            "ordinal",
+            unique=True,
+        ),
+        Index(
+            "uk_product_candidate_run_v1",
+            "avernet_tenant",
+            "env",
+            "rollout_id",
+            unique=True,
+        ),
+    )
 
 
 for model in (
@@ -85,5 +133,6 @@ for model in (
     ProductRuntimeRow,
     ProductReceiptRow,
     ProductIntentRow,
+    ProductCandidateSlotRow,
 ):
     register_avernet_tenant_guard(model)

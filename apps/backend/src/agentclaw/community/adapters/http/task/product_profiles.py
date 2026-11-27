@@ -28,6 +28,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from agentclaw.community.adapters.http.task.product_body_limits import (
     ProductBodyLimitRoute,
 )
+from .product_rollout_schemas import RolloutQueryResponse
 from agentclaw.community.di import Injected
 
 
@@ -117,7 +118,9 @@ async def create_collet(
     return envelope(asdict(result), request)
 
 
-@router.get("/collets/{collet_id}/rollouts", response_model=Envelope[dict])
+@router.get(
+    "/collets/{collet_id}/rollouts", response_model=Envelope[RolloutQueryResponse]
+)
 @envelope_errors
 async def query_rollouts(
     collet_id: int,
@@ -132,6 +135,11 @@ async def query_rollouts(
             "revision": result.revision,
             "current_rollout_id": result.current_rollout_id,
             "stopped": result.stopped,
+            **(
+                {"multi_rollout_control": result.multi_rollout_control}
+                if result.multi_rollout_control is not None
+                else {}
+            ),
         },
         request,
     )

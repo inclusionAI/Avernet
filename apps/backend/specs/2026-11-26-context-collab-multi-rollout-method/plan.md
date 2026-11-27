@@ -1,6 +1,6 @@
 # L5 MultiRollout Method 实施与验证计划
 
-- 状态：Draft / MultiRollout 尚未执行；依赖 [spec](spec.md) 评审。关系端点命名已独立调整，不代表 S1 完成。
+- 状态：Implementation executed (2026-11-27)；S1–S6 本地代码与测试已实施，最终验证及外部集成缺口见 [delivery](delivery.md)。下文保留原计划的任务与验收意图。
 - 基线：`3857a08d93`；证据和外部文档限制见 [research](research.md)。
 - 顺序原则：先解决运行权威/恢复，再做并发和 Agent；不能先在 L6 用循环拼出表面效果。
 
@@ -79,7 +79,7 @@
 
 ## 7. 验证命令与证据边界
 
-以下是**实施后待执行**的命令，目录为 `apps/backend/`；新测试目录在实施时创建。
+以下保留原计划的验证命令，目录为 `apps/backend/`；新增测试目录已创建。已执行命令与最终统计见 [delivery](delivery.md)，不能把计划命令本身当作验证证据。
 
 ```bash
 DEPLOY_PROFILE=test uv run --no-sync pytest -q \
@@ -102,3 +102,18 @@ bash scripts/ci_test.sh
 - 更新 L5/产品 owning README 与 Context Boundary，记录本地扩展和截止/恢复诊断。
 - 实施交付另写 delivery：实现、CI、MySQL DDL、真实 provider、企业装配、部署分别列证据/缺口。
 - 本轮 spec 的文档解析/链接检查不是上述测试通过；不得复用前轮 35,402 passed 作为新验收。
+
+
+## 8. 执行结果索引（2026-11-27）
+
+| 切片 | 实际交付 |
+| --- | --- |
+| S1 | MultiRollout@1.0、闭合 policy/预算/codec、有限组合矩阵及唯一有效 NEST Swarm 校验；旧 core @0.2 与 v1 wire 保留 |
+| S2 | multi-rollout@1 snapshot、独立候选/plan/Binding/edge、SQL CAS/回执/预算/后继/outbox 原子性；新增租户槽位与认领 lease/fence DDL |
+| S3 | candidate-scoped engine/MethodRunPort、真实 Bot adapter 路由/观察/验收、隔离 envelope、stage plan 输入投影；默认完整重跑而非无证明复用 |
+| S4 | 并发 provider I/O、持久槽位/跨 Collet 原子配额、收齐候选与受信评分选优；稳定 tie-break、失败隔离、无效分拒绝 |
+| S5 | 失败后人工等待或自主 intent；统一 typed patch/预算裁决；UUID 在途认领、原决定回放、bounded no-progress/截止与调用预扣 |
+| S6 | 多候选查询/OpenAPI、公共默认拒绝 DI、显式 worker/deadline sweep、取消/迟到 route 对账与有限观测字段 |
+
+本地测试包括多连接 SQLite、真实文件命名空间和 provider blocking 栅栏。
+最终命令与计数以 delivery 为准；MySQL 执行、企业策略 Agent、真实外部副作用/取消和部署不在已验证边界内。

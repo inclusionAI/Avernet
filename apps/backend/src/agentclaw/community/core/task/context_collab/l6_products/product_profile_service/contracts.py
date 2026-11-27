@@ -82,8 +82,11 @@ class RolloutList(list[ColletRollout]):
         revision: int,
         current_rollout_id: int,
         stopped: bool,
+        *,
+        multi_rollout_control: dict | None = None,
     ) -> None:
         super().__init__(values)
         self.revision = revision
         self.current_rollout_id = current_rollout_id
         self.stopped = stopped
+        self.multi_rollout_control = multi_rollout_control

@@ -1,7 +1,7 @@
 # Context Collab L5 MultiRollout Method：并发选优与反馈驱动迭代
 
 - 日期：2026-11-26
-- 状态：**Draft / 待评审；本轮仅提出方案，未实现、未迁移、未发布**。
+- 状态：**Implemented / 本地开发与验收已执行，完整 CI 结果见 [delivery](delivery.md)；未合并、未部署，外部集成未验证**。
 - 拥有模块：Backend `core/task/context_collab/l5_methods`；L6 负责选择与装配。
 - 目标基线：`3857a08d9300f7950978c2ba3fc516b2b5f80ff9`。
 - 配套：[源码与依据](research.md)、[实施与验证计划](plan.md)。
@@ -103,7 +103,7 @@ ProductProfile
 
 ## 4. 最小合同与配置
 
-以下新增 MultiRollout 类型及组合示例属于**目标合同**，当前源码尚不能直接接受 MultiRollout。
+以下是原始方案的目标合同；2026-11-27 已实现本地执行路径，实际交付与外部集成边界见 [delivery](delivery.md)。
 既有 Template 的端点命名已单独调整为 source_method/target_method；新增值类型属于 L5，不把子方法配置复制到 L6。
 
 ### 4.1 组合关系：仅使用 MethodCompositionTemplate
@@ -554,3 +554,18 @@ progress 的回执/CAS、interactive、stop、选择/演进决定竞争同一权
 MultiRollout 本身仍是 Draft，尚未实现。独立的 MethodRelationTemplate 端点重命名已传播至合同、校验、
 拓扑、存储读取和 DI 消费者；五方法签名与 SQL DDL 未改。实际验证与之前的方案阶段证据分别记入
 [research](research.md)；端点重命名回归不代表上述多候选验收用例、完整 Backend CI、真实 Agent/Provider、MySQL 或部署已通过。
+
+
+### 12.4 2026-11-27 开发交付
+
+用户确认实施后，新增 MultiRollout@1.0 的策略/预算、候选作用域 durable Swarm、
+单 SQL snapshot/CAS、跨 Collet SQL admission、leased/fenced outbox、可信选优、
+人工/自主统一策略裁决与幂等、绝对等待/全局截止、查询/HTTP schema 和 fail-closed DI。
+独立 candidate Binding/edge/plan/session 与预算/后继/回执/outbox 原子保存；默认完整重跑，
+不声称未经证明的局部证据复用。§12.3 保留为方案阶段历史，不是当前实现状态。
+
+当前 owning 合同：[L5 MultiRollout](../../src/agentclaw/community/core/task/context_collab/l5_methods/MULTI-ROLLOUT.md)、
+[ProductProfile 配置与集成](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-opt-in)。
+新增测试位于 `tests/community/core/task/context_collab/multi_rollout/`。
+执行命令、失败修复、最终 CI、DDL 与外部能力缺口分别记录在 [delivery](delivery.md)，
+不将方案阶段或端点改名的旧测试统计当作本次验收。

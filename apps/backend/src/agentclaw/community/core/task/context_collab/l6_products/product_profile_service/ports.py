@@ -11,6 +11,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.rollout_contracts i
     RolloutRepository,
     RuntimeSnapshot,
 )
+from ...l5_methods.multi_rollout_contracts import MultiRolloutSetup
+
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
 )
@@ -36,4 +38,6 @@ class ProductProfileRepository(RolloutRepository, Protocol):
         content: str,
         context: ActorContext,
         request_id: str,
+        *,
+        multi_setup: MultiRolloutSetup | None = None,
     ) -> RuntimeSnapshot: ...

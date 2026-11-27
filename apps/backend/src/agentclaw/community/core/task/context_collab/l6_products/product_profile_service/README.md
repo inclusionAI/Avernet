@@ -23,6 +23,7 @@ consumes:
   - RolloutExecutionPort
   - RolloutInteractionPort
   - StageSessionMessagesPort
+  - MultiRolloutController
 internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.task.context_collab
@@ -66,7 +67,8 @@ after a successor rollout or later state change. Reusing it for different conten
 or a different rollout conflicts. Current authorization always precedes replay.
 The result, state changes, successor identities and cancellation/advance intents
 commit atomically; repeated calls cannot add another committed side effect.
-Receipts survive service/process reconstruction. Concurrent duplicates may compute
+Receipts survive service/process reconstruction. For ordinary serial profiles,
+concurrent duplicates may compute
 a proposal more than once, but the proposal capability must not mutate durable
 state or dispatch/cancel runs itself.
 
@@ -78,7 +80,7 @@ cannot control a superseded rollout. `limit` remains bounded. This signature
 change is breaking: remove old `context`/`request_id` and interactive
 `expected_revision` fields; HTTP interaction bodies contain only `interactive_uuid`
 and `interactive_context` (unknown body fields are rejected). No SQL migration
-is required; existing receipts and independent Bot progress replay semantics are
+is required for that signature change; existing receipts and independent Bot progress replay semantics are
 unchanged.
 
 ## Creation, queries and revision metadata
@@ -183,9 +185,10 @@ profile. A host must supply the real capabilities and schedule the worker.
 
 ## Storage, recovery and compatibility
 
-Apply the [v2 DDL](../../sql/2026_11_26_product_runtime_v2.sql). Five tables hold
+Apply the [v2 DDL](../../sql/2026_11_26_product_runtime_v2.sql). Five base tables hold
 complete configuration, explicit integer identity mappings, a versioned runtime
-snapshot, operation receipts and durable intents. The runtime snapshot contains
+snapshot, operation receipts and durable intents; MultiRollout adds one tenant-wide
+candidate admission table. The runtime snapshot contains
 independent Collet/Rollout/Stage records, parent/current relationships, frozen
 Method facts, attempts, leases, sessions and evidence. It is the **single** v2
 execution authority, not a view assembled from process-local Plan/Stage dicts.
@@ -223,3 +226,116 @@ exact provider/session routing. They are **not** evidence of a live Bot/provider
 a target MySQL deployment, enterprise integration or remote cancellation.
 The change's actual commands/results and remaining migration work belong in its
 [delivery report](../../../../../../../../specs/2026-11-26-context-collab-protocol-optimization/delivery.md).
+
+
+## MultiRollout NEST Swarm (opt-in)
+
+The [L5 runtime contract](../../l5_methods/MULTI-ROLLOUT.md) owns candidate execution,
+state, bounded strategies, isolation, unknown outcomes and recovery. This service
+only validates/instantiates composition and exposes the same five public methods.
+It does not implement a second retry loop or activate optional methods.
+
+A ProductProfile still has only `id/name/composition/stages`. Use **one** Swarm
+MethodTemplate and an explicit directed relation; do not add `body_method` or
+repeat Swarm templates N times:
+
+```python
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import get_profile
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import SwarmStagesPolicy
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import CompositionRelation
+from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_policy import (
+    MultiRolloutMethodPolicy, MultiRolloutLimits, ParallelBestOf, AdaptiveUntilAccepted,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodCompositionTemplate, MethodTemplate, MethodRelationTemplate,
+)
+
+multi_policy = MultiRolloutMethodPolicy(
+    strategy=ParallelBestOf(samples=4, max_concurrency=2, selection_ref="highest-score@1"),
+    limits=MultiRolloutLimits(
+        max_rollouts=4, max_elapsed_seconds=3600, max_stage_dispatches=100,
+        max_strategy_calls=8, max_no_progress=2,
+    ),
+    isolation_ref="per-candidate-workspace@1",  # requires a real host binding
+)
+composition = MethodCompositionTemplate(
+    required_methods=(
+        MethodTemplate(get_profile("MultiRollout", "1.0"), multi_policy),
+        MethodTemplate(get_profile("Swarm", "0.2"), SwarmStagesPolicy(
+            execution_ref="openapi-bot/v1", acceptance_ref="trusted-evidence/v1",
+            overall_acceptance="owner",
+        )),
+    ),
+    relations=(MethodRelationTemplate(
+        source_method="MultiRollout", target_method="Swarm", relation=CompositionRelation.NEST,
+    ),),
+)
+# In an authenticated actor scope with governed host capabilities installed:
+# profile = await service.create_product_profile("best-of-swarm", composition, stages_yaml)
+```
+
+For iterative operation replace **only the MultiRollout policy strategy**, not
+its composition relation:
+
+```python
+strategy = AdaptiveUntilAccepted(
+    feedback_mode="interactive", adaptation_ref="stage-improvement-agent@1",
+    feedback_timeout_seconds=600,
+)
+# Autonomous mode omits feedback_timeout_seconds entirely:
+strategy = AdaptiveUntilAccepted(
+    feedback_mode="autonomous", adaptation_ref="stage-improvement-agent@1",
+)
+```
+
+These example references are installation requirements, not claims that an
+enterprise Agent, workspace provider or trusted evaluator is installed publicly.
+`ProductProfileRuntimeModule` binds unavailable strategy/isolation/notification
+ports; publication and create recheck the host capabilities. Autonomous delegation
+and resource access are also rechecked on real strategy/execution paths.
+
+### Query and interaction contract
+
+Only new MultiRollout profiles receive `multi_rollout_control` in the HTTP Envelope
+alongside existing rollouts/revision/current_rollout_id/stopped. The published
+HTTP response schema describes the extension. It includes controller phase/outcome,
+focus/winner, all actual candidate IDs, plan versions/digests, body Bindings,
+trusted scores, hard budget usage, reservations/peak, absolute waiting deadline,
+strategy-call dispositions/durations and cancel requested/unknown/confirmed facts.
+No raw feedback or credentials are in this projection. Legacy HTTP JSON omits the
+extension; `all_rollout=false` returns the focus only, not all active candidates.
+
+Interactive UUID/actor authorization and the signature are unchanged. MultiRollout
+adds a durable in-flight operation fence: same or competing adaptive feedback
+cannot call two Agents at once. Committed results replay before focus/terminal
+checks, with fresh authorization. New UUIDs cannot alter a terminal run. Parallel
+interaction permits only SHUTDOWN; adaptive adjustments require WAITING_FEEDBACK.
+Trusted SHUTDOWN can fence an in-flight selection/adaptation. Ordinary serial
+profiles retain their previous proposal/CAS behavior.
+
+Signed progress retains its separate request_id/attempt/**aggregate**
+expected_revision. A valid non-focus candidate may report; concurrent sibling
+reports can CAS-conflict normally. Follow the original-request replay and then
+confirmed-stale/new-technical-ID retry procedure in the L5 guide.
+
+### Storage, scheduling and deployment
+
+New installations use the current [bootstrap DDL](../../sql/2026_11_26_product_runtime_v2.sql).
+Existing v2 installations must stop writers/workers and apply the additive
+[MultiRollout upgrade](../../sql/2026_11_27_multi_rollout.sql) **once** before running
+new code: outbox logical-key/claim lease/fence columns/indexes and a tenant-wide
+candidate admission table are required. No separate tables per plan/decision.
+Existing JSON snapshots and receipts are not rewritten. This is not a claim that
+the MySQL script has been executed against a production installation.
+
+The host schedules both worker `run_once` and `check_deadlines`. Claimed leases
+recover with fencing; unknown dispatch and unconfirmed cancellation retain quota.
+Without provider query/idempotency reconciliation, an unknown attempt is not
+redelivered. A late route remains cancellation work. A positive cancellation
+acknowledgement or actual terminal provider observation settles external occupancy;
+it does not manufacture a cancelled business event. No implicit timer/thread is
+started by profile creation, and a configured Agent alone is not a running worker.
+
+Rollback must first stop/drain/reconcile MultiRollout executions and preserve a
+reader for `product-runtime/multi-rollout@1`; never point an old writer at this new
+snapshot or delete quota rows for unknown external runs.
