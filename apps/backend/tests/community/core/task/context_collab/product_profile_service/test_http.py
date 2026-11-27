@@ -123,7 +123,7 @@ def test_http_uses_authenticated_actor_for_every_product_operation(client, creat
                 "stages": h.stages,
             },
         ).status_code
-        == 422
+        == 200
     )
     assert (
         client.post(

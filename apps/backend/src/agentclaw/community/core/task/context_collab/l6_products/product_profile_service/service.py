@@ -49,6 +49,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
     RolloutList,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
+    compile_configuration,
     validate_configuration,
     default_composition,
     multi_policy,
@@ -118,7 +119,7 @@ class ProductProfileService(ProductProfileServiceProtocol):
             )
             composition = default_composition()
             specs, execution_policy = await asyncio.to_thread(
-                validate_configuration, composition, stages, self._execution
+                compile_configuration, composition, stages
             )
             logger.info(
                 "product_profile.create.step.complete operation_id=%s step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
@@ -127,18 +128,6 @@ class ProductProfileService(ProductProfileServiceProtocol):
                 len(specs),
                 execution_policy.execution_ref,
                 execution_policy.acceptance_ref,
-            )
-            step = "multi-rollout-setup"
-            logger.info(
-                "product_profile.create.step.start operation_id=%s step=%s",
-                operation_id,
-                step,
-            )
-            await self._multi_setup(composition, specs, execution_policy, context)
-            logger.info(
-                "product_profile.create.step.complete operation_id=%s step=%s",
-                operation_id,
-                step,
             )
             step = "repository-persistence"
             logger.info(

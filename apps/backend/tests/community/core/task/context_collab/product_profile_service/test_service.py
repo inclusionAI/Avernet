@@ -175,15 +175,21 @@ async def test_runtime_authorization_precedes_persistence_and_provider(created):
     h.bot.get_session_messages.assert_not_awaited()
 
 
-async def test_profile_requires_real_capabilities(runtime):
+async def test_profile_creation_does_not_require_runtime_capabilities(runtime):
     h = runtime
     h.service._execution = (
         UnavailableRolloutExecution()
     )  # capability binding, not mocking tested behavior
-    with pytest.raises(Invalid, match="not configured"):
-        await h.service.create_product_profile("coding", h.stages)
+    h.service._multi_rollout = None
+    profile = await h.service.create_product_profile("coding", h.stages)
+    assert profile.name == "coding"
     with h.repository.db.orm_session() as session:
-        assert session.query(ProductConfigurationRow).count() == 0
+        assert session.query(ProductConfigurationRow).count() == 1
+
+    with pytest.raises(Invalid, match="not configured"):
+        await h.service.create_product_collet(profile.id, "build a feature")
+    with h.repository.db.orm_session() as session:
+        assert session.query(ProductRuntimeRow).count() == 0
 
 
 async def test_query_is_read_only_and_uses_explicit_current_pointer(created):
