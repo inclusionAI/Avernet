@@ -1,4 +1,8 @@
-import type { CreateTodoAutoImportRuleInput, TodoAutoImportRule } from '@/domain/todos/models';
+import type {
+  CreateTodoAutoImportRuleInput,
+  TodoAutoImportRule,
+  UpdateTodoAutoImportRuleInput,
+} from '@/domain/todos/models';
 import {
   createTodoAutoImportRule,
   loadTodoAutoImportRules,
@@ -61,6 +65,21 @@ export function useTodoAutoImportRules({ active, spaceId }: UseTodoAutoImportRul
     }
   };
 
+  const updateRule = async (rule: TodoAutoImportRule, input: UpdateTodoAutoImportRuleInput) => {
+    setUpdatingRuleId(rule.ruleId);
+    setError('');
+    try {
+      const updated = await updateTodoAutoImportRule(rule.ruleId, input);
+      setRules((current) => current.map((item) => (item.ruleId === updated.ruleId ? updated : item)));
+      return true;
+    } catch {
+      setError('自动导入规则更新失败，请重试。');
+      return false;
+    } finally {
+      setUpdatingRuleId('');
+    }
+  };
+
   const setRuleEnabled = async (rule: TodoAutoImportRule, enabled: boolean) => {
     setUpdatingRuleId(rule.ruleId);
     setError('');
@@ -84,6 +103,7 @@ export function useTodoAutoImportRules({ active, spaceId }: UseTodoAutoImportRul
     error,
     refresh,
     createRule,
+    updateRule,
     setRuleEnabled,
   };
 }

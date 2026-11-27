@@ -1,12 +1,20 @@
 import type {
+  BotTeamDetail,
+  BotTeamRecord,
   CreateTodoAutoImportRuleInput,
   CreateTodoInput,
   CreateTodoInteractionInput,
+  CreateTodoProductInteractionInput,
+  DimaImportResult,
+  ImportDimaTodosInput,
+  SaveBotTeamInput,
   TodoAcceptanceInput,
   TodoArtifact,
   TodoAutoImportRule,
   TodoEvent,
   TodoListQuery,
+  TodoProductInteraction,
+  TodoProductInteractionPage,
   TodoProgress,
   TodoRecord,
   TodoSourceDraft,
@@ -20,10 +28,16 @@ import { BackendRequestError } from '../httpClient';
 import { isEnvelopeSuccess, type BackendApiEnvelope, type BackendApiPage } from '../types';
 import {
   createTodoAutoImportRule as createTodoAutoImportRuleRequest,
+  archiveBotTeam,
+  cancelTodoProductInteraction as cancelTodoProductInteractionRequest,
   createTodo,
+  createBotTeam,
   createTodoInteraction,
+  createTodoProductInteraction,
   downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
+  listTodoProductInteractions,
   getTodo,
+  getBotTeam,
   getTodoProgress,
   getTodoSourceDraft,
   listTodoArtifacts,
@@ -33,25 +47,49 @@ import {
   listTodoSourceProjects,
   listTodoSourceWorkItems,
   listTodoAutoImportRules,
+  listBotTeams,
   listTodoSpaces,
   runTodo,
   submitTodoAcceptance,
   TODO_ENDPOINTS,
   updateTodoAutoImportRule as updateTodoAutoImportRuleRequest,
+  updateBotTeam,
+  importDimaTodos,
+  type BotTeamDetailDto,
+  type BotTeamRecordDto,
   type TodoAutoImportRuleDto,
   type TodoArtifactDto,
   type TodoDto,
   type TodoEventDto,
+  type TodoProductInteractionDto,
+  type TodoProductInteractionPageDto,
   type TodoSourceDraftDto,
   type TodoSourceProjectDto,
   type TodoSourceWorkItemDto,
   type TodoSpaceDto,
   type TodoSpacePageDto,
 } from './todoController';
-import { mapTodoArtifactDto, mapTodoDto, mapTodoEventDto, mapTodoProgressDto } from './todoMapper';
+import {
+  mapBotTeamDetailDto,
+  mapBotTeamRecordDto,
+  mapDimaImportResultDto,
+  mapTodoArtifactDto,
+  mapTodoDto,
+  mapTodoEventDto,
+  mapTodoProductInteractionDto,
+  mapTodoProductInteractionPageDto,
+  mapTodoProgressDto,
+} from './todoMapper';
 
 export interface TodoPage {
   items: TodoRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface BotTeamPage {
+  items: BotTeamRecord[];
   total: number;
   page: number;
   pageSize: number;
@@ -126,6 +164,52 @@ export async function loadTodo(todoId: string): Promise<TodoRecord> {
   return mapTodoDto(unwrap(response, TODO_ENDPOINTS.detail(todoId)));
 }
 
+export async function loadBotTeams(
+  spaceId: number,
+  status?: 'active' | 'archived',
+): Promise<BotTeamPage> {
+  const data = unwrap<BackendApiPage<BotTeamRecordDto>>(
+    await listBotTeams(spaceId, status),
+    TODO_ENDPOINTS.botTeams,
+  );
+  const items = Array.isArray(data.items) ? data.items.map(mapBotTeamRecordDto) : [];
+  return {
+    items,
+    total: data.total ?? items.length,
+    page: data.page ?? 1,
+    pageSize: data.pageSize ?? data.page_size ?? 100,
+  };
+}
+
+export async function loadBotTeam(botTeamId: string): Promise<BotTeamDetail> {
+  return mapBotTeamDetailDto(
+    unwrap<BotTeamDetailDto>(await getBotTeam(botTeamId), TODO_ENDPOINTS.botTeam(botTeamId)),
+  );
+}
+
+export async function addBotTeam(input: SaveBotTeamInput & { spaceId: number }): Promise<BotTeamDetail> {
+  return mapBotTeamDetailDto(
+    unwrap<BotTeamDetailDto>(await createBotTeam(input), TODO_ENDPOINTS.botTeams),
+  );
+}
+
+export async function saveBotTeam(botTeamId: string, input: SaveBotTeamInput): Promise<BotTeamDetail> {
+  return mapBotTeamDetailDto(
+    unwrap<BotTeamDetailDto>(await updateBotTeam(botTeamId, input), TODO_ENDPOINTS.botTeam(botTeamId)),
+  );
+}
+
+export async function archiveTodoBotTeam(botTeamId: string): Promise<BotTeamRecord> {
+  return mapBotTeamRecordDto(
+    unwrap<BotTeamRecordDto>(await archiveBotTeam(botTeamId), TODO_ENDPOINTS.botTeamArchive(botTeamId)),
+  );
+}
+
+export async function importTodoDimaItems(input: ImportDimaTodosInput): Promise<DimaImportResult[]> {
+  const data = unwrap(await importDimaTodos(input), TODO_ENDPOINTS.dimaImports);
+  return (Array.isArray(data.items) ? data.items : []).map(mapDimaImportResultDto);
+}
+
 
 export async function loadTodoProgress(
   todoId: string,
@@ -155,6 +239,41 @@ export async function addTodoInteraction(todoId: string, input: CreateTodoIntera
   const response = await createTodoInteraction(todoId, input);
   const data = unwrap(response, TODO_ENDPOINTS.interactions(todoId));
   return mapTodoEventDto(data);
+}
+
+export async function loadTodoProductInteractionPage(
+  todoId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<TodoProductInteractionPage> {
+  const path = TODO_ENDPOINTS.productInteractions(todoId);
+  return mapTodoProductInteractionPageDto(
+    unwrap<TodoProductInteractionPageDto>(await listTodoProductInteractions(todoId, page, pageSize), path),
+  );
+}
+
+export async function addTodoProductInteraction(
+  todoId: string,
+  input: CreateTodoProductInteractionInput,
+): Promise<TodoProductInteraction> {
+  const path = TODO_ENDPOINTS.productInteractions(todoId);
+  const data = unwrap<TodoProductInteractionDto>(
+    await createTodoProductInteraction(todoId, input),
+    path,
+  );
+  return mapTodoProductInteractionDto(data);
+}
+
+export async function stopTodoProductInteraction(
+  todoId: string,
+  interactionId: string,
+): Promise<TodoProductInteraction> {
+  const path = TODO_ENDPOINTS.productInteractionCancel(todoId, interactionId);
+  const data = unwrap<TodoProductInteractionDto>(
+    await cancelTodoProductInteractionRequest(todoId, interactionId),
+    path,
+  );
+  return mapTodoProductInteractionDto(data);
 }
 
 export async function loadTodoEvents(todoId: string): Promise<TodoEvent[]> {

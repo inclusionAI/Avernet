@@ -66,8 +66,9 @@ export const notificationService = {
         notificationId: wo.notificationId,
         isRead: wo.isRead,
         bizType: wo.bizType,
-        eventType: wo.eventType,
+         eventType: wo.eventType,
         bbsTarget: wo.bbsTarget,
+        todoTarget: wo.todoTarget,
       }));
       return { data: recent };
     } catch (e) {

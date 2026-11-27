@@ -35,6 +35,12 @@ from agentclaw.community.core.task.todos.stage_models import (
     TodoStageRecord,
     TodoStageStatus,
 )
+from agentclaw.community.core.task.todos.product_interaction_models import (
+    TodoProductInteraction,
+    TodoProductInteractionDeliveryState,
+    TodoProductInteractionKind,
+    TodoProductInteractionResponse,
+)
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
 )
@@ -613,3 +619,87 @@ for _model in (
     TodoArtifactModel,
 ):
     register_avernet_tenant_guard(_model)
+
+
+class TodoProductInteractionModel(Base):
+    """One locally persisted Human request and Product platform response."""
+
+    __tablename__ = "ac_todo_product_interaction"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    interaction_id = Column(String(128), nullable=False)
+    todo_id = Column(String(64), nullable=False)
+    interaction_kind = Column(String(32), nullable=False)
+    target_interaction_id = Column(String(128), nullable=True)
+    product_collet_id = Column(AutoIncrementBigInteger, nullable=False)
+    collet_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
+    expected_revision = Column(BigInteger, nullable=True)
+    actor_id = Column(String(256), nullable=False)
+    actor_name = Column(String(256), nullable=True)
+    request_message = Column(Text, nullable=False)
+    delivery_state = Column(String(32), nullable=False)
+    response_type = Column(String(64), nullable=True)
+    response_message = Column(Text, nullable=True)
+    failure_code = Column(String(64), nullable=True)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "interaction_id",
+            name="uk_todo_product_interaction_tenant_env_id",
+        ),
+        Index(
+            "idx_todo_product_interaction_list",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "gmt_create",
+            "id",
+        ),
+        Index(
+            "idx_todo_product_interaction_state",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "delivery_state",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoProductInteraction:
+        return TodoProductInteraction(
+            interaction_id=self.interaction_id,
+            todo_id=self.todo_id,
+            kind=TodoProductInteractionKind(self.interaction_kind),
+            actor_id=self.actor_id,
+            actor_name=self.actor_name,
+            request_message=self.request_message,
+            delivery_state=TodoProductInteractionDeliveryState(self.delivery_state),
+            product_collet_id=self.product_collet_id,
+            collet_rollout_id=self.collet_rollout_id,
+            expected_revision=self.expected_revision,
+            target_interaction_id=self.target_interaction_id,
+            response=(
+                TodoProductInteractionResponse(self.response_type, self.response_message or "")
+                if self.response_type
+                else None
+            ),
+            failure_code=self.failure_code,
+            created_at=self.gmt_create.isoformat(),
+            updated_at=self.gmt_modified.isoformat(),
+        )

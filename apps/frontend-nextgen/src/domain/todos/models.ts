@@ -13,6 +13,83 @@ export type TodoSourceType = 'manual' | 'dima';
 export type TodoSourceWorkItemCategory = 'req' | 'task' | 'bug';
 export type TodoSourceMetadata = Record<string, string>;
 export type TodoAutoImportRuleStatus = 'enabled' | 'disabled';
+export type TodoExecutorType = 'bot' | 'bot_team';
+export type BotTeamStatus = 'active' | 'archived';
+
+export interface TodoOwner {
+  userId: string;
+  userName: string;
+}
+
+export interface TodoExecutor {
+  type: TodoExecutorType;
+  id: string;
+  revisionId?: string;
+}
+
+export interface TodoExecutorOption extends TodoExecutor {
+  name: string;
+  description?: string;
+}
+
+export interface TodoRequiredArtifactGate {
+  artifactType: string;
+  artifactState: string;
+  minCount: number;
+}
+
+export interface TodoCompletionGate {
+  requiredArtifacts: TodoRequiredArtifactGate[];
+}
+
+export interface BotTeamNode {
+  code: string;
+  name: string;
+  botId: string;
+  approvalRequired: boolean;
+  completionGate: TodoCompletionGate;
+}
+
+export interface BotTeamRecord {
+  botTeamId: string;
+  spaceId: number;
+  name: string;
+  description: string;
+  status: BotTeamStatus;
+  publishedRevisionId?: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotTeamRevision {
+  botTeamRevisionId: string;
+  botTeamId: string;
+  revisionNo: number;
+  name: string;
+  description: string;
+  nodes: BotTeamNode[];
+  definitionHash: string;
+  productProfileId?: number;
+  createdBy: string;
+  publishedBy: string;
+  publishedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotTeamDetail {
+  botTeam: BotTeamRecord;
+  revisions: BotTeamRevision[];
+}
+
+export interface SaveBotTeamInput {
+  spaceId?: number;
+  name: string;
+  description: string;
+  nodes: BotTeamNode[];
+}
 
 /** Todo 工作台从 Task Engine 读取的最小空间视图。 */
 export interface TodoSpace {
@@ -140,6 +217,11 @@ export interface TodoRecord {
   description: string;
   botId: string;
   botName?: string;
+  ownerId?: string;
+  ownerName?: string;
+  templateId?: string;
+  templateVersionId?: string;
+  templateName?: string;
   status: TodoStatus;
   collabContextId?: string;
   createdAt: string;
@@ -176,8 +258,39 @@ export interface CreateTodoInput {
   spaceId: number;
   title: string;
   description: string;
-  botId: string;
+  executor: TodoExecutor;
+  owner: TodoOwner;
   source?: TodoCreateSource;
+}
+
+export interface ImportDimaTodoItemInput {
+  title: string;
+  description: string;
+  source: TodoCreateSource;
+}
+
+export interface ImportDimaTodosInput {
+  spaceId: number;
+  executor: TodoExecutor;
+  owner: TodoOwner;
+  items: ImportDimaTodoItemInput[];
+}
+
+export type DimaImportStatus = 'imported' | 'duplicate' | 'failed';
+export type ProductRuntimeStatus =
+  | 'ready'
+  | 'retryable_failure'
+  | 'not_applicable'
+  | 'binding_conflict'
+  | 'invalid_binding';
+
+export interface DimaImportResult {
+  sourceWorkItemId: string;
+  status: DimaImportStatus;
+  todoId?: string;
+  productRuntimeStatus: ProductRuntimeStatus;
+  errorCode?: string;
+  retryable: boolean;
 }
 
 export interface CreateTodoInteractionInput {
@@ -274,4 +387,50 @@ export interface TodoProgress {
 export interface TodoBotOption {
   botId: string;
   botName: string;
+}
+
+export type TodoProductInteractionKind = 'human_message' | 'stop_request';
+
+export type TodoProductInteractionDeliveryState =
+  | 'sending'
+  | 'delivery_unknown'
+  | 'succeeded'
+  | 'failed'
+  | 'cancel_requested'
+  | 'cancelled';
+
+export type TodoProductInteractionResponseType = 'DO_NOTHING' | 'OPTIMIZE' | 'RE_DO' | 'SHUTDOWN';
+
+export interface TodoProductInteractionResponse {
+  type: TodoProductInteractionResponseType;
+  message: string;
+}
+
+export interface TodoProductInteraction {
+  interactionId: string;
+  todoId: string;
+  kind: TodoProductInteractionKind;
+  actorId: string;
+  actorName?: string;
+  requestMessage: string;
+  deliveryState: TodoProductInteractionDeliveryState;
+  productColletId: number;
+  colletRolloutId?: number;
+  expectedRevision?: number;
+  targetInteractionId?: string;
+  response?: TodoProductInteractionResponse;
+  failureCode?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TodoProductInteractionPage {
+  items: TodoProductInteraction[];
+  canSend: boolean;
+  blockingInteractionId?: string;
+}
+
+export interface CreateTodoProductInteractionInput {
+  message: string;
+  replyToInteractionId?: string;
 }

@@ -81,6 +81,13 @@ export function WorkOrderTabs() {
       navigate(`/lab/community?${query.toString()}`);
       return;
     }
+    if (wo.todoTarget?.todoId) {
+      const { todoId } = wo.todoTarget;
+      if (!wo.isRead) await markOneRead(wo.notificationId);
+      void refreshUnread(true);
+      navigate(`/lab/todos/${encodeURIComponent(todoId)}?focus=interaction`);
+      return;
+    }
     setDetail(wo);
     // 审批类：走工单详情（GET /openapi/v1/work-orders/{work_order_id}）补 apply_reason / review_remark 等
     // 行内看不到的字段；不动已读态（PENDING 审批读过仍要留在「待我处理」，由「标记为已读」显式触发）。

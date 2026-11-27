@@ -54,6 +54,17 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
       navigate(`/lab/community?${query.toString()}`);
       return;
     }
+    if (item?.todoTarget?.todoId) {
+      const { todoId } = item.todoTarget;
+      if (!item.isRead) {
+        void markOneRead(item.notificationId).finally(() => {
+          void loadRecent();
+        });
+      }
+      setOpen(false);
+      navigate(`/lab/todos/${encodeURIComponent(todoId)}?focus=interaction`);
+      return;
+    }
     const cat = item ? categoryFromItemType(item.itemType) : null;
     setOpen(false);
     navigate(cat ? `/ticket-center?category=${cat}` : '/ticket-center');

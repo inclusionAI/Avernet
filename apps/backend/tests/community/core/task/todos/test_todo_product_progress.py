@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,6 +38,13 @@ from agentclaw.community.core.task.todos.services.todo_product_progress_service 
 from agentclaw.community.core.task.todos.services.todo_product_progress_service import (
     parse_product_rollouts,
     map_product_stage_status,
+)
+from agentclaw.community.core.task.todos.notification_models import (
+    TodoNotificationEvent,
+    TodoNotificationPublishResult,
+    TodoNotificationPublishStatus,
+    TodoNotificationType,
+    build_todo_notification_delivery_key,
 )
 from agentclaw.community.core.task.todos.stage_models import (
     TodoStageRecord,
@@ -198,6 +205,17 @@ class _BotTeams:
         return BotTeamDetail(bot_team=team, revisions=(revision,))
 
 
+class RecordingNotifications:
+    def __init__(self) -> None:
+        self.events: list[TodoNotificationEvent] = []
+
+    def publish(self, event: TodoNotificationEvent) -> TodoNotificationPublishResult:
+        self.events.append(event)
+        return TodoNotificationPublishResult(
+            TodoNotificationPublishStatus.PUBLISHED, None
+        )
+
+
 class RecordingProductProfiles:
     def __init__(
         self,
@@ -263,20 +281,29 @@ def _service(
     todo: TodoRecord = _todo(),
     profile_id: int | None = 55,
     products: RecordingProductProfiles | None = None,
+    notifications: RecordingNotifications | None = None,
 ) -> tuple[
     TodoProductProgressService,
     _Todos,
     _BotTeams,
     RecordingProductProfiles,
+    RecordingNotifications,
 ]:
     todos = _Todos(todo)
     teams = _BotTeams(profile_id)
     profiles = products or RecordingProductProfiles()
+    publisher = notifications or RecordingNotifications()
     return (
-        TodoProductProgressService(todos=todos, bot_teams=teams, product_profiles=profiles),
+        TodoProductProgressService(
+            todos=todos,
+            bot_teams=teams,
+            product_profiles=profiles,
+            notifications=publisher,
+        ),
         todos,
         teams,
         profiles,
+        publisher,
     )
 
 
@@ -312,7 +339,7 @@ def test_rollout_parser_rejects_missing_metadata() -> None:
 
 
 def test_service_queries_current_rollout_and_only_the_current_stage_details() -> None:
-    service, _todos, _teams, products = _service()
+    service, _todos, _teams, products, _notifications = _service()
 
     progress = asyncio_run(
         service.get_progress(todo_id="todo_1", actor_id="human_1", limit=25)
@@ -335,7 +362,7 @@ def test_service_queries_current_rollout_and_only_the_current_stage_details() ->
 
 def test_service_keeps_skeleton_when_runtime_is_unavailable() -> None:
     products = RecordingProductProfiles(failure=TimeoutError("timeout"))
-    service, _todos, _teams, product_profiles = _service(products=products)
+    service, _todos, _teams, product_profiles, _notifications = _service(products=products)
 
     progress = asyncio_run(
         service.get_progress(todo_id="todo_1", actor_id="human_1")
@@ -349,7 +376,7 @@ def test_service_keeps_skeleton_when_runtime_is_unavailable() -> None:
 
 def test_legacy_todo_never_calls_product_runtime() -> None:
     products = RecordingProductProfiles()
-    service, _todos, _teams, product_profiles = _service(
+    service, _todos, _teams, product_profiles, _notifications = _service(
         todo=_todo(
             template_id="",
             template_version_id="",
@@ -369,7 +396,7 @@ def test_legacy_todo_never_calls_product_runtime() -> None:
 
 def test_product_pending_reports_provisioning_without_runtime_query() -> None:
     products = RecordingProductProfiles()
-    service, _todos, _teams, product_profiles = _service(
+    service, _todos, _teams, product_profiles, _notifications = _service(
         todo=_todo(product_collet_id=None), products=products
     )
 
@@ -387,3 +414,59 @@ def asyncio_run(coroutine: Any):
     import asyncio
 
     return asyncio.run(coroutine)
+
+
+def _single_stage_rollout(status: StatusEnum) -> ColletRollout:
+    return ColletRollout(
+        collet_id=22,
+        rollout_id=501,
+        stages=[
+            replace(
+                _runtime_stage(1, status=status, stage_rollout_id=1001),
+                status=status,
+            )
+        ],
+        content="todo snapshot",
+        status=StatusEnum.RUNNING,
+    )
+
+
+@pytest.mark.parametrize(
+    ("runtime_status", "notification_type"),
+    [
+        (StatusEnum.RUN_FINISHED, TodoNotificationType.HUMAN_ACTION_REQUIRED),
+        (StatusEnum.ACCEPTANCE_FAILED, TodoNotificationType.VERIFICATION_REQUIRED),
+        (StatusEnum.RUN_FAILED, TodoNotificationType.EXECUTION_INTERRUPTED),
+        (StatusEnum.ACCEPTANCE_SUCCEED, TodoNotificationType.TODO_COMPLETED),
+    ],
+)
+def test_progress_goals_notify_owner_with_stable_delivery_identity(
+    runtime_status: StatusEnum, notification_type: TodoNotificationType
+) -> None:
+    products = RecordingProductProfiles(
+        rollouts=[_single_stage_rollout(runtime_status)]
+    )
+    service, _todos, _teams, _product_profiles, notifications = _service(
+        todo=_todo(owner_id="owner_1"), products=products
+    )
+
+    progress = asyncio_run(service.get_progress(todo_id="todo_1", actor_id="human_1"))
+    asyncio_run(service.get_progress(todo_id="todo_1", actor_id="human_1"))
+
+    assert len(notifications.events) == 2
+    assert all(
+        item.notification_type is notification_type for item in notifications.events
+    )
+    assert notifications.events[0].recipient_id == "owner_1"
+    assert notifications.events[0].notification_type is notification_type
+    assert notifications.events[0].delivery_key == (
+        build_todo_notification_delivery_key(
+            todo_id="todo_1",
+            notification_type=notification_type,
+            rollout_revision=4,
+            stage_rollout_id=1001,
+            action_version=notifications.events[0].action_version,
+        )
+    )
+    assert len({item.delivery_key for item in notifications.events}) == 1
+    assert progress.runtime_unavailable is False

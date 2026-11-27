@@ -9,10 +9,16 @@ import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
  */
 export {
   acceptTodo,
+  addBotTeam,
   addTodo,
   addTodoInteraction,
+  addTodoProductInteraction,
+  archiveTodoBotTeam,
   createTodoAutoImportRule,
   downloadTodoArtifactContent,
+  importTodoDimaItems,
+  loadBotTeam,
+  loadBotTeams,
   loadTodo,
   loadTodoProgress,
   loadTodoArtifacts,
@@ -24,10 +30,13 @@ export {
   loadTodoSourceDraft,
   loadTodoSourceProjects,
   loadTodoSourceWorkItems,
+  loadTodoProductInteractionPage,
+  saveBotTeam,
   startTodoRun,
+  stopTodoProductInteraction,
   updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoService';
-export type { TodoPage, TodoStatus } from '@/services/backendApi/todos/todoService';
+export type { BotTeamPage, TodoPage, TodoStatus } from '@/services/backendApi/todos/todoService';
 
 /** Mention candidates follow the Todo's own Space, not the currently selected UI Space. */
 export async function loadTodoMentionBots(spaceId: number): Promise<TodoBotOption[]> {

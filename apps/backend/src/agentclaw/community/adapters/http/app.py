@@ -376,6 +376,8 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
     _TodoErrors.TodoNotFoundError: 404, _TodoErrors.TodoStateConflictError: 409,
+    _TodoErrors.TodoProductInteractionInFlightError: 409, _TodoErrors.TodoProductInteractionNotCancellableError: 409, _TodoErrors.TodoProductInteractionTerminalTodoError: 409,
+    _TodoErrors.TodoProductInteractionTransitionError: 409, _TodoErrors.TodoProductInvalidRuntimeBindingError: 409, _TodoErrors.TodoProductRuntimeNotReadyError: 409,
     _TodoErrors.TodoBotScopeError: 403, _TodoErrors.TodoBotAmbiguousError: 409,
     _TodoErrors.TodoExecutionAuthError: 401, _TodoErrors.TodoSourceAuthError: 401,
     _TodoErrors.TodoArtifactNotFoundError: 404, _TodoErrors.TodoSourceWorkItemNotFoundError: 404,

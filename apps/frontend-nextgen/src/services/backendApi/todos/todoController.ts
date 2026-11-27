@@ -1,7 +1,10 @@
 import type {
   CreateTodoAutoImportRuleInput,
   CreateTodoInput,
+  ImportDimaTodosInput,
+  SaveBotTeamInput,
   CreateTodoInteractionInput,
+  CreateTodoProductInteractionInput,
   TodoAcceptanceInput,
   TodoListQuery,
   TodoAutoImportRuleStatus,
@@ -13,8 +16,65 @@ import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
 const TODO_API_BASE = `${TASK_READ_API_BASE}/todos`;
+const BOT_TEAM_API_BASE = `${TASK_READ_API_BASE}/bot-teams`;
 // Space 列表是 Task Engine 内部契约，不存在对应 OpenAPI；保持同源相对路径，由本地/部署代理转发到 Engine。
 const TODO_SPACES_API_PATH = '/api/v1/collaboration/tasks/spaces';
+
+
+export interface BotTeamNodeDto extends BackendUnknownRecord {
+  code?: string;
+  name?: string;
+  bot_id?: string;
+  approval_required?: boolean;
+  completion_gate?: { required_artifacts?: Array<BackendUnknownRecord> };
+}
+
+export interface BotTeamRecordDto extends BackendUnknownRecord {
+  bot_team_id?: string;
+  space_id?: number | string;
+  name?: string;
+  description?: string;
+  status?: string;
+  published_revision_id?: string | null;
+  created_by?: string;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BotTeamRevisionDto extends BackendUnknownRecord {
+  bot_team_revision_id?: string;
+  bot_team_id?: string;
+  revision_no?: number | string;
+  name?: string;
+  description?: string;
+  nodes?: BotTeamNodeDto[];
+  definition_hash?: string;
+  product_profile_id?: number | string | null;
+  created_by?: string;
+  published_by?: string;
+  published_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BotTeamDetailDto extends BackendUnknownRecord {
+  bot_team?: BotTeamRecordDto;
+  revisions?: BotTeamRevisionDto[];
+}
+
+export interface DimaImportResultDto extends BackendUnknownRecord {
+  source_work_item_id?: string;
+  status?: string;
+  todo_id?: string | null;
+  product_runtime_status?: string;
+  error_code?: string | null;
+  retryable?: boolean;
+}
+
+export interface DimaImportResponseDto extends BackendUnknownRecord {
+  items?: DimaImportResultDto[];
+}
 
 export interface TodoDto extends BackendUnknownRecord {
   todo_id?: string | number;
@@ -24,6 +84,11 @@ export interface TodoDto extends BackendUnknownRecord {
   description?: string;
   bot_id?: string;
   bot_name?: string;
+  owner_id?: string;
+  owner_name?: string;
+  template_id?: string;
+  template_version_id?: string;
+  template_name_snapshot?: string;
   status?: string;
   collab_context_id?: string;
   created_at?: string;
@@ -65,6 +130,30 @@ export interface TodoPageDto {
   page?: number;
   page_size?: number;
   pageSize?: number;
+}
+
+export interface TodoProductInteractionDto extends BackendUnknownRecord {
+  interaction_id?: string;
+  todo_id?: string;
+  kind?: string;
+  actor_id?: string;
+  actor_name?: string | null;
+  request_message?: string;
+  delivery_state?: string;
+  product_collet_id?: number | string;
+  collet_rollout_id?: number | string | null;
+  expected_revision?: number | string | null;
+  target_interaction_id?: string | null;
+  response?: BackendUnknownRecord | null;
+  failure_code?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TodoProductInteractionPageDto extends BackendUnknownRecord {
+  items?: TodoProductInteractionDto[];
+  can_send?: boolean;
+  blocking_interaction_id?: string | null;
 }
 
 export interface TodoProgressDto extends BackendUnknownRecord {
@@ -138,6 +227,9 @@ export const TODO_ENDPOINTS = {
   list: TODO_API_BASE,
   detail: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}`,
   progress: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/progress`,
+  productInteractions: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/product-interactions`,
+  productInteractionCancel: (todoId: string, interactionId: string) =>
+    `${TODO_API_BASE}/${encodeURIComponent(todoId)}/product-interactions/${encodeURIComponent(interactionId)}/cancel`,
   acceptance: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/acceptance`,
   interactions: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/interactions`,
   events: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/events`,
@@ -155,6 +247,10 @@ export const TODO_ENDPOINTS = {
   dimaAutoImportRules: `${TODO_API_BASE}/sources/dima/auto-import-rules`,
   dimaAutoImportRule: (ruleId: string) =>
     `${TODO_API_BASE}/sources/dima/auto-import-rules/${encodeURIComponent(ruleId)}`,
+  dimaImports: `${TODO_API_BASE}/products/dima-imports`,
+  botTeams: BOT_TEAM_API_BASE,
+  botTeam: (botTeamId: string) => `${BOT_TEAM_API_BASE}/${encodeURIComponent(botTeamId)}`,
+  botTeamArchive: (botTeamId: string) => `${BOT_TEAM_API_BASE}/${encodeURIComponent(botTeamId)}/archive`,
 };
 
 export function listTodoSpaces() {
@@ -204,12 +300,21 @@ export function getTodoProgress(todoId: string, options?: { expandedStageCode?: 
   });
 }
 
+function executorData(input: CreateTodoInput['executor']): BackendUnknownRecord {
+  return {
+    type: input.type,
+    id: input.id,
+    ...(input.revisionId ? { revision_id: input.revisionId } : {}),
+  };
+}
+
 export function createTodo(input: CreateTodoInput) {
   const data: BackendUnknownRecord = {
     space_id: input.spaceId,
     title: input.title,
     description: input.description,
-    bot_id: input.botId,
+    executor: executorData(input.executor),
+    owner: { user_id: input.owner.userId, user_name: input.owner.userName },
   };
   if (input.source) {
     data.source = {
@@ -227,6 +332,43 @@ export function createTodo(input: CreateTodoInput) {
     data,
     operation: 'create-todo',
   });
+}
+
+export function listTodoProductInteractions(todoId: string, page = 1, pageSize = 20) {
+  return backendRequest<BackendApiEnvelope<TodoProductInteractionPageDto>>(
+    TODO_ENDPOINTS.productInteractions(todoId),
+    {
+      method: 'GET',
+      params: userScopedParams({ page, page_size: pageSize }),
+      operation: 'list-todo-product-interactions',
+      retryOnTransient: true,
+    },
+  );
+}
+
+export function createTodoProductInteraction(todoId: string, input: CreateTodoProductInteractionInput) {
+  const data: BackendUnknownRecord = { message: input.message };
+  if (input.replyToInteractionId) data.reply_to_interaction_id = input.replyToInteractionId;
+  return backendRequest<BackendApiEnvelope<TodoProductInteractionDto>>(
+    TODO_ENDPOINTS.productInteractions(todoId),
+    {
+      method: 'POST',
+      params: userScopedParams(),
+      data,
+      operation: 'create-todo-product-interaction',
+    },
+  );
+}
+
+export function cancelTodoProductInteraction(todoId: string, interactionId: string) {
+  return backendRequest<BackendApiEnvelope<TodoProductInteractionDto>>(
+    TODO_ENDPOINTS.productInteractionCancel(todoId, interactionId),
+    {
+      method: 'POST',
+      params: userScopedParams(),
+      operation: 'cancel-todo-product-interaction',
+    },
+  );
 }
 
 export function submitTodoAcceptance(todoId: string, input: TodoAcceptanceInput) {
@@ -376,5 +518,95 @@ export function updateTodoAutoImportRule(ruleId: string, input: UpdateTodoAutoIm
     params: userScopedParams(),
     data,
     operation: 'update-todo-auto-import-rule',
+  });
+}
+
+
+function botTeamDefinitionData(input: SaveBotTeamInput): BackendUnknownRecord {
+  return {
+    name: input.name,
+    description: input.description,
+    nodes: input.nodes.map((node) => ({
+      code: node.code,
+      name: node.name,
+      bot_id: node.botId,
+      approval_required: node.approvalRequired,
+      completion_gate: {
+        required_artifacts: node.completionGate.requiredArtifacts.map((artifact) => ({
+          artifact_type: artifact.artifactType,
+          artifact_state: artifact.artifactState,
+          min_count: artifact.minCount,
+        })),
+      },
+    })),
+  };
+}
+
+export function listBotTeams(spaceId: number, status?: 'active' | 'archived') {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<BotTeamRecordDto>>>(TODO_ENDPOINTS.botTeams, {
+    method: 'GET',
+    params: userScopedParams({ space_id: spaceId, page: 1, page_size: 100, ...(status ? { status } : {}) }),
+    operation: 'list-todo-bot-teams',
+    retryOnTransient: true,
+  });
+}
+
+export function getBotTeam(botTeamId: string) {
+  return backendRequest<BackendApiEnvelope<BotTeamDetailDto>>(TODO_ENDPOINTS.botTeam(botTeamId), {
+    method: 'GET',
+    params: userScopedParams(),
+    operation: 'get-todo-bot-team',
+    retryOnTransient: true,
+  });
+}
+
+export function createBotTeam(input: SaveBotTeamInput & { spaceId: number }) {
+  return backendRequest<BackendApiEnvelope<BotTeamDetailDto>>(TODO_ENDPOINTS.botTeams, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: { space_id: input.spaceId, ...botTeamDefinitionData(input) },
+    operation: 'create-todo-bot-team',
+  });
+}
+
+export function updateBotTeam(botTeamId: string, input: SaveBotTeamInput) {
+  return backendRequest<BackendApiEnvelope<BotTeamDetailDto>>(TODO_ENDPOINTS.botTeam(botTeamId), {
+    method: 'PUT',
+    params: userScopedParams(),
+    data: botTeamDefinitionData(input),
+    operation: 'update-todo-bot-team',
+  });
+}
+
+export function archiveBotTeam(botTeamId: string) {
+  return backendRequest<BackendApiEnvelope<BotTeamRecordDto>>(TODO_ENDPOINTS.botTeamArchive(botTeamId), {
+    method: 'POST',
+    params: userScopedParams(),
+    operation: 'archive-todo-bot-team',
+  });
+}
+
+export function importDimaTodos(input: ImportDimaTodosInput) {
+  return backendRequest<BackendApiEnvelope<DimaImportResponseDto>>(TODO_ENDPOINTS.dimaImports, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: {
+      space_id: input.spaceId,
+      executor: executorData(input.executor),
+      owner: { user_id: input.owner.userId, user_name: input.owner.userName },
+      items: input.items.map((item) => ({
+        title: item.title,
+        description: item.description,
+        source: {
+          type: item.source.type,
+          container_id: item.source.containerId,
+          item_id: item.source.itemId,
+          url: item.source.url,
+          updated_at: item.source.updatedAt,
+          metadata: item.source.metadata,
+        },
+      })),
+    },
+    operation: 'import-dima-todos',
   });
 }

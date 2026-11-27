@@ -351,6 +351,18 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/progress"): NoCheck(
         "Product Progress inherits Todo Space membership and Product runtime authorization"
     ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): NoCheck("Product interaction history inherits Todo Space membership"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): NoCheck("Product interaction sending inherits Todo Space membership"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions/{interaction_id}/cancel",
+    ): NoCheck("Product stop inherits Todo Space membership"),
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): NoCheck(
         "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
     ),
