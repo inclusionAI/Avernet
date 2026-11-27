@@ -77,16 +77,16 @@ def project_method_topology(
             )
         bindings[name] = binding
     for relation in profile.composition.relations:
-        parent, child = (
-            bindings[relation.parent_method],
-            bindings[relation.child_method],
+        source, target = (
+            bindings[relation.source_method],
+            bindings[relation.target_method],
         )
         edge_id = product_relation_id(collet_id, relation)
         existing = store.get_composition_edge(axes, edge_id, collet_id)
         if existing is not None:
             if (
-                existing.parent_binding != parent.method_binding_id
-                or existing.child_binding != child.method_binding_id
+                existing.parent_binding != source.method_binding_id
+                or existing.child_binding != target.method_binding_id
                 or existing.relation_kind != relation.relation
             ):
                 raise ContextCollabValidationError(
@@ -94,15 +94,15 @@ def project_method_topology(
                 )
             # DETACHED remains detached; recovery never replays a lifecycle action.
             continue
-        if BindingState.TERMINATED in {parent.state, child.state}:
+        if BindingState.TERMINATED in {source.state, target.state}:
             continue
         store.insert_composition_edge(
             axes,
             MethodCompositionEdge(
                 edge_id=edge_id,
                 collab_context_id=collet_id,
-                parent_binding=parent.method_binding_id,
-                child_binding=child.method_binding_id,
+                parent_binding=source.method_binding_id,
+                child_binding=target.method_binding_id,
                 relation_kind=relation.relation,
                 state=CompositionEdgeState.ACTIVE,
                 transitioned_from="",

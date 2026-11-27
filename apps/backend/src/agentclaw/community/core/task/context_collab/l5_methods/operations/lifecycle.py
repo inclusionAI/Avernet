@@ -306,6 +306,10 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         method_binding_id = command.method_binding_id or f"mb_{uuid4().hex[:12]}"
         bind_reason = command.bind_reason or "compose"
         method_kind = command.method_kind
+        if method_kind == "MultiRollout":
+            raise ContextCollabValidationError(
+                "MultiRollout requires the durable product runtime, not legacy MethodStore"
+            )
         method_names = tuple(kind.value for kind in parse_method_kinds(method_kind))
         # 经 from_dict 整形校验(method_kind 投影一致、config 结构等),
         # 垃圾入参在落库前拒绝。
@@ -451,7 +455,10 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         binding = self._store.get_binding(axes, method_binding_id, collab_context_id)
         if binding is None:
             binding = self._recovery.recover(
-                collab_context_id, context, method_binding_id=method_binding_id, now=_now()
+                collab_context_id,
+                context,
+                method_binding_id=method_binding_id,
+                now=_now(),
             )
         self._authorize("inspect", binding, context, collab_context_id)
         edges = self._store.list_composition_edges(axes, collab_context_id)

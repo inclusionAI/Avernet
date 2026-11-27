@@ -51,6 +51,6 @@ def product_execution_binding_ref(
 
 def product_relation_id(collet_id: str, relation: MethodRelationTemplate) -> str:
     return (
-        f"mce_{collet_id}_{relation.parent_method.lower()}_"
-        f"{relation.relation.value}_{relation.child_method.lower()}"
+        f"mce_{collet_id}_{relation.source_method.lower()}_"
+        f"{relation.relation.value}_{relation.target_method.lower()}"
     )

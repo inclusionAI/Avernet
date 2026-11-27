@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import TypeAlias
+from enum import Enum
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodCompositionTemplate,
 )
@@ -14,6 +15,12 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 
 YAML: TypeAlias = str
+
+
+class ProductProfileStatus(str, Enum):
+    DRAFT = "DRAFT"
+    ONLINE = "ONLINE"
+    OFFLINE = "OFFLINE"
 
 
 @dataclass(frozen=True)

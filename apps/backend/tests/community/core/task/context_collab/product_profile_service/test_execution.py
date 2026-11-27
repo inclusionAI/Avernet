@@ -49,6 +49,8 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
+from .helpers import persist_profile
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -91,6 +93,7 @@ async def test_full_journey_failure_successor_old_report_and_real_messages(creat
     failure_context = report_context(h, failed, "failure-1")
     accepted = await h.engine.report(failed, failure_context)
     assert accepted["accepted"] is True
+    assert snapshot(h).revision == old.revision + 1
     assert snapshot(h).current().status is S.ACCEPTANCE_FAILED
     assert snapshot(h).collet.status is S.ACCEPTANCE_FAILED
     assert len(h.calls) == 1
@@ -102,11 +105,7 @@ async def test_full_journey_failure_successor_old_report_and_real_messages(creat
     prior = snapshot(h)
     old_history = deepcopy(prior.current())
     result = await h.service.interactive(
-        prior.current_rollout_id,
-        "fix design",
-        context=h.owner,
-        request_id="redo",
-        expected_revision=prior.revision,
+        prior.current_rollout_id, "retry-design", "fix design"
     )
     assert result.type is A.RE_DO
     current = snapshot(h)
@@ -140,25 +139,22 @@ async def test_full_journey_failure_successor_old_report_and_real_messages(creat
     assert current.collet.status is S.ACCEPTANCE_SUCCEED
     assert current.current().status is S.ACCEPTANCE_SUCCEED
     assert current.rollouts[0] == old_history
-    values = await h.service.query_collet_rollout(h.collet.id, context=h.owner)
+    values = await h.service.query_collet_rollout(h.collet.id)
     assert len(values) == 2
-    assert (await h.service.query_collet_rollout(h.collet.id, False, context=h.owner))[
+    assert (await h.service.query_collet_rollout(h.collet.id, False))[
         0
     ] == current.current()
     details = await h.service.query_stage_rollout_details(
-        current.current().stages[1].stage_rollout_id, context=h.owner
+        current.current().stages[1].stage_rollout_id
     )
     assert (
         details.session_id == "provider-session-3"
         and details.messages[0]["content"] == "actual message body"
     )
     assert len(h.calls) == 3
-    assert (
-        await h.service.create_product_collet(
-            h.profile.id, "build a feature", context=h.owner, request_id="collet-1"
-        )
-        == h.collet
-    )
+    another = await h.service.create_product_collet(h.profile.id, "build a feature")
+    assert another.id != h.collet.id and another.status is S.CREATE
+    assert snapshot(h).collet.status is S.ACCEPTANCE_SUCCEED
 
 
 async def test_run_failed_without_artifacts_and_wrong_actor_rejected(created):
@@ -266,11 +262,7 @@ async def test_optimize_reuses_only_accepted_unaffected_evidence(created):
         A.OPTIMIZE, "improve implementation", ("implementation",), "add error handling"
     )
     await h.service.interactive(
-        previous.current_rollout_id,
-        "improve",
-        context=h.owner,
-        request_id="optimize",
-        expected_revision=previous.revision,
+        previous.current_rollout_id, "optimize-implementation", "improve"
     )
     current = snapshot(h)
     first = current.current().stages[0]
@@ -297,13 +289,7 @@ async def test_shutdown_is_separate_and_cancellation_not_falsely_confirmed(creat
     await h.engine.advance(h.collet.id, h.owner)
     before = snapshot(h)
     h.interaction.propose.return_value = Adjustment(A.SHUTDOWN, "stop requested")
-    result = await h.service.interactive(
-        before.current_rollout_id,
-        "stop",
-        context=h.owner,
-        request_id="stop",
-        expected_revision=before.revision,
-    )
+    result = await h.service.interactive(before.current_rollout_id, "shutdown", "stop")
     assert result.type is A.SHUTDOWN
     saved = snapshot(h)
     assert saved.stopped and saved.collet.status == before.collet.status
@@ -335,13 +321,7 @@ async def test_stop_racing_dispatch_records_late_delivery_cancel(created):
     await sent.wait()
     before = snapshot(h)
     h.interaction.propose.return_value = Adjustment(A.SHUTDOWN, "stop requested")
-    await h.service.interactive(
-        before.current_rollout_id,
-        "stop",
-        context=h.owner,
-        request_id="race-stop",
-        expected_revision=before.revision,
-    )
+    await h.service.interactive(before.current_rollout_id, "shutdown", "stop")
     proceed.set()
     with pytest.raises(Conflict):
         await task
@@ -358,9 +338,7 @@ async def test_real_database_transaction_failure_rolls_back_all_creation(
     runtime, engine
 ):
     h = runtime
-    profile = await h.service.create_product_profile(
-        "coding", h.composition, h.stages, context=h.owner, request_id="profile-atomic"
-    )
+    profile = persist_profile(h, "coding", h.composition, h.stages)
 
     def fail_receipt(conn, cursor, statement, parameters, context, executemany):
         if statement.startswith("INSERT INTO ac_product_receipt_v2"):
@@ -369,9 +347,7 @@ async def test_real_database_transaction_failure_rolls_back_all_creation(
     sql_event.listen(engine, "before_cursor_execute", fail_receipt)
     try:
         with pytest.raises(RuntimeError, match="receipt write failure"):
-            await h.service.create_product_collet(
-                profile.id, "request", context=h.owner, request_id="atomic-fail"
-            )
+            await h.service.create_product_collet(profile.id, "request")
     finally:
         sql_event.remove(engine, "before_cursor_execute", fail_receipt)
     with h.repository.db.orm_session() as session:
@@ -407,13 +383,11 @@ async def test_tenant_isolation_survives_thread_offload(created):
     h = created
     with avernet_tenant_scope("other-public-tenant"):
         with pytest.raises(Missing):
-            await h.service.query_collet_rollout(h.collet.id, context=h.owner)
+            await h.service.query_collet_rollout(h.collet.id)
         with pytest.raises(Missing):
-            await h.service.create_product_collet(
-                h.profile.id, "request", context=h.owner, request_id="not-visible"
-            )
+            await h.service.create_product_collet(h.profile.id, "request")
         assert h.repository.pending_intents() == []
-    assert len(await h.service.query_collet_rollout(h.collet.id, context=h.owner)) == 1
+    assert len(await h.service.query_collet_rollout(h.collet.id)) == 1
 
 
 @pytest.mark.parametrize("report_wins", [True, False])
@@ -442,13 +416,7 @@ async def test_report_and_stop_race_on_persisted_revision(created, report_wins):
     reporting = asyncio.create_task(h.engine.report(event, context))
     await verify_entered.wait()
     stopping = asyncio.create_task(
-        h.service.interactive(
-            before.current_rollout_id,
-            "stop",
-            context=h.owner,
-            request_id="racing-stop",
-            expected_revision=before.revision,
-        )
+        h.service.interactive(before.current_rollout_id, "shutdown", "stop")
     )
     await proposal_entered.wait()
     if report_wins:
@@ -482,11 +450,7 @@ async def test_planner_cannot_mutate_authorized_snapshot(created):
 
     h.interaction.propose.side_effect = adversarial
     await h.service.interactive(
-        before.current_rollout_id,
-        "feedback",
-        context=h.owner,
-        request_id="detached-proposal",
-        expected_revision=before.revision,
+        before.current_rollout_id, "planner-isolation", "feedback"
     )
     saved = snapshot(h)
     assert saved.owner == before.owner and saved.bindings == before.bindings
@@ -506,16 +470,8 @@ async def test_whole_product_owner_acceptance_is_not_fabricated(runtime):
             ),
         ),
     )
-    profile = await h.service.create_product_profile(
-        "owner-contract",
-        h.composition,
-        h.stages,
-        context=h.owner,
-        request_id="owner-profile",
-    )
-    h.collet = await h.service.create_product_collet(
-        profile.id, "work", context=h.owner, request_id="owner-collet"
-    )
+    profile = persist_profile(h, "owner-contract", h.composition, h.stages)
+    h.collet = await h.service.create_product_collet(profile.id, "work")
     for request in ("owner-design", "owner-implementation"):
         await run_finished(h)
         event = stage_event(h)

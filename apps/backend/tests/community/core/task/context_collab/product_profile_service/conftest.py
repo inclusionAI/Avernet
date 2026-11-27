@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
+from .helpers import persist_profile
 
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.context_collab.errors import (
@@ -11,6 +12,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    actor_context_scope,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
     ProfilePublisherAllowlist,
@@ -173,7 +175,7 @@ def runtime(db):
             ),
         )
     )
-    return SimpleNamespace(
+    runtime = SimpleNamespace(
         owner=owner,
         bot=bot,
         calls=calls,
@@ -189,15 +191,13 @@ def runtime(db):
         stages=STAGES,
         worker=RolloutIntentWorker(repository, engine, execution),
     )
+    with actor_context_scope(owner):
+        yield runtime
 
 
 @pytest_asyncio.fixture
 async def created(runtime):
     h = runtime
-    h.profile = await h.service.create_product_profile(
-        "coding", h.composition, h.stages, context=h.owner, request_id="profile-1"
-    )
-    h.collet = await h.service.create_product_collet(
-        h.profile.id, "build a feature", context=h.owner, request_id="collet-1"
-    )
+    h.profile = persist_profile(h, "coding", h.composition, h.stages)
+    h.collet = await h.service.create_product_collet(h.profile.id, "build a feature")
     return h

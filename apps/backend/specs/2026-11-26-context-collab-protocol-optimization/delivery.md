@@ -4,6 +4,7 @@
 - 输入：[R3 目标合同](spec.md)、[验收计划](plan.md)、[原设计证据](research.md)。原方案文件在开始开发时已经存在，保留其历史记录。
 - 结论：新的正式领域对象、五方法服务、SQL 轮次权威、Method/YAML 联合校验、执行/消息端口及独立签名 Bot 进度入口已实现并有本地运行测试。**不能据此宣称计划 F 的旧产品全量切换、存量历史导入、真实 provider/目标 MySQL 验证已完成。**
 - 当前 owning 合同：[产品运行模块](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md)。新 v2 与明确命名的 v1 兼容路径不混写；兼容复核期限为 **2026-12-31**，责任域为 Backend context_collab。
+- 后续接口精简以本文第 5 节及 [spec §5.2](spec.md#52-服务签名草图) 为准；干预唯一 ID 的最新修订见第 6 节及 [spec §5.6](spec.md#56-interactive)，替代第 5 节中干预按次生效/显式 revision 的合同。前述记录保留各轮开发和验证证据。
 
 ## 1. 实施结果及相对原计划的差异
 
@@ -128,3 +129,43 @@ BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=4 \
 已更新的 owning 导航：[Backend](../../README.md)、[context_collab](../../src/agentclaw/community/core/task/context_collab/README.md)、[L5](../../src/agentclaw/community/core/task/context_collab/l5_methods/README.md)、[L6](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md)、[存储指南](../../src/agentclaw/community/core/task/context_collab/l6_products/PROFILE-STORAGE.md)、[API](../../src/agentclaw/community/api/README.md) 与 [新产品运行模块](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md)。依赖反向索引由架构测试生成，不手工编辑。没有宣称新的 ADR 已获得额外批准，也未为本次实现引入架构豁免。
 
 旧文档中基线已缺失的 Swarm 专项/历史导航见 research E12；没有用 pycache、历史结果或新 v2 测试去冒充那些旧文件已恢复。
+
+
+## 5. 用户追加修订：精简五方法参数
+
+基于已经提交并推送的 `000f640ac4`，按用户追加要求，从 ProductProfileService 的五个公开方法、Protocol 和全部仓库内调用方移除 `context`、`request_id`，HTTP 创建/干预正文也不再包含 `request_id`。旧关键字和未知正文字段不继续作为可选兼容参数接纳。`interactive_context` 是业务反馈文本，不属于本次移除的身份上下文。
+
+- G1 身份载体增加 transport-free 的 `actor_context_scope` / `current_actor_context`。HTTP 通过共享的已认证依赖绑定并清理作用域；库入口必须先认证并建立同一作用域。无匿名/默认 owner 降级，服务单例不保存调用者。嵌套异常恢复、缺失身份拒绝、并发任务隔离及线程 offload 的作用域传递均有测试。
+- 三类写操作为每次调用生成内部回执标识，保留 SQL 原子提交和回执存储，不再承诺基于客户端键的重放。相同内容重复 create 会产生独立 Profile/Collet，不按名称或内容偷偷去重。
+- `expected_revision` 继续作为干预的必填 CAS 围栏；已经提交的 revision 再次调用会冲突，调用者须重新查询。会话 `limit` 的范围限制不变。独立签名 Bot 进度上报的 ReportContext、request_id/attempt/expected_revision 和重放接纳合同完全不变。
+- 没有修改数据库结构、旧 v1 兼容接口或给现有账户扩大权限；旧批量迁移、真实 provider/目标 MySQL、企业集成和部署仍保持前文所列未验证边界。本轮没有另行 commit/push、合并或部署。
+- 已同步 [当前产品运行指南](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md)、[spec](spec.md) 和 [plan 修订说明](plan.md)。前文原实现的客户端创建/干预幂等结果是历史验证，不应再当作本轮的公开接口承诺。
+
+### 本轮验证及已修复失败
+
+- 修正后的产品专项、独立进度 HTTP 和 Service API conformance：**372 passed、18 warnings，7.95s**。
+- 首次完整回归在 **31,243 passed、13 skipped、6 subtests passed** 后，由新增并发身份测试的 `runtime configuration is missing` 失败停止，耗时 **448.32s**；这次不是完整 CI 通过。该测试同时在共享一条 SQLite 连接的 StaticPool 夹具上打开多个跨线程 SQL 会话，超出了该夹具的并发事务能力。修正为保持调用者作用域及线程上下文并发、仅串行使用这条测试连接；依然通过同一真实服务分别断言 owner 可读和 outsider 被拒绝。没有在生产代码增加串行锁、模拟被测服务、删除断言或跳过此测试。
+- 在 `COVERAGE_CORE=sysmon` 下对 9 个身份/签名形状用例连续执行 5 轮，**每轮 9 passed，共 45 次通过**；没有关闭覆盖率或改变完整 CI 的 4-worker 配置。
+- 修正夹具后，保持相同命令及 4-worker 配置重跑完整 Backend CI：**35,376 passed、41 skipped、651 warnings、13 subtests passed，633.38s（10m33s）**，最终输出 **`backend CI gate passed`**。报告检查器统计 case pass rate **100%（35,430/35,430）**、全源行覆盖率 **90.80% ≥ 75%**；架构、完整 app 注册端点、合同和覆盖率门禁均保持启用。
+- 本轮未提交，完整脚本的提交范围增量 **91.12%（1,528/1,677）** 不是本次参数精简的独立增量。为验证实际修改，另以 `HEAD` 到包含工作区 15 个相关文件的临时 Git tree 运行标准 `singlebox/ci/report_check.py`，并用同一报告解析函数核对 `git diff HEAD` 的工作区新增行和未跟踪源文件：两者均通过，**4 个修改的 Python 源文件，可执行增量覆盖率 100%（36/36）≥ 80%**。复用本轮成功 CI 的 XML 报告，未遗漏可执行模块，没有改动真实 Git index 或为测试创建 commit。
+- 本轮 11 个修改/新增 Python 文件的 Ruff format 与 F401/F811/F821、15 个相关文件的末尾换行/尾空格/源文件行数限制与相对文档链接、`git diff --check` 均通过。针对实际工作树的明文凭据扫描及仓库 SAST block gate 也通过；没有新增豁免、降低阈值或关闭 hooks。首次失败记录保留如上，不以最终通过数抹除。
+
+
+## 6. 用户追加修订：干预唯一 ID 与内部并发围栏
+
+在上一轮未提交的参数精简工作区上继续修改。`interactive` 的公开签名改为 `interactive(collet_rollout_id, interactive_uuid, interactive_context)`，Protocol、HTTP 正文、调用方及精确签名测试同步更新；不再接收 `expected_revision`，也不恢复旧 `context`/`request_id` 参数。独立 Bot 进度上报的参数和 CAS/幂等合同不变。
+
+- 调用者为同一干预保持相同 UUID（非空白字符串，最多 128 UTF-8 字节），新干预使用新 UUID。复用现有 tenant/env/actor 作用域内的 SQL 唯一回执：同 UUID、同 rollout ID/反馈文本返回原结果；改内容或换 rollout 冲突。授权在回执读取前执行，不向越权调用者泄漏结果。历史 rollout 上已提交的干预也可以重放，新干预仍须指向当前 rollout。
+- 干预结果、revision 更新、后继身份、停止事实、取消/推进意图与回执同事务提交。内部捕获已加载的 revision 做 CAS；重复调用若在回执预读后输掉 CAS，则从新事务复查 UUID 回执，有原结果就返回，没有则继续报冲突。不同干预或进度竞争不会静默覆盖，也不自动重算旧建议。服务重建后从 SQL 重放，不依赖内存锁或缓存。
+- 并发重试可能重复计算无副作用的 proposal，新增能力合同注释明确其不得直接持久化或派发/取消；幂等保证覆盖已提交的干预效果，不声称外部模型请求只能调用一次。创建接口的独立 ID 语义、身份作用域、SQL schema、真实 provider/目标 MySQL/企业集成和部署边界均不变。
+- 已同步 [当前产品运行指南](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md)、[spec](spec.md)、[plan](plan.md) 和 proposal 能力合同。本轮仍未 commit/push、合并或部署。
+
+### 本轮验证与失败记录
+
+- 首次专项在 **59 passed** 后，由新 CAS 竞态测试的同步等待超时停止：用 RE_DO 在 SQLite UPDATE 前暂停时，前面的后继身份 INSERT 已占据单 writer 锁，阻止对手提交。将这个特定竞态改为在没有前置 INSERT 的 DO_NOTHING 上验证真实 CAS；后继回滚和 RE_DO 重放由其他真实事务案例覆盖。未修改生产并发保护、扩大超时、跳过用例或放宽断言。
+- 第二次专项在 **67 passed** 后，同一新测试因工作线程尚在 SQLAlchemy 监听器回调内就移除监听器，触发 `deque mutated during iteration`。改为释放屏障并等待重复调用退出后再清理测试监听器；生产实现未因这两次夹具失败而改动。
+- 修正后的产品专项、独立进度注册端点及 Service API conformance：**397 passed、18 warnings，23.01s**；完整 app 产品注册端点、全部架构及 HTTP 快速门禁：**524 passed、44 warnings，91.00s**。包括新增真实注册的 UUID 内容冲突 409 案例。
+- 两种并发重复（提议期间对手提交、save 回执预读后输掉 CAS）在 `COVERAGE_CORE=sysmon` 下连续执行 3 轮，**每轮 2 passed，共 6 次通过**。测试使用文件 SQLite 的独立连接，没有用单连接 StaticPool 并发事务冒充持久化竞争。
+- 完整 Backend CI 使用同一 `scripts/ci_test.sh`、4 workers 与标准覆盖率阈值，显式以本轮修改前/后的临时工作区 tree 作为 `--base`/`--head`（仅使用独立 `GIT_INDEX_FILE` 建快照，真实 index 保持为空）：**35,402 passed、41 skipped、651 warnings、13 subtests passed，644.37s（10m44s）**，最终输出 **`backend CI gate passed`**。case pass rate **100%（35,456/35,456）**，全源行覆盖率 **90.80% ≥ 75%**，本轮新增可执行行覆盖率 **100%（14/14）≥ 80%**；不是用空提交差异跳过增量门禁。
+- 复用本轮完整 CI 生成的 XML 报告，额外对 `HEAD` 到全部未提交修改的 tree 运行标准报告检查器，并用工作区 diff/未跟踪源文件扫描核对遗漏：两者均通过。包括上一轮参数精简在内，共 **5 个修改的 Python 源文件，增量覆盖率 100%（47/47）**。CI 后源码/测试与已验证 tree 的内容哈希一致，仅追加本交付记录，没有再次改变实现。
+- 全部 **13 个**修改/新增 Python 文件的 Ruff format 与 F401/F811/F821、**17 个**相关文件的末尾换行/尾空格/源文件行数上限与相对文档链接、`git diff --check` 均通过；真实未提交修改的凭据扫描和仓库 SAST block gate 通过。未改 mandatory gates、hooks 或真实暂存区，未执行本轮 commit/push。真实 provider/目标 MySQL、企业集成和部署仍未验证，不把本地 SQL/Protocol double 结果当作外部联调证据。

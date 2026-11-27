@@ -446,8 +446,8 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             if (
                 edge is None
                 or edge.state is not CompositionEdgeState.ACTIVE
-                or edge.parent_binding != refs[relation.parent_method]
-                or edge.child_binding != refs[relation.child_method]
+                or edge.parent_binding != refs[relation.source_method]
+                or edge.child_binding != refs[relation.target_method]
                 or edge.relation_kind != relation.relation
             ):
                 raise ContextCollabValidationError(

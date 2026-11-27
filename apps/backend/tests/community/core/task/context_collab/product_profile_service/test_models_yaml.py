@@ -311,6 +311,7 @@ def test_mysql_migration_ddl_matches_models_and_pins_transactional_utf8_defaults
         rollout_models.ProductRuntimeRow,
         rollout_models.ProductReceiptRow,
         rollout_models.ProductIntentRow,
+        rollout_models.ProductCandidateSlotRow,
     ):
         ddl = str(CreateTable(model.__table__).compile(dialect=mysql.dialect())).strip()
         generated.append(

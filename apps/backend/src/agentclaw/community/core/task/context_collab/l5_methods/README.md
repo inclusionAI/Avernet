@@ -1,8 +1,18 @@
 # L5 Method contracts and operations
 
+## MultiRollout local extension
+
+[MultiRollout@1.0](MULTI-ROLLOUT.md) nests one durable Swarm body through explicit
+MethodCompositionTemplate relations. It supports bounded parallel best-of-N and
+human/autonomous feedback iteration, with candidate-scoped execution, SQL tenant
+admission, trusted scoring, immutable stage plans and fenced strategy operations.
+New Profile creation selects interactive MultiRollout over a static YAML Swarm
+workflow; execution remains unavailable without governed host capabilities. The
+existing four ACCS core profile versions and legacy MethodStore path are unchanged.
+
 ## Durable product rollout path
 
-[RolloutEngine](rollout_engine.py) owns serial product-stage transitions and the
+[RolloutEngine](rollout_engine.py) owns candidate-scoped product-stage transitions (serial for legacy profiles) and the
 independent [ProgressEvent Service API](rollout_progress_protocol.py). [Runtime contracts](rollout_contracts.py)
 and the bounded [intent worker](rollout_worker.py) use durable allocation,
 attempt/lease, actual runtime session and revision facts. They do not import L6
@@ -23,6 +33,9 @@ This is the local implementation boundary, not a new ACCS wire operation.
 purpose: Method contracts and operations over L4 primitives, independent of product composition.
 provides:
   - MethodProfile
+  - MultiRolloutMethodPolicy
+  - MultiRolloutController
+  - MethodRunPort
   - MethodBinding
   - MethodPolicy
   - OpenMethodPolicy
@@ -41,6 +54,9 @@ provides:
   - SwarmExecutionControl
   - SwarmExecutionOperations
 consumes:
+  - MultiRolloutStrategyPort
+  - MultiRolloutIsolationPort
+  - MultiRolloutNotificationPort
   - MethodStoreProtocol
   - CollaborationReader
   - EventWriter

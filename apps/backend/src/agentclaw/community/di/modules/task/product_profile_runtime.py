@@ -43,8 +43,38 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 
 
+from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_contracts import (
+    MultiRolloutStrategyPort,
+    MultiRolloutIsolationPort,
+    MultiRolloutNotificationPort,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_capabilities import (
+    UnavailableMultiRolloutStrategy,
+    UnavailableMultiRolloutIsolation,
+    UnavailableMultiRolloutNotifications,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_controller import (
+    MultiRolloutController,
+)
+
+
 class ProductProfileRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(
+            MultiRolloutStrategyPort,
+            to=UnavailableMultiRolloutStrategy(),
+            scope=singleton,
+        )
+        binder.bind(
+            MultiRolloutIsolationPort,
+            to=UnavailableMultiRolloutIsolation(),
+            scope=singleton,
+        )
+        binder.bind(
+            MultiRolloutNotificationPort,
+            to=UnavailableMultiRolloutNotifications(),
+            scope=singleton,
+        )
         binder.bind(
             ProductRuntimeAuthorization,
             to=OwnerProductRuntimeAuthorization(),
@@ -81,6 +111,21 @@ class ProductProfileRuntimeModule(Module):
 
     @singleton
     @provider
+    def multi_controller(
+        self,
+        repository: RolloutRepository,
+        strategy: MultiRolloutStrategyPort,
+        isolation: MultiRolloutIsolationPort,
+        notifications: MultiRolloutNotificationPort,
+        authorization: ProductRuntimeAuthorization,
+        interaction: RolloutInteractionPort,
+    ) -> MultiRolloutController:
+        return MultiRolloutController(
+            repository, strategy, isolation, notifications, authorization, interaction
+        )
+
+    @singleton
+    @provider
     def service(
         self,
         repository: ProductProfileRepository,
@@ -89,9 +134,16 @@ class ProductProfileRuntimeModule(Module):
         execution: RolloutExecutionPort,
         interaction: RolloutInteractionPort,
         messages: StageSessionMessagesPort,
+        multi_rollout: MultiRolloutController,
     ) -> ProductProfileServiceProtocol:
         return ProductProfileService(
-            repository, publisher, authorization, execution, interaction, messages
+            repository,
+            publisher,
+            authorization,
+            execution,
+            interaction,
+            messages,
+            multi_rollout,
         )
 
     @singleton
@@ -101,8 +153,9 @@ class ProductProfileRuntimeModule(Module):
         repository: RolloutRepository,
         execution: RolloutExecutionPort,
         authorization: ProductRuntimeAuthorization,
+        isolation: MultiRolloutIsolationPort,
     ) -> RolloutEngine:
-        return RolloutEngine(repository, execution, authorization)
+        return RolloutEngine(repository, execution, authorization, isolation)
 
     @singleton
     @provider
@@ -111,8 +164,9 @@ class ProductProfileRuntimeModule(Module):
         repository: RolloutRepository,
         engine: RolloutEngine,
         execution: RolloutExecutionPort,
+        multi_rollout: MultiRolloutController,
     ) -> RolloutIntentWorker:
-        return RolloutIntentWorker(repository, engine, execution)
+        return RolloutIntentWorker(repository, engine, execution, multi_rollout)
 
     @singleton
     @provider
