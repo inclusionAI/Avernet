@@ -50,6 +50,10 @@ class BotPublishNotFoundError(RuntimeError):
     """bot_id 无 success 发布单或 ext.binding.online 缺失。"""
 
 
+class BotOnlinePublicationNotFoundError(BotPublishNotFoundError):
+    """Bot has no successful online publication; not a binding/provider failure."""
+
+
 class BindingNotFoundError(RuntimeError):
     """binding_id 无效或不支持实例查询。"""
 
@@ -125,7 +129,7 @@ class DeviceInstanceService:
         env = env_utils.get_current_env()
         record = self._publish_repo.get_latest_success_by_source_bot_id(bot_id, env)
         if record is None:
-            raise BotPublishNotFoundError(
+            raise BotOnlinePublicationNotFoundError(
                 f"No success publish record found for bot_id={bot_id}, env={env}"
             )
 

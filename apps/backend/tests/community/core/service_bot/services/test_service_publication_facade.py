@@ -32,6 +32,8 @@ from agentclaw.community.core.devices.errors import (
     InvalidDeviceStatusError,
 )
 from agentclaw.community.core.devices.services.device_instance_service import (
+    BotOnlinePublicationNotFoundError,
+    BindingNotFoundError,
     BotPublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
@@ -1195,3 +1197,33 @@ def test_upgrade_publication_maps_retained_draft_failure_to_upstream(deps, monke
     deps.publish_service.upgrade_publish.side_effect = UpgradeDraftRestartError(draft)
     with pytest.raises(ServiceContainerUpstreamError, match="draft"):
         deps.facade.upgrade_publication("bot-1", 1, actor_id="admin", owner_id="owner")
+
+
+@pytest.mark.parametrize("allow_unpublished", [False, True])
+def test_container_snapshot_without_publication_is_empty_only_when_requested(deps, allow_unpublished):
+    deps.device_service.get_instances_by_bot.side_effect = BotOnlinePublicationNotFoundError("not published")
+    if allow_unpublished:
+        assert deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner", allow_unpublished=True) == {
+            "bot_id": "bot-1", "instances": []
+        }
+    else:
+        with pytest.raises(ServiceContainerConflictError):
+            deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner")
+
+
+@pytest.mark.parametrize("error,expected", [
+    (BotPublishNotFoundError("invalid publication"), ServiceContainerConflictError),
+    (BindingNotFoundError("missing binding"), ServiceContainerConflictError),
+    (DeviceServiceError("provider failed"), ServiceContainerUpstreamError),
+])
+def test_allow_unpublished_does_not_hide_broken_runtime(deps, error, expected):
+    deps.device_service.get_instances_by_bot.side_effect = error
+    with pytest.raises(expected):
+        deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner", allow_unpublished=True)
+
+
+def test_allow_unpublished_does_not_bypass_bot_authorization(deps):
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.NONE
+    with pytest.raises(ServicePublicationNotFoundError):
+        deps.facade.list_containers("bot-1", actor_id="stranger", owner_id="owner", allow_unpublished=True)
+    deps.device_service.get_instances_by_bot.assert_not_called()

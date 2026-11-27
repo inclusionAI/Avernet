@@ -195,3 +195,14 @@ async def test_restart_container_returns_accepted_operation():
         actor_id="owner",
         owner_id="owner",
     )
+
+
+@pytest.mark.asyncio
+async def test_container_list_explicitly_allows_unpublished_empty_snapshot():
+    facade = Mock()
+    facade.list_containers.return_value = {"bot_id": "bot-1", "instances": []}
+    result = await list_containers(bot_id="bot-1", request=request(), actor_id="owner",
+                                   owner_id="owner", facade=facade, allow_unpublished=True)
+    facade.list_containers.assert_called_once_with("bot-1", actor_id="owner", owner_id="owner", allow_unpublished=True)
+    assert result.data.summary.total == 0
+    assert result.data.instances == []
