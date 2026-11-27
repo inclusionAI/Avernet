@@ -153,33 +153,35 @@ describe('NodeListViewV2 覆盖补齐', () => {
     expect(rootLi.textContent).not.toContain('人工处理');
   });
 
-  it('点击和键盘操作定位节点目标，第一棒恢复宿主会话', () => {
+  it('点击和键盘操作定位节点目标，第一棒按实际执行会话联动', () => {
     render(<NodeListViewV2 task={task} nav={recorded.nav} />);
 
-    // 根节点统一恢复宿主会话，不因节点目标存在而改走联动
+    // 根节点有可解析目标时优先按实际执行会话联动
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 根节点' }));
-    expect(recorded.calls.root).toEqual(['n-root']);
-    expect(recorded.calls.select).toHaveLength(0);
+    expect(recorded.calls.root).toEqual([]);
+    expect(recorded.calls.select).toHaveLength(1);
+    const [, rootTarget] = recorded.calls.select[0];
+    expect(rootTarget).toMatchObject({ sessionId: 'sess-main', kind: 'bot' });
 
     // 其他节点:选中 + 会话联动(coop_group 派生会话唯一 → 群会话目标)
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 群协作节点' }));
-    expect(recorded.calls.select).toHaveLength(1);
-    const [, groupTarget] = recorded.calls.select[0];
+    expect(recorded.calls.select).toHaveLength(2);
+    const [, groupTarget] = recorded.calls.select[1];
     expect(groupTarget).toMatchObject({ sessionId: 'bcs_grp_x', kind: 'group' });
 
-    // 空格键同样触发选择;根节点 Enter 仍恢复宿主会话
+    // 空格键同样触发选择;根节点 Enter 也按实际执行会话联动
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第3棒 未知态节点' }), { key: ' ' });
-    expect(recorded.calls.select).toHaveLength(2);
-    expect(recorded.calls.select[1][0]).toBe('n-mystery');
+    expect(recorded.calls.select).toHaveLength(3);
+    expect(recorded.calls.select[2][0]).toBe('n-mystery');
 
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第1棒 根节点' }), { key: 'Enter' });
-    expect(recorded.calls.root).toHaveLength(2);
-    expect(recorded.calls.select).toHaveLength(2);
+    expect(recorded.calls.root).toEqual([]);
+    expect(recorded.calls.select).toHaveLength(4);
 
     // 其它按键不触发选择
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第4棒 带子任务节点' }), { key: 'Tab' });
-    expect(recorded.calls.select).toHaveLength(2);
-    expect(recorded.calls.root).toHaveLength(2);
+    expect(recorded.calls.select).toHaveLength(4);
+    expect(recorded.calls.root).toHaveLength(0);
   });
 
   it('子任务按钮:独立点击 stopPropagation,不触发节点选择', () => {
