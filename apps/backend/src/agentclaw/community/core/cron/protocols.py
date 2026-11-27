@@ -22,7 +22,7 @@ class BotInfoProvider(Protocol):
             user_id: 用户ID（用于权限校验）
 
         Returns:
-            Bot 信息字典，包含 bot_id, bot_name, binding_id 等
+            Bot 信息字典，包含稳定主键 id、bot_id、owner_id、bot_name、binding_id 等
         """
         ...
 

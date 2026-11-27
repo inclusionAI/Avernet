@@ -202,6 +202,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     publicationVersion: asNumber(dto.publication_version) ?? asNumber(asRecord(dto.publish).version),
     liveVersion: asNumber(dto.live_version),
     ownerId,
+    entityId: asString(dto.entity_id),
     ownerName: asString(dto.owner_name),
     entityKey: asString(dto.card_id) ?? `${spaceId ?? 'unknown'}:${botType}:${id}`,
     name: asString(dto.bot_name) ?? asString(dto.name) ?? '未命名 Bot',

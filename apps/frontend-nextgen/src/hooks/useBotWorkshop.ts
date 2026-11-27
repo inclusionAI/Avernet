@@ -174,7 +174,8 @@ export function useBotWorkshop() {
     },
     openTaskInstances: (bot: BotDomain) => {
       const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
-      if (bot.ownerId) params.set('owner_id', bot.ownerId);
+      if (bot.entityId) params.set('entity_id', bot.entityId);
+      else if (bot.ownerId) params.set('owner_id', bot.ownerId);
       // 与 openDetail 同口径携带阶段：定时任务页的 Caller 配置、实例校验都按它取数。
       params.set('runtime_stage', resolveBotRuntimeStage(bot.lifecycle));
       history.push(`/bot-workshop/scheduled-tasks?${params.toString()}`);

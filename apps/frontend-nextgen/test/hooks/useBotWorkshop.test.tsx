@@ -611,3 +611,17 @@ it('本地 Bot 删除成功后清除当前会话及身份下的会话记忆', as
   expect(state.lastSessionByIdentity.u1.botSessionId).toBeNull();
   expect(state.lastSessionByIdentity.u2.botSessionId).toBe('session-2');
 });
+
+
+it.each([['original', 'entity_id', 'original'], [undefined, 'owner_id', 'new-owner']])(
+  'scheduled task navigation preserves the identity kind (%s)',
+  async (entityId, parameter, expected) => {
+    const { result, unmount } = renderHook(() => useBotWorkshop());
+    act(() => result.current.openTaskInstances(mapBotDto({ bot_id: 'bot', owner_id: 'new-owner', entity_id: entityId, bot_type: 'service', engine: 'teclaw' }).item));
+    const url = (history.push as jest.Mock).mock.calls.slice(-1)[0]?.[0] as string;
+    const params = new URLSearchParams(url.split('?')[1]);
+    expect(params.get(parameter!)).toBe(expected);
+    expect(params.has(parameter === 'entity_id' ? 'owner_id' : 'entity_id')).toBe(false);
+    unmount();
+  },
+);

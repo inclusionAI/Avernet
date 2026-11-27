@@ -499,7 +499,7 @@ async def test_default_listing_uses_authenticated_users_caller_not_parent(bot_fi
     caller = dict(svc._bot_provider.get_bot.return_value)
     svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [caller]}
     svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 1})
-    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+    svc._publish_repo.get_latest_by_source_bot_and_status.return_value = None
     svc._resolver.resolve_for_binding.side_effect = lambda binding, actor, **kw: SimpleNamespace(
         conn_info={"binding": binding, "actor": actor}
     )
@@ -520,7 +520,7 @@ async def test_default_listing_uses_authenticated_users_caller_not_parent(bot_fi
     request = svc._runtime_bindings.resolve.call_args.args[0]
     assert (request.owner_id, request.actor_user_id, request.stage) == ("owner", "viewer", "online")
     assert svc._resolver.resolve_for_binding.call_args.args == (99, "viewer")
-    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+    svc._publish_repo.get_latest_by_source_bot_and_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -594,7 +594,7 @@ async def test_default_caller_online_filter_and_internal_user_fallback():
 @pytest.mark.parametrize("stage", ["draft", "verify"])
 async def test_explicit_non_online_listing_does_not_select_caller(stage):
     svc = service(caller=True, provider="local")
-    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+    svc._publish_repo.get_latest_by_source_bot_and_status.return_value = None
     svc._publish_repo.get_retained_verify_by_source_bot_id_and_owner.return_value = None
     svc._transport.invoke.return_value = {"success": True, "data": []}
     result = await svc.list_all_crons(
@@ -616,7 +616,7 @@ async def test_caller_resolution_failures_return_failed_targets_without_parent_r
     assert result["data"] == []
     assert result["failed_targets"][0]["reason"] == "caller_unavailable"
     svc._transport.invoke.assert_not_called()
-    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+    svc._publish_repo.get_latest_by_source_bot_and_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -733,7 +733,7 @@ async def test_teclaw_caller_lists_service_stage_bindings(bot_filter, stage_filt
     bot = svc._bot_provider.get_bot.return_value
     bot["active_engine"] = "teclaw"
     svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [bot]}
-    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+    svc._publish_repo.get_latest_by_source_bot_and_status.side_effect = (
         lambda **kwargs: SimpleNamespace(
             id=8, status=kwargs["status"], ext={"binding": {"verify": 2, "online": 3}}
         )
