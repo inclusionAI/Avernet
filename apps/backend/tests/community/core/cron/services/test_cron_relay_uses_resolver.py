@@ -172,6 +172,7 @@ class TestListAllCronsOwnerId:
                     "active_engine": "hermes",
                 },
                 {
+                    "id": 7,
                     "bot_id": "service-hermes",
                     "owner_id": "owner-1",
                     "binding_id": 84,
@@ -210,7 +211,7 @@ class TestListAllCronsOwnerId:
         resolver.resolve_for_bot.assert_not_called()
         resolver.resolve_for_binding.assert_not_called()
         transport.invoke.assert_not_awaited()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+        publish_repo.get_latest_by_source_bot_and_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_all_crons_adds_owner_id_to_each_task(self):
@@ -445,8 +446,8 @@ class TestListServiceBotRuntimeStages:
             bindings={"verify": 20, "online": 30},
         )
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: (
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: (
                 publish_record if status == PublishStatus.SUCCESS.value else None
             )
         )
@@ -459,6 +460,7 @@ class TestListServiceBotRuntimeStages:
 
         targets, failed_targets = svc._build_runtime_targets(
             {
+                "id": 7,
                 "bot_id": "service-bot",
                 "owner_id": "owner-1",
                 "binding_id": 10,
@@ -491,8 +493,8 @@ class TestListServiceBotRuntimeStages:
             bindings={"verify": 20, "online": 30},
         )
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.VALIDATING.value: validating_record,
                 PublishStatus.SUCCESS.value: success_record,
             }.get(status)
@@ -505,6 +507,7 @@ class TestListServiceBotRuntimeStages:
 
         targets, failed_targets = svc._build_runtime_targets(
             {
+                "id": 7,
                 "bot_id": "service-bot",
                 "owner_id": "owner-1",
                 "binding_id": 10,
@@ -528,8 +531,8 @@ class TestListServiceBotRuntimeStages:
             bindings={"verify": 20, "online": 30},
         )
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: (
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: (
                 publish_record if status == PublishStatus.SUCCESS.value else None
             )
         )
@@ -544,6 +547,7 @@ class TestListServiceBotRuntimeStages:
 
         target = svc._resolve_published_runtime_target(
             {
+                "id": 7,
                 "bot_id": "service-bot",
                 "owner_id": "owner-1",
                 "bot_name": "Service Bot",
@@ -563,6 +567,7 @@ class TestListServiceBotRuntimeStages:
         bot_list = {
             "items": [
                 {
+                    "id": 7,
                     "bot_id": "service-bot",
                     "owner_id": "owner-1",
                     "binding_id": 10,
@@ -575,8 +580,8 @@ class TestListServiceBotRuntimeStages:
         bot_provider.list_bots_by_owner_or_collaborator.return_value = bot_list
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.VALIDATING.value: _make_publish_record(
                     publish_id=101,
                     status=PublishStatus.VALIDATING.value,
@@ -645,6 +650,7 @@ class TestListServiceBotRuntimeStages:
         bot_list = {
             "items": [
                 {
+                    "id": 7,
                     "bot_id": "service-bot",
                     "owner_id": "owner-1",
                     "binding_id": 10,
@@ -656,8 +662,8 @@ class TestListServiceBotRuntimeStages:
         bot_provider.list_bots_by_owner_or_collaborator.return_value = bot_list
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.SUCCESS.value: _make_publish_record(
                     publish_id=202,
                     status=PublishStatus.SUCCESS.value,
@@ -739,6 +745,7 @@ class TestListServiceBotRuntimeStages:
     async def test_service_bot_list_reports_instance_query_failure(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -747,8 +754,8 @@ class TestListServiceBotRuntimeStages:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.SUCCESS.value: _make_publish_record(
                     publish_id=202,
                     status=PublishStatus.SUCCESS.value,
@@ -819,6 +826,7 @@ class TestListServiceBotRuntimeStages:
         bot_list = {
             "items": [
                 {
+                    "id": 7,
                     "bot_id": "service-bot",
                     "owner_id": "owner-1",
                     "binding_id": 10,
@@ -831,8 +839,8 @@ class TestListServiceBotRuntimeStages:
         bot_provider.list_bots_by_owner_or_collaborator.return_value = bot_list
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.VALIDATING.value: _make_publish_record(
                     publish_id=101,
                     status=PublishStatus.VALIDATING.value,
@@ -967,6 +975,7 @@ class TestListServiceBotRuntimeStages:
     async def test_service_bot_list_records_all_runtime_failures_for_single_bot(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -975,8 +984,8 @@ class TestListServiceBotRuntimeStages:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.VALIDATING.value: _make_publish_record(
                     publish_id=101,
                     status=PublishStatus.VALIDATING.value,
@@ -1186,6 +1195,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_skips_hermes_service_bot(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-hermes",
             "owner_id": "owner-1",
             "binding_id": 42,
@@ -1218,7 +1228,7 @@ class TestListRunningCronsOwnerId:
         device_provider.list_devices_by_runtime_binding.assert_not_called()
         resolver.resolve_for_binding.assert_not_called()
         transport.invoke.assert_not_awaited()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+        publish_repo.get_latest_by_source_bot_and_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_running_crons_adds_owner_id_for_specific_bot(self):
@@ -1323,6 +1333,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_requires_stage_for_service_bot(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 42,
@@ -1366,6 +1377,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_expands_service_bot_runtime_instances(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1374,8 +1386,8 @@ class TestListRunningCronsOwnerId:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.SUCCESS.value: _make_publish_record(
                     publish_id=202,
                     status=PublishStatus.SUCCESS.value,
@@ -1453,6 +1465,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_filters_runtime_stage(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1461,8 +1474,8 @@ class TestListRunningCronsOwnerId:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: {
+        publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+            lambda source_bot_pk, status, env: {
                 PublishStatus.VALIDATING.value: _make_publish_record(
                     publish_id=101,
                     status=PublishStatus.VALIDATING.value,
@@ -1551,6 +1564,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_filters_device_uuid_with_stage(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1559,7 +1573,7 @@ class TestListRunningCronsOwnerId:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -1632,6 +1646,7 @@ class TestListRunningCronsOwnerId:
     async def test_list_running_crons_records_adapter_failure_with_dict_data(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1656,7 +1671,7 @@ class TestListRunningCronsOwnerId:
             "data": {},
         })
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+        publish_repo.get_latest_by_source_bot_and_status.return_value = None
 
         svc = _make_service(
             bot_provider=bot_provider,
@@ -1842,6 +1857,7 @@ class TestForwardRequestUsesResolver:
     async def test_run_cron_routes_verify_stage_by_publish_binding_and_keeps_task_id(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1850,7 +1866,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=101,
                 status=PublishStatus.VALIDATING.value,
@@ -1898,6 +1914,7 @@ class TestForwardRequestUsesResolver:
     async def test_update_cron_allows_enabled_toggle_for_published_stage(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1906,7 +1923,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -1959,6 +1976,7 @@ class TestForwardRequestUsesResolver:
     async def test_update_cron_fans_out_enabled_toggle_to_runtime_instances(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -1967,7 +1985,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2060,6 +2078,7 @@ class TestForwardRequestUsesResolver:
     async def test_run_cron_fan_out_manual_run_reports_all_failed(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2068,7 +2087,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2137,6 +2156,7 @@ class TestForwardRequestUsesResolver:
     async def test_run_cron_rejects_service_runtime_without_device_provider(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2145,7 +2165,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2186,6 +2206,7 @@ class TestForwardRequestUsesResolver:
     async def test_get_cron_runs_fans_out_to_runtime_instances(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2194,7 +2215,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2295,6 +2316,7 @@ class TestForwardRequestUsesResolver:
         )
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2303,7 +2325,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2381,6 +2403,7 @@ class TestForwardRequestUsesResolver:
     async def test_get_cron_runs_uses_runtime_device_list_not_get_instances(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2389,7 +2412,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2466,6 +2489,7 @@ class TestForwardRequestUsesResolver:
     async def test_get_cron_runs_routes_specific_device_uuid(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2474,7 +2498,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2567,6 +2591,7 @@ class TestForwardRequestUsesResolver:
     async def test_run_cron_online_stage_routes_teclaw_binding_via_real_resolver(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2575,7 +2600,7 @@ class TestForwardRequestUsesResolver:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=202,
                 status=PublishStatus.SUCCESS.value,
@@ -2758,6 +2783,7 @@ class TestGetCronDetailBotContext:
     async def test_service_verify_detail_adds_publish_context_to_nested_bot(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
+            "id": 7,
             "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 10,
@@ -2766,7 +2792,7 @@ class TestGetCronDetailBotContext:
         }
 
         publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+        publish_repo.get_latest_by_source_bot_and_status.return_value = (
             _make_publish_record(
                 publish_id=101,
                 status=PublishStatus.VALIDATING.value,

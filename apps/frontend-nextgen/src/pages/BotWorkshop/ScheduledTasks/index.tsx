@@ -18,13 +18,14 @@ const ScheduledTasksPage = () => {
   const location = useLocation();
   const query = new URLSearchParams(location.search);
   const botId = query.get('bot_id')?.trim() || '';
-  const ownerId = query.get('entity_id') || query.get('owner_id') || undefined;
+  const entityId = query.get('entity_id') || undefined;
+  const ownerId = query.get('owner_id') || undefined;
   const pageSize = [10, 20, 50].includes(Number(query.get('page_size'))) ? Number(query.get('page_size')) : 20;
   const page = Math.max(1, Math.floor(Number(query.get('page'))) || 1);
   const stage = isStage(query.get('runtime_stage'))
     ? (query.get('runtime_stage') as 'draft' | 'verify' | 'online')
     : undefined;
-  const state = useScheduledTasks(botId, ownerId, { runtime_stage: stage }, page, pageSize);
+  const state = useScheduledTasks(botId, entityId, { runtime_stage: stage }, page, pageSize, ownerId);
   const { context, lock } = state;
   useEffect(() => {
     if (context?.bot_type !== 'personal') return;

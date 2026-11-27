@@ -132,7 +132,7 @@ export function ArchitectNameField({
             variant="ghost"
             size="sm"
             className={`group h-auto w-full cursor-pointer justify-start rounded-none py-2 pr-3 text-left text-xs transition-colors ${
-              selected ? 'bg-lavender-50 text-lavender-700' : 'hover:bg-slate-50'
+              selected ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
             }`}
             style={{ paddingLeft: 10 + depth * 20 }}
             onMouseDown={(event) => event.preventDefault()}
@@ -148,7 +148,7 @@ export function ArchitectNameField({
             }}
           >
             <span className="flex min-w-0 w-full items-start gap-2">
-              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-slate-400 group-hover:text-lavender-600">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground group-hover:text-primary">
                 {hasChildren ? (
                   expanded ? (
                     <ChevronDown size={14} strokeWidth={1.8} />
@@ -160,17 +160,17 @@ export function ArchitectNameField({
               <span className="block min-w-0 flex-1">
                 <span
                   className={`block truncate ${
-                    hasChildren ? 'font-medium text-slate-800' : 'font-normal text-slate-700'
+                    hasChildren ? 'font-medium text-foreground' : 'font-normal text-foreground'
                   }`}
                 >
                   {option.label}
                 </span>
                 {option.ownerName && (
-                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">{option.ownerName}</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{option.ownerName}</span>
                 )}
               </span>
               {hasChildren && !isSearching && (
-                <span className="mt-0.5 shrink-0 text-[10px] text-slate-300">{option.children?.length}</span>
+                <span className="mt-0.5 shrink-0 text-[10px] text-muted-foreground/70">{option.children?.length}</span>
               )}
             </span>
           </Button>
@@ -181,13 +181,14 @@ export function ArchitectNameField({
   }
 
   return (
+    /* figma 稿 node 2017:18988:架构域名称 = 搜索下拉,展开面板选中项高亮;placeholder/口径沿用。 */
     <div className="relative space-y-1.5">
-      <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
+      <label className="flex items-center gap-1 text-xs font-semibold text-foreground">
         {label}
         {required ? (
-          <span className="ml-0.5 text-red-500">*</span>
+          <span className="ml-0.5 text-destructive">*</span>
         ) : (
-          <span className="font-normal text-slate-400">（可选）</span>
+          <span className="font-normal text-muted-foreground">（可选）</span>
         )}
       </label>
       <div className="relative">
@@ -214,35 +215,35 @@ export function ArchitectNameField({
               event.currentTarget.blur();
             }
           }}
-          className="h-8 w-full rounded-lg border border-slate-200 bg-background px-3 py-1.5 pr-8 text-sm text-slate-700 outline-none transition-shadow placeholder:text-slate-300 focus:border-transparent focus:ring-1 focus:ring-slate-300 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-slate-300 focus-visible:ring-offset-0 disabled:bg-slate-50 disabled:text-slate-400"
+          className="h-8 w-full rounded-lg border border-input bg-background px-3 py-1.5 pr-8 text-sm text-foreground outline-none transition-shadow placeholder:text-muted-foreground/50 focus:border-transparent focus:ring-1 focus:ring-muted-foreground/15 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-muted-foreground/15 focus-visible:ring-offset-0 disabled:bg-muted/60 disabled:text-muted-foreground"
         />
         {loading && (
           <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
           </div>
         )}
       </div>
       {shouldShowDropdown && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
           {!loading && !error && loaded && isSearching && (
-            <div className="border-b border-divider bg-slate-50/80 px-3 py-2 text-[11px] text-slate-400">
+            <div className="border-b border-divider bg-muted/80 px-3 py-2 text-[11px] text-muted-foreground">
               {`匹配到 ${matchedOptionCount} 项`}
             </div>
           )}
           <div className="max-h-72 overflow-auto py-1">
             {loading ? (
-              <div className="px-3 py-2 text-xs text-slate-400">加载中...</div>
+              <div className="px-3 py-2 text-xs text-muted-foreground">加载中...</div>
             ) : error ? (
-              <div className="px-3 py-2 text-xs text-red-500">{error}</div>
+              <div className="px-3 py-2 text-xs text-destructive">{error}</div>
             ) : matchedOptionCount > 0 ? (
               renderOptionTree(matchedOptions)
             ) : (
-              <div className="px-3 py-2 text-xs text-slate-400">未找到匹配项，可直接输入新名称</div>
+              <div className="px-3 py-2 text-xs text-muted-foreground">未找到匹配项，可直接输入新名称</div>
             )}
           </div>
         </div>
       )}
-      {description && <p className="text-[11px] leading-relaxed text-slate-400">{description}</p>}
+      {description && <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>}
     </div>
   );
 }

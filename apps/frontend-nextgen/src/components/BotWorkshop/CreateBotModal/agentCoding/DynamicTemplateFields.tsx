@@ -83,7 +83,7 @@ export const DynamicTemplateFields: React.FC<DynamicTemplateFieldsProps> = ({
 
   if (!fields.length) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-400">
+      <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
         当前模板无需额外配置。
       </div>
     );

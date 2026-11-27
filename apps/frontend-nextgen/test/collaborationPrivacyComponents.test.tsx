@@ -71,7 +71,7 @@ describe('collaboration privacy accessible UI', () => {
 
     expect(dialogSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
-    expect(hookSource).not.toContain("position: 'top-center'");
+    expect(privacySources).not.toContain("position: 'top-center'");
     expect(privacySources).toContain("from '@/components/ui/notify'");
     expect(privacySources).toContain('notifyError');
     expect(privacySources).toContain('notifySuccess');

@@ -191,7 +191,8 @@ test('history validates target without fallback and preserves duplicate run IDs'
 });
 test('keys include owner/bot/target, and deep links retain the same address', () => {
   const row = mapManagedRoutine(dto, scope);
-  expect(row.key).not.toBe(routineKey({ ...row, owner_id: 'other' }, scope));
+  expect(row.key).toBe(routineKey({ ...row, owner_id: 'other' }, scope));
+  expect(row.key).not.toBe(routineKey(row, { ...scope, entityId: 'other-entity' }));
   expect(addressFromKey(row.key, scope)).toMatchObject({
     id: dto.routine_id,
     device_uuid: 'uuid',
@@ -256,7 +257,7 @@ test('service lock reads continue using the OpenAPI endpoint and verified owner'
   await client().getLock(context);
   expect(request).toHaveBeenCalledWith(
     '/openapi/v1/bots/bot%2Fa/edit-lock',
-    expect.objectContaining({ method: 'GET', params: { user_id: 'admin', entity_id: 'owner' } }),
+    expect.objectContaining({ method: 'GET', params: { user_id: 'admin', owner_id: 'owner' } }),
   );
 });
 
@@ -415,4 +416,42 @@ describe('multi-instance create expands one request per selected instance', () =
     expect(result.message).toContain('uuid-2（实例不可用');
     expect(result.message).toContain('无需重复勾选');
   });
+});
+
+
+test('legacy Owner links keep owner_id for list and Caller metadata after handoff', async () => {
+  request.mockImplementation(async (url: string) => ok(
+    url.endsWith('/routines') ? { total: 0, items: [] }
+      : url.endsWith('/caller-context') ? { bot_call_type: 'owner' }
+      : url.endsWith('/editors') ? { items: [] }
+      : { bot_id: 'bot', owner_id: 'new-owner', entity_id: 'original', bot_type: 'service', engine: 'teclaw' },
+  ));
+  const legacy = createRoutineClient('bot', undefined, 'collaborator', undefined, 'new-owner');
+  await legacy.list({ runtime_stage: 'online' });
+  await legacy.context();
+  for (const [, options] of request.mock.calls) {
+    expect(options.params).toMatchObject({ user_id: 'collaborator', owner_id: 'new-owner' });
+    expect(options.params).not.toHaveProperty('entity_id');
+  }
+});
+
+test('stable entity takes precedence and current Owner is used only for lock ownership', async () => {
+  request.mockResolvedValue(ok({ total: 0, items: [] }));
+  const handedOff = createRoutineClient('bot', 'original', 'collaborator', undefined, 'new-owner');
+  await handedOff.list({ runtime_stage: 'online' });
+  expect(request.mock.calls[0][1].params).toMatchObject({ entity_id: 'original', user_id: 'collaborator' });
+  expect(request.mock.calls[0][1].params).not.toHaveProperty('owner_id');
+  await handedOff.getLock({ bot_type: 'service', owner_id: 'new-owner' });
+  expect(request.mock.calls[1][1].params).toEqual({ user_id: 'collaborator', owner_id: 'new-owner' });
+});
+
+
+test.each([
+  { ...scope, entityId: 'original' },
+  { botId: scope.botId, userId: 'collaborator', ownerId: 'new-owner' },
+])('handoff detail keys use the address scope independently of current Owner: %j', (addressScope) => {
+  const row = mapManagedRoutine({ ...dto, owner_id: 'new-owner' }, addressScope);
+  expect(row.owner_id).toBe('new-owner');
+  expect(addressFromKey(row.key, addressScope)?.id).toBe(dto.routine_id);
+  expect(addressFromKey(row.key, { ...addressScope, entityId: 'another-bot-entity' })).toBeUndefined();
 });

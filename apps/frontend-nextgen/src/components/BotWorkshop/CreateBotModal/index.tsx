@@ -5,7 +5,6 @@ import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { BotCreateAuthorization, BotCreateInput, BotCreateScenario, BotCreateSpace } from '@/services/botWorkshop';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
-import { Cloud, Laptop } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { AuthorizationPanel } from './AuthorizationPanel';
 import { CreateBotFormFields } from './CreateBotFormFields';
@@ -165,21 +164,18 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
         size="lg"
         showClose={!expertCreation.initializationPending}
         aria-describedby="create-bot-description"
-        className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] overscroll-y-none p-4"
+        className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[680px] overscroll-y-none p-4"
       >
         <>
-          <ModalHeader className="flex-row items-center gap-2.5 space-y-0">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              {isLocal ? <Laptop aria-hidden className="size-5" /> : <Cloud aria-hidden className="size-5" />}
-            </div>
-            <div className="min-w-0 space-y-1">
-              <ModalTitle className="text-base leading-6">{isLocal ? '创建本地 Bot' : '创建云端 Bot'}</ModalTitle>
-              <ModalDescription id="create-bot-description" className="text-xs leading-5">
-                {isLocal
-                  ? 'Bot 在个人设备中运行，不提供服务化能力。'
-                  : 'Bot 在云端运行，可按引擎能力选择是否提供服务。'}
-              </ModalDescription>
-            </div>
+          {/* figma 稿 node 2041:48753:弹窗宽 680;头部「标题+副标题」同行纯文字,去图标容器。
+              色板按方案 A 走语义 token,稿值仅作对照(references/spec-notes.md)。 */}
+          <ModalHeader className="flex-row items-baseline gap-2 space-y-0">
+            <ModalTitle className="text-base leading-6">{isLocal ? '创建本地 Bot' : '创建云端 Bot'}</ModalTitle>
+            <ModalDescription id="create-bot-description" className="text-xs leading-5">
+              {isLocal
+                ? 'Bot 在个人设备中运行，不提供服务化能力。'
+                : 'Bot 在云端运行，可按引擎能力选择是否提供服务。'}
+            </ModalDescription>
           </ModalHeader>
           {expertMode && selectedExpert && (
             <p className="text-sm text-muted-foreground">来自专家市场 · {selectedExpert.name}</p>

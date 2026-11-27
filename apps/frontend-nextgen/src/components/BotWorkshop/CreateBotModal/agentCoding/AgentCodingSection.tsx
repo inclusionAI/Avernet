@@ -168,7 +168,8 @@ export function AgentCodingSection({
       </div>
       {selected && value ? (
         <div className="relative mt-4 overflow-visible border-t border-divider pt-3">
-          <div className="mb-2.5 flex items-center gap-2 text-xs font-semibold text-foreground">
+          {/* figma 稿 node 2041:48753:「Bot 配置」组标题 13/500 + 分割线。 */}
+          <div className="mb-2.5 flex items-center gap-2 text-[13px] font-medium text-foreground">
             <span className="size-1.5 rounded-full bg-primary" />
             Bot 配置
           </div>
