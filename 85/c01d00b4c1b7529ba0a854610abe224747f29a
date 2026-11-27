@@ -1,0 +1,61 @@
+apps/bcs/crates/services/bcs-direct-a2a-runner/src/lib.rs
+  s_76b15ecd7ad8b7::t_7d1fff57467861 153-159
+apps/bcs/crates/bootstrap/bcs/tests/conformance_direct_session_directory.rs
+  s_76b15ecd7ad8b7::t_0e16b6e1e49e79 1-94
+apps/bcs/crates/services/bcs-direct-a2a-runner/tests/conformance_direct_a2a.rs
+  s_76b15ecd7ad8b7::t_ddc04850082311 350-422
+apps/bcs/crates/bootstrap/bcs/src/dist_direct_a2a.rs
+  s_76b15ecd7ad8b7::t_b41f83c760de84 6-7,55-56
+apps/bcs/crates/services/bcs-dist-worker/tests/direct_a2a_chain/output.rs
+  s_76b15ecd7ad8b7::t_5544650343e9c6 56-88
+  s_76b15ecd7ad8b7::t_b944f44639fe9a 55
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_76b15ecd7ad8b7::t_b41f83c760de84 39,52
+apps/bcs/crates/bootstrap/bcs/src/dist_direct_a2a/directory.rs
+  s_76b15ecd7ad8b7::t_0e16b6e1e49e79 1-58
+apps/bcs/crates/services/bcs-direct-a2a-runner/CONTEXT.md
+  s_76b15ecd7ad8b7::t_93d4c42c6e9bc0 17-22,26,30-34
+  s_55a03aab436f97::t_fa619cca129af7 35
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_76b15ecd7ad8b7::t_93d4c42c6e9bc0 54
+apps/bcs/crates/services/bcs-direct-a2a-runner/src/output.rs
+  s_76b15ecd7ad8b7::t_7d1fff57467861 38-40
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_76b15ecd7ad8b7::t_93d4c42c6e9bc0 354,372-373,375
+  s_76b15ecd7ad8b7::t_ea1a6eb0a9e346 374
+  s_76b15ecd7ad8b7::t_489336380ce3b3 376
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/src/lib.rs
+  s_76b15ecd7ad8b7::t_b41f83c760de84 35-38
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/tests/output.rs
+  s_76b15ecd7ad8b7::t_ddc04850082311 117-134
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/Cargo.toml
+  s_76b15ecd7ad8b7::t_b41f83c760de84 11
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/README.md
+  s_76b15ecd7ad8b7::t_93d4c42c6e9bc0 30-36
+apps/bcs/Cargo.lock
+  s_76b15ecd7ad8b7::t_eb2876113ed54e 384,1536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85c01d00b4c1b7529ba0a854610abe224747f29a",
+  "prompts": {},
+  "sessions": {
+    "s_55a03aab436f97": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c81-b912-7212-95fd-215f3948ef77",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_76b15ecd7ad8b7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c5e-cab2-7ef0-afb6-2c534ee4185f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
