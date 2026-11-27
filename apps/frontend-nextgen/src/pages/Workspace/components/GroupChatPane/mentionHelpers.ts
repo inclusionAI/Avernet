@@ -1,5 +1,6 @@
 import type { GroupView } from '@/domain/collaboration';
 import type { MentionConfig, MentionItem } from '@tc-chat/ui';
+import { renderGroupMentionItem } from './GroupMentionItem';
 
 const ALL_MENTION_ID = 'ALL-Bots';
 
@@ -28,6 +29,7 @@ export function buildGroupMentionConfig(
       {
         key: 'members',
         label: '会话成员',
+        renderItem: renderGroupMentionItem,
         items: [{ id: ALL_MENTION_ID, name: 'ALL-Bots', description: '提及所有 Bot' }, ...memberItems],
       },
     ],

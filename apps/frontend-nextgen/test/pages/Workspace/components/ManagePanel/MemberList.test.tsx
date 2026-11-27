@@ -140,7 +140,7 @@ describe('MemberList', () => {
     expect(memberRow('consultant').textContent).toContain('成员');
   });
 
-  it('会话精简档：bot 展示类型与自动/禁言状态，人类不展示参与/旁观状态', () => {
+  it('会话精简档：Bot 展示自动/禁言，Human 展示在线/勿扰', () => {
     renderMembers(
       [
         { ...baseParticipant, actorId: 'bot-auto', name: '自由 Bot', mode: 'auto' },
@@ -168,10 +168,8 @@ describe('MemberList', () => {
     expect(memberRow('bot-auto').textContent).toContain('自动');
     expect(memberRow('bot-muted').textContent).toContain('禁言');
     expect(memberRow('bot-auto').textContent).toContain('Bot');
-    // 会话精简档：人类参与状态不在列表重复展示（会话输入区上方已标识）。
-    // 用 queryByText 精确匹配徽标元素，避免成员名（参与用户/旁观用户）包含同词导致误伤。
-    expect(screen.queryByText('参与')).not.toBeInTheDocument();
-    expect(screen.queryByText('旁观')).not.toBeInTheDocument();
+    expect(within(memberRow('human-present')).getByText('在线')).toHaveClass('bg-success/10', 'text-success');
+    expect(within(memberRow('human-absent')).getByText('勿扰')).toHaveClass('bg-muted', 'text-muted-foreground');
     expect(memberRow('human-present').textContent).toContain('用户');
     // 状态色：自动绿（success），禁言灰（neutral）。
     expect(screen.getByText('自动')).toHaveClass('bg-success/10', 'text-success');
@@ -330,7 +328,7 @@ describe('MemberList', () => {
     expect(moreButtons[0]).toHaveClass('hidden', '@max-w-[400px]:inline-flex');
   });
 
-  it('会话精简档：bot 状态标签一级收起；无可收起标签的普通用户行不渲染 ... 入口', () => {
+  it('会话状态在窄面板不折叠，普通成员无其他可折叠标签时不出现 ... 入口', () => {
     renderMembers(
       [
         { ...baseParticipant, actorId: 'bot-auto', role: 'member', mode: 'auto' },
@@ -346,10 +344,9 @@ describe('MemberList', () => {
       { groupKind: 'free_chat', showMode: true, badgePolicy: 'session' },
     );
 
-    expect(screen.getByText('自动')).toHaveClass('@max-w-[400px]:hidden');
-    expect(screen.getByText('Bot')).not.toHaveClass('@max-w-[400px]:hidden');
-    // bot 行有可收起的状态标签 → 有 ... 入口；human 行仅类型标签 → 不渲染。
-    expect(screen.getAllByRole('button', { name: '更多成员标签' })).toHaveLength(1);
+    expect(screen.getByText('自动')).not.toHaveClass('@max-w-[400px]:hidden');
+    expect(screen.getByText('在线')).not.toHaveClass('@max-w-[400px]:hidden');
+    expect(screen.queryByRole('button', { name: '更多成员标签' })).not.toBeInTheDocument();
   });
 
   it('... 入口 hover/聚焦后展开显示被收起的标签', async () => {
