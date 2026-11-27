@@ -9,6 +9,7 @@
 mod assembly;
 mod commands;
 mod dispatch;
+mod direct;
 mod gateway;
 mod storage;
 use bcs_dist_test_runner as workload;
@@ -19,11 +20,13 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 struct Args {
     #[arg(long)]
     archive: PathBuf,
+    #[arg(long)]
+    direct: bool,
 }
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let mut host = assembly::Host::new(&args.archive).await;
+    let mut host = assembly::Host::new(&args.archive, args.direct).await;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     println!(
         "{}",

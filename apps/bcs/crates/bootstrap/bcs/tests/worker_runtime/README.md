@@ -17,9 +17,17 @@ late definitive evidence, live follow, snapshot coverage, retention and cursor G
 The retained-obligation probe crosses a durable scan boundary before concluding
 absence; the supervisor may have already consumed the current round prefix.
 It is a bounded functional suite, not a load or capacity benchmark. Test-only
-Runner workloads from [bcs-dist-test-runner](../../../../test-support/bcs-dist-test-runner/README.md)
+Group-scenario runner workloads from [bcs-dist-test-runner](../../../../test-support/bcs-dist-test-runner/README.md)
 provide decisions; all admission, checkpoint, projection,
 archival, isolation and ownership behavior comes from production services.
+
+The same story starts a second companion with `--direct` and a loopback HTTP
+A2A agent. It sends external JSON-RPC requests through the Direct Gateway,
+checks admission of the registered target, streams replacement text and a
+delta, answers a remote question, and starts a new turn after confirmed
+cancellation. The agent records the downstream context and remote task ID.
+This process uses the production Direct directory, Worker runner, and Connector
+with the test registry, memory coordination store, and SQLite archive.
 
 The Store mock disappears on process exit. In-process Worker takeover must not
 be reported as persistence across a process or storage-node restart. Actual

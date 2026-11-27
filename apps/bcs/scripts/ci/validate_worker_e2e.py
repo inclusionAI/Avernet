@@ -5,6 +5,8 @@ import sys
 
 
 REQUIRED_CHECKS = {
+    'direct_admission_stream_and_reply',
+    'direct_confirmed_cancel_preserves_context',
     'gateway_http_retry_conflict_once',
     'gateway_http_concurrent_first_request',
     'gateway_http_sse_get_task_consistency',

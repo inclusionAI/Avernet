@@ -519,8 +519,36 @@ async fn protocol_errors_are_reported_as_json_rpc_errors() {
     let core = gateway_core(&p);
     let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), DistGatewayConfig::new(64)).unwrap();
     let bare = router(Arc::new(gateway), GatewayHttpConfig::new("https://gw.example"));
-    let response = bare.oneshot(rpc("GetTask", json!({ "id": "x" }))).await.unwrap();
+    let response = bare.oneshot(rpc("GetTask", json!({ "id": 7 }))).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn methods_accept_only_their_named_a2a_arguments_and_keep_the_rpc_id() {
+    let app = app_over(Arc::new(Failing(GatewayError::NotFound)));
+    for (method, params) in [
+        ("SendMessage", json!({ "id": "s0001.abc.def" })),
+        ("SendStreamingMessage", json!({ "message": false })),
+        ("GetTask", json!(["s0001.abc.def"])),
+        ("SubscribeToTask", json!({ "id": 7 })),
+        ("CancelTask", Value::Null),
+        ("ListTasks", json!({ "pageSize": "five" })),
+    ] {
+        let response = json_of(&app, rpc(method, params)).await;
+        assert_eq!(response["id"], "r1");
+        assert_eq!(error_code(&response), -32602, "{method}");
+    }
+    let raw = |json| Request::post("/a2a/grp-research-01")
+        .header("content-type", "application/json")
+        .body(Body::from(json)).unwrap();
+    let missing = json_of(&app, raw(r#"{"id":17,"jsonrpc":"2.0","method":"GetTask"}"#)).await;
+    assert_eq!(missing["id"], 17);
+    assert_eq!(error_code(&missing), -32602);
+
+    // JSON field order does not affect dispatch. Valid params reach the service.
+    let ordered = json_of(&app, raw(r#"{"params":{"id":"s0001.abc.def"},"method":"GetTask","id":17,"jsonrpc":"2.0"}"#)).await;
+    assert_eq!(ordered["id"], 17);
+    assert_eq!(error_code(&ordered), -32001);
 }
 
 /// A Gateway whose every use case fails with one error.

@@ -21,6 +21,7 @@ mod content;
 pub mod cursor;
 mod error;
 mod mapping;
+mod request;
 mod rpc;
 mod stream;
 

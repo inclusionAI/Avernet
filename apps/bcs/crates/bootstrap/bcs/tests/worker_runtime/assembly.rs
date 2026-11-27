@@ -77,6 +77,7 @@ pub struct Worker {
     pub stopped: bool,
 }
 pub struct Host {
+    shard: ShardId,
     pub model: Arc<Model>,
     pub layout: KeyLayout,
     pub inbox: Arc<StoreInboxProducer>,
@@ -92,7 +93,15 @@ pub struct Host {
     peers: Arc<Peers>,
 }
 impl Host {
-    pub async fn new(path: &Path) -> Self {
+    pub fn direct_stores(&self) -> bcs::dist_direct_a2a::DirectA2aStores {
+        bcs::dist_direct_a2a::DirectA2aStores {
+            coordination: self.coordination.clone(), inbox: self.inbox.clone(),
+            feed: self.feed.clone(), archive: self.archive.clone(),
+        }
+    }
+
+    pub async fn new(path: &Path, direct: bool) -> Self {
+        let shard = ShardId(if direct { 0 } else { 1 });
         let model = Arc::new(Model::default());
         let layout = KeyLayout::new("singlebox", "worker-mock").unwrap();
         let budget = Arc::new(SharedScanBudget::new(ScanBudgetConfig::default()).unwrap());
@@ -171,12 +180,13 @@ impl Host {
                 now: Arc::new(|| SystemClock.now()),
             },
             SupervisorConfig {
-                shards: vec![ShardId(1)],
+                shards: vec![shard],
                 ..Default::default()
             },
         )
         .unwrap();
         let mut host = Self {
+            shard,
             model,
             layout,
             inbox,
@@ -191,8 +201,35 @@ impl Host {
             budget,
             peers: Arc::new(Peers::default()),
         };
-        host.add_worker("worker-a").await;
+        if direct {
+            let peers = host.peers.clone();
+            let (runtime, processor, supervisor) = host.direct_stores().worker(
+                "worker-direct".into(), "http://worker-direct.example.test".into(),
+                Self::worker_config(shard),
+                ProcessorConfig { cancel_grace: Duration::from_secs(2), ..Default::default() },
+                move |_| Ok(peers), host.budget.clone(), host.dispatch.clone(),
+            ).await.unwrap();
+            host.workers.push(Worker { runtime, processor: Arc::new(processor), stopped: false });
+            host.supervisor = supervisor;
+        } else {
+            host.add_worker("worker-a").await;
+        }
         host
+    }
+    fn worker_config(shard: ShardId) -> WorkerConfig {
+        WorkerConfig {
+            shards: vec![shard],
+            heartbeat_interval: Duration::from_millis(50),
+            lease_ttl: Duration::from_secs(1),
+            request_timeout: Duration::from_millis(200),
+            exit_margin: Duration::from_millis(5),
+            check_interval: Duration::from_millis(5),
+            candidate_backoff: Duration::from_millis(5),
+            max_active_sessions: 8,
+            max_acquires_per_tick: 4,
+            max_shards_per_tick: 1,
+            ..Default::default()
+        }
     }
     pub async fn add_worker(&mut self, name: &str) {
         let coordination = Arc::new(
@@ -207,19 +244,7 @@ impl Host {
         let runtime = WorkerRuntime::start(
             name.into(),
             format!("http://{name}.example.test"),
-            WorkerConfig {
-                shards: vec![ShardId(1)],
-                heartbeat_interval: Duration::from_millis(50),
-                lease_ttl: Duration::from_secs(1),
-                request_timeout: Duration::from_millis(200),
-                exit_margin: Duration::from_millis(5),
-                check_interval: Duration::from_millis(5),
-                candidate_backoff: Duration::from_millis(5),
-                max_active_sessions: 8,
-                max_acquires_per_tick: 4,
-                max_shards_per_tick: 1,
-                ..Default::default()
-            },
+            Self::worker_config(self.shard),
             coordination.clone(),
             coordination.clone(),
             coordination.clone(),
@@ -275,8 +300,8 @@ impl Host {
                     processor_errors.push(error.code);
                 }
             }
-            self.inbox.repair(ShardId(1)).await?;
-            self.inbox.discover(ShardId(1)).await?;
+            self.inbox.repair(self.shard).await?;
+            self.inbox.discover(self.shard).await?;
             let report = self.supervisor.tick().await;
             anyhow::ensure!(report.failures == 0, "supervisor failed: {report:?}");
             tokio::time::sleep(Duration::from_millis(2)).await;

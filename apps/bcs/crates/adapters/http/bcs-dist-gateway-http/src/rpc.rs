@@ -2,9 +2,10 @@
 
 use crate::error::a2a_error;
 use crate::mapping::{self, TaskShape};
+use crate::request::{Method, RpcRequest};
 use crate::{AppState, cursor, stream};
 use a2a::{
-    A2AError, CancelTaskRequest, GetTaskRequest, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
+    A2AError, CancelTaskRequest, GetTaskRequest, JsonRpcId, JsonRpcResponse,
     ListTasksRequest, ListTasksResponse, Message, SendMessageRequest, SendMessageResponse,
     SubscribeToTaskRequest, methods,
 };
@@ -16,7 +17,6 @@ use axum::response::{IntoResponse, Response};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::num::NonZeroU32;
 
@@ -35,11 +35,6 @@ fn gateway(error: GatewayError) -> A2AError {
     a2a_error(&error)
 }
 
-fn params<T: DeserializeOwned>(request: &JsonRpcRequest) -> Result<T, A2AError> {
-    let value = request.params.clone().unwrap_or(Value::Null);
-    serde_json::from_value(value).map_err(|e| A2AError::invalid_params(format!("invalid params: {e}")))
-}
-
 fn result<T: serde::Serialize>(value: &T) -> Outcome {
     serde_json::to_value(value)
         .map(Answer::Result)
@@ -55,7 +50,7 @@ pub(crate) async fn handle(
     Path(id_or_group): Path<String>,
     caller: Option<Extension<GatewayCaller>>,
     headers: HeaderMap,
-    body: Result<Json<JsonRpcRequest>, JsonRejection>,
+    body: Result<Json<RpcRequest>, JsonRejection>,
 ) -> Response {
     let request = match body {
         Ok(Json(request)) => request,
@@ -84,20 +79,7 @@ pub(crate) async fn handle(
                 else { SessionTarget::Group { group: GroupId(id_or_group) } },
         id: id.clone(),
     };
-    let outcome = match request.method.as_str() {
-        methods::SEND_MESSAGE => call.send(&request).await,
-        methods::SEND_STREAMING_MESSAGE => call.send_streaming(&request).await,
-        methods::GET_TASK => call.get(&request).await,
-        methods::SUBSCRIBE_TO_TASK => call.subscribe(&request, &headers).await,
-        methods::CANCEL_TASK => call.cancel(&request).await,
-        methods::LIST_TASKS => call.list(&request).await,
-        methods::CREATE_PUSH_CONFIG
-        | methods::GET_PUSH_CONFIG
-        | methods::LIST_PUSH_CONFIGS
-        | methods::DELETE_PUSH_CONFIG => Err(A2AError::push_notification_not_supported()),
-        methods::GET_EXTENDED_AGENT_CARD => Err(A2AError::extended_card_not_configured()),
-        other => Err(A2AError::method_not_found(other)),
-    };
+    let outcome = call.dispatch(request.call, &headers).await;
     match outcome {
         Ok(Answer::Result(value)) => Json(JsonRpcResponse::success(id, value)).into_response(),
         Ok(Answer::Stream(response)) => response,
@@ -163,6 +145,23 @@ fn content_of(message: &Message) -> Result<Payload, A2AError> {
 }
 
 impl Call<'_> {
+    async fn dispatch(&self, method: Method, headers: &HeaderMap) -> Outcome {
+        match method {
+            Method::SendMessage(args) => self.send(args.parse()?).await,
+            Method::SendStreamingMessage(args) => self.send_streaming(args.parse()?).await,
+            Method::GetTask(args) => self.get(args.parse()?).await,
+            Method::SubscribeToTask(args) => self.subscribe(args.parse()?, headers).await,
+            Method::CancelTask(args) => self.cancel(args.parse()?).await,
+            Method::ListTasks(args) => self.list(args.parse()?).await,
+            Method::Other { method } => Err(match method.as_str() {
+                methods::CREATE_PUSH_CONFIG | methods::GET_PUSH_CONFIG
+                | methods::LIST_PUSH_CONFIGS | methods::DELETE_PUSH_CONFIG => A2AError::push_notification_not_supported(),
+                methods::GET_EXTENDED_AGENT_CARD => A2AError::extended_card_not_configured(),
+                other => A2AError::method_not_found(other),
+            }),
+        }
+    }
+
     fn submit_input(&self, request: &SendMessageRequest) -> Result<SubmitInput, A2AError> {
         if request
             .configuration
@@ -182,8 +181,7 @@ impl Call<'_> {
         })
     }
 
-    async fn send(&self, request: &JsonRpcRequest) -> Outcome {
-        let request: SendMessageRequest = params(request)?;
+    async fn send(&self, request: SendMessageRequest) -> Outcome {
         let input = self.submit_input(&request)?;
         let gw = &self.state.gateway;
         // A message to an existing task answers its open question: remember what
@@ -211,8 +209,7 @@ impl Call<'_> {
         result(&SendMessageResponse::Task(mapping::task(&view, shape)))
     }
 
-    async fn send_streaming(&self, request: &JsonRpcRequest) -> Outcome {
-        let request: SendMessageRequest = params(request)?;
+    async fn send_streaming(&self, request: SendMessageRequest) -> Outcome {
         let input = self.submit_input(&request)?;
         let gw = &self.state.gateway;
         // A message to an existing task is the reply to its question. Note what
@@ -242,8 +239,7 @@ impl Call<'_> {
         )))
     }
 
-    async fn get(&self, request: &JsonRpcRequest) -> Outcome {
-        let request: GetTaskRequest = params(request)?;
+    async fn get(&self, request: GetTaskRequest) -> Outcome {
         let view = self
             .state
             .gateway
@@ -253,8 +249,7 @@ impl Call<'_> {
         result(&mapping::task(&view, TaskShape::history(request.history_length)))
     }
 
-    async fn subscribe(&self, request: &JsonRpcRequest, headers: &HeaderMap) -> Outcome {
-        let request: SubscribeToTaskRequest = params(request)?;
+    async fn subscribe(&self, request: SubscribeToTaskRequest, headers: &HeaderMap) -> Outcome {
         let tid = Tid(request.id);
         // A usable Last-Event-ID resumes right after it; anything else (absent,
         // undecodable, another task's) gets the snapshot first.
@@ -294,8 +289,7 @@ impl Call<'_> {
         )))
     }
 
-    async fn cancel(&self, request: &JsonRpcRequest) -> Outcome {
-        let request: CancelTaskRequest = params(request)?;
+    async fn cancel(&self, request: CancelTaskRequest) -> Outcome {
         let tid = Tid(request.id);
         // The JSON-RPC request id identifies this cancel: a retry repeats it.
         let request_id = match &self.id {
@@ -322,8 +316,7 @@ impl Call<'_> {
         result(&mapping::task(&view, TaskShape::FULL))
     }
 
-    async fn list(&self, request: &JsonRpcRequest) -> Outcome {
-        let request: ListTasksRequest = params(request)?;
+    async fn list(&self, request: ListTasksRequest) -> Outcome {
         let size = match request.page_size {
             None => self.state.config.default_page_size,
             Some(size) => u32::try_from(size).map_err(|_| A2AError::invalid_params("pageSize must be positive"))?,

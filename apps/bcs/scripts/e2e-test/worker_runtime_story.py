@@ -16,8 +16,8 @@ import time
 
 
 class Host:
-    def __init__(self, binary, archive, log):
-        self.process = subprocess.Popen([str(binary), '--archive', str(archive)],
+    def __init__(self, binary, archive, log, *options):
+        self.process = subprocess.Popen([str(binary), '--archive', str(archive), *options],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=log, text=True, bufsize=1)
         self.replies = queue.Queue()
@@ -145,7 +145,7 @@ def run(h, checks):
         display = restored['view']['content']['snapshot']
         assert display['kind'] == 'inline'
         assert display['value'] == {'format_version': 1, 'units': [
-            {'node': 'answer', 'artifact_id': 'answer', 'class': 'output', 'content': 'x' * size}]}
+            {'source': 'answer', 'artifact_id': 'answer', 'class': 'output', 'content': 'x' * size}]}
         assert saved['result'] == {'kind': 'inline', 'value': {'finished': True}}
         consumed = h.call('checkpoint', sid=sid)['checkpoint']['consumed']
         calls = h.call('tick')['runner_calls']
@@ -231,13 +231,16 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='worker-story-') as directory:
             with args.report.with_suffix('.log').open('w') as log:
-                h = Host(args.binary.resolve(), Path(directory) / 'archive.db', log)
-                passed = False
-                try:
-                    run(h, report['checks'])
-                    passed = True
-                finally:
-                    h.close(passed)
+                from direct_worker_story import run as run_direct
+                for scenario, database, flags in [(run, 'archive.db', []),
+                                                  (run_direct, 'direct.db', ['--direct'])]:
+                    h = Host(args.binary.resolve(), Path(directory) / database, log, *flags)
+                    passed = False
+                    try:
+                        scenario(h, report['checks'])
+                        passed = True
+                    finally:
+                        h.close(passed)
         report['status'] = 'passed'
     except Exception as exc:
         report['error'] = str(exc)
