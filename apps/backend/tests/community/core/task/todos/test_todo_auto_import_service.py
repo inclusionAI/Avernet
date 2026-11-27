@@ -16,12 +16,20 @@ from agentclaw.community.core.task.todos.auto_import_models import (
     TodoAutoImportRuleRecord,
     TodoAutoImportRuleStatus,
 )
+from agentclaw.community.core.task.todos.bot_team_models import BotTeamStatus
 from agentclaw.community.core.task.todos.errors import (
     TodoAutoImportRuleDisabledError,
     TodoBotAmbiguousError,
     TodoBotScopeError,
+    TodoTemplateStateConflictError,
+    TodoTemplateValidationError,
 )
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoExecutorKind,
+    TodoExecutorSelection,
+    TodoOwnerInput,
+)
 from agentclaw.community.core.task.todos.services.todo_auto_import_service import (
     TodoAutoImportService,
 )
@@ -59,18 +67,6 @@ class _Access:
 
 
 class _Bots:
-    def list_live_by_bot_id(self, bot_id: str):
-        if bot_id == "bot_1":
-            return [
-                {
-                    "bot_id": bot_id,
-                    "bot_name": "Bot One",
-                    "space_id": 7,
-                    "owner_id": "bot_owner",
-                }
-            ]
-        return []
-
     def list_matches_by_current_owner(self, bot_id: str, owner_id: str):
         if bot_id == "scheduler_bot" and owner_id == "user_1":
             return [{"bot_id": bot_id, "owner_id": owner_id}]
@@ -80,6 +76,32 @@ class _Bots:
                 {"bot_id": bot_id, "owner_id": owner_id},
             ]
         return []
+
+
+class _BotTeams:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def get_bot_team(self, *, bot_team_id: str, actor_id: str):
+        self.calls.append({"bot_team_id": bot_team_id, "actor_id": actor_id})
+        values = {
+            "team_1": (7, BotTeamStatus.ACTIVE, "team_rev_1"),
+            "team_other_space": (8, BotTeamStatus.ACTIVE, "team_rev_2"),
+            "team_archived": (7, BotTeamStatus.ARCHIVED, "team_rev_3"),
+            "team_unpublished": (7, BotTeamStatus.ACTIVE, None),
+        }
+        if bot_team_id not in values:
+            raise TodoTemplateValidationError("Bot team not found")
+        space_id, status, revision_id = values[bot_team_id]
+        return SimpleNamespace(
+            bot_team=SimpleNamespace(
+                bot_team_id=bot_team_id,
+                space_id=space_id,
+                status=status,
+                published_revision_id=revision_id,
+            ),
+            revisions=(),
+        )
 
 
 class _Repository:
@@ -178,33 +200,36 @@ class _Repository:
         return tuple(self.progress[: kwargs["limit"]])
 
 
-class _Todos:
+class _ProductCreation:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
     def create_todo(self, **kwargs: Any) -> TodoRecord:
         self.calls.append(kwargs)
+        executor = kwargs["executor"]
         return TodoRecord(
             todo_id="todo_1",
             space_id=kwargs["space_id"],
             title=kwargs["title"],
             description=kwargs["description"],
-            bot_id=kwargs["bot_id"],
-            bot_name="Bot One",
+            bot_id="",
+            bot_name="",
             status=TodoStatus.NOT_STARTED,
             collab_context_id=None,
             created_by=kwargs["actor_id"],
             created_at=NOW,
             updated_at=NOW,
+            template_id=executor.id,
+            template_version_id=executor.revision_id,
         )
 
 
-def _service() -> tuple[TodoAutoImportService, _Repository, _Access, _Todos]:
+def _service() -> tuple[TodoAutoImportService, _Repository, _Access, _ProductCreation]:
     repository = _Repository()
     access = _Access()
-    todos = _Todos()
+    todos = _ProductCreation()
     return (
-        TodoAutoImportService(repository, access, _Bots(), todos),
+        TodoAutoImportService(repository, access, _Bots(), _BotTeams(), todos),
         repository,
         access,
         todos,
@@ -246,7 +271,7 @@ def test_create_update_and_active_list_validate_space_and_bot_scope() -> None:
         actor_id="user_1",
         source_container_ids=("W1", "W1", "P1"),
         filter_text=" 只导入高优任务 ",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
     assert rule.source_container_ids == ("W1", "P1")
@@ -267,13 +292,13 @@ def test_create_update_and_active_list_validate_space_and_bot_scope() -> None:
     assert updated.cron_expression == "0 9 * * 1-5"
     assert service.list_active_rules() == ()
 
-    with pytest.raises(TodoBotScopeError):
+    with pytest.raises(TodoTemplateValidationError):
         service.update_rule(
             rule_id=rule.rule_id,
             actor_id="user_1",
             bot_id="other_bot",
         )
-    assert repository.rules[rule.rule_id].bot_id == "bot_1"
+    assert repository.rules[rule.rule_id].bot_id == "team_1"
 
 
 @pytest.mark.parametrize(
@@ -291,7 +316,7 @@ def test_rule_schedule_validation(field: str, value: object, message: str) -> No
         "actor_id": "user_1",
         "source_container_ids": ("W1",),
         "filter_text": "all",
-        "bot_id": "bot_1",
+        "bot_id": "team_1",
         "scheduler_bot_id": "scheduler_bot",
         field: value,
     }
@@ -319,7 +344,7 @@ def test_rule_scheduler_must_be_uniquely_owned_by_creator(
             actor_id="user_1",
             source_container_ids=("W1",),
             filter_text="all",
-            bot_id="bot_1",
+            bot_id="team_1",
             scheduler_bot_id=scheduler_bot_id,
         )
 
@@ -331,7 +356,7 @@ def test_cross_space_owner_list_hides_rules_after_membership_is_lost() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
     repository.rules["rule_hidden"] = replace(
@@ -350,7 +375,7 @@ def test_checkpoint_and_progress_do_not_require_rule_owner() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -370,7 +395,7 @@ def test_checkpoint_validates_outcome_container_and_aware_times() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -393,7 +418,7 @@ def test_failed_checkpoint_may_omit_cursor_and_todo() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -417,7 +442,7 @@ def test_progress_filter_rejects_naive_source_time() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -435,7 +460,7 @@ def test_any_rule_reader_can_create_with_rule_owned_scope() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -453,7 +478,15 @@ def test_any_rule_reader_can_create_with_rule_owned_scope() -> None:
             "actor_id": "user_1",
             "title": "Imported task",
             "description": "Created by an external Agent",
-            "bot_id": "bot_1",
+            "executor": TodoExecutorSelection(
+                type=TodoExecutorKind.BOT_TEAM,
+                id="team_1",
+                revision_id="team_rev_1",
+            ),
+            "owner": TodoOwnerInput(
+                user_id="user_1",
+                user_name="user_1",
+            ),
             "source": _source(),
         }
     ]
@@ -466,7 +499,7 @@ def test_create_from_rule_rejects_disabled_or_unconfigured_source() -> None:
         actor_id="user_1",
         source_container_ids=("W1",),
         filter_text="all",
-        bot_id="bot_1",
+        bot_id="team_1",
         scheduler_bot_id="scheduler_bot",
     )
 
@@ -487,4 +520,28 @@ def test_create_from_rule_rejects_disabled_or_unconfigured_source() -> None:
             title="Imported task",
             description="",
             source=_source(),
+        )
+
+@pytest.mark.parametrize(
+    ("bot_id", "error_type"),
+    [
+        ("team_other_space", TodoTemplateValidationError),
+        ("team_archived", TodoTemplateStateConflictError),
+        ("team_unpublished", TodoTemplateStateConflictError),
+    ],
+)
+def test_rule_executor_must_be_active_published_bot_team(
+    bot_id: str,
+    error_type: type[Exception],
+) -> None:
+    service, _, _, _ = _service()
+
+    with pytest.raises(error_type):
+        service.create_rule(
+            space_id=7,
+            actor_id="user_1",
+            source_container_ids=("W1",),
+            filter_text="all",
+            bot_id=bot_id,
+            scheduler_bot_id="scheduler_bot",
         )

@@ -74,7 +74,7 @@ export function TodoCreateModal({
       <ModalContent size="lg" aria-describedby={undefined}>
         <ModalHeader>
           <ModalTitle>发起待办</ModalTitle>
-          <ModalDescription>填写待办内容，选择负责执行的 Bot 或 Bot 小队，以及人工负责人。</ModalDescription>
+          <ModalDescription>填写待办内容，选择负责执行的 Bot 小队，以及人工负责人。</ModalDescription>
         </ModalHeader>
         <div className="space-y-4">
           <label className="block space-y-1.5 text-sm font-medium text-foreground">

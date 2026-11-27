@@ -30,11 +30,19 @@ from agentclaw.community.core.task.todos.auto_import_models import (
 from agentclaw.community.core.task.todos.auto_import_service_protocol import (
     TodoAutoImportServiceProtocol,
 )
-from agentclaw.community.core.task.todos.bot_scope import resolve_todo_bot
+from agentclaw.community.core.task.todos.bot_team_models import (
+    BotTeamDetail,
+    BotTeamStatus,
+)
+from agentclaw.community.core.task.todos.bot_team_service_protocol import (
+    TodoBotTeamServiceProtocol,
+)
 from agentclaw.community.core.task.todos.errors import (
     TodoAutoImportRuleDisabledError,
     TodoBotAmbiguousError,
     TodoBotScopeError,
+    TodoTemplateStateConflictError,
+    TodoTemplateValidationError,
 )
 from agentclaw.community.core.task.todos.models import (
     MAX_ACTOR_ID_LENGTH,
@@ -42,7 +50,14 @@ from agentclaw.community.core.task.todos.models import (
     MAX_TODO_ID_LENGTH,
     TodoRecord,
 )
-from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoExecutorKind,
+    TodoExecutorSelection,
+    TodoOwnerInput,
+)
+from agentclaw.community.core.task.todos.product_creation_protocol import (
+    TodoProductCreationServiceProtocol,
+)
 from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
     MAX_TODO_SOURCE_ITEM_ID_LENGTH,
@@ -59,12 +74,14 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
         repository: TodoAutoImportRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
-        todo_service: TodoServiceProtocol,
+        bot_teams: TodoBotTeamServiceProtocol,
+        product_creation: TodoProductCreationServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
-        self._todo_service = todo_service
+        self._bot_teams = bot_teams
+        self._product_creation = product_creation
 
     def create_rule(
         self,
@@ -92,15 +109,14 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
             trigger_interval_seconds
         )
         normalized_cron = _cron_expression(cron_expression)
-        space, _member = self._space_access.require_space_member(
+        self._space_access.require_space_member(
             space_id=normalized_space_id,
             user_id=actor,
         )
-        resolve_todo_bot(
-            bot_repository=self._bot_repository,
-            space=space,
+        self._require_active_published_bot_team(
+            bot_team_id=selected_bot_id,
+            space_id=normalized_space_id,
             actor_id=actor,
-            bot_id=selected_bot_id,
         )
         _require_creator_owned_bot(
             bot_repository=self._bot_repository,
@@ -179,7 +195,7 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
             rule_id=normalized_rule_id,
             created_by=actor,
         )
-        space, _member = self._space_access.require_space_member(
+        self._space_access.require_space_member(
             space_id=rule.space_id,
             user_id=actor,
         )
@@ -230,11 +246,10 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
         ):
             raise ValidationError("at least one auto-import rule field is required")
         if selected_bot_id is not None:
-            resolve_todo_bot(
-                bot_repository=self._bot_repository,
-                space=space,
+            self._require_active_published_bot_team(
+                bot_team_id=selected_bot_id,
+                space_id=rule.space_id,
                 actor_id=actor,
-                bot_id=selected_bot_id,
             )
         if selected_scheduler_bot_id is not None:
             _require_creator_owned_bot(
@@ -378,14 +393,55 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
         )
         if container_id not in rule.source_container_ids:
             raise ValidationError("source container is not configured on this rule")
-        return self._todo_service.create_todo(
+        detail = self._require_active_published_bot_team(
+            bot_team_id=rule.bot_id,
+            space_id=rule.space_id,
+            actor_id=rule.created_by,
+        )
+        revision_id = detail.bot_team.published_revision_id
+        if revision_id is None:
+            raise TodoTemplateStateConflictError(
+                "Bot team must have a published revision"
+            )
+        return self._product_creation.create_todo(
             space_id=rule.space_id,
             actor_id=rule.created_by,
             title=title,
             description=description,
-            bot_id=rule.bot_id,
+            executor=TodoExecutorSelection(
+                type=TodoExecutorKind.BOT_TEAM,
+                id=rule.bot_id,
+                revision_id=revision_id,
+            ),
+            owner=TodoOwnerInput(
+                user_id=rule.created_by,
+                user_name=rule.created_by,
+            ),
             source=source,
         )
+
+    def _require_active_published_bot_team(
+        self,
+        *,
+        bot_team_id: str,
+        space_id: int,
+        actor_id: str,
+    ) -> BotTeamDetail:
+        detail = self._bot_teams.get_bot_team(
+            bot_team_id=bot_team_id,
+            actor_id=actor_id,
+        )
+        if detail.bot_team.space_id != space_id:
+            raise TodoTemplateValidationError("Bot team does not belong to space")
+        if detail.bot_team.status is not BotTeamStatus.ACTIVE:
+            raise TodoTemplateStateConflictError(
+                "archived Bot team cannot be selected for automation"
+            )
+        if detail.bot_team.published_revision_id is None:
+            raise TodoTemplateStateConflictError(
+                "Bot team must have a published revision"
+            )
+        return detail
 
 
 def _space_id(value: object) -> int:

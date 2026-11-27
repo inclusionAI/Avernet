@@ -91,6 +91,19 @@ const runningTodo: TodoRecord = {
   status: 'in_progress',
 };
 
+const publishedBotTeam = {
+  botTeamId: 'todo_tpl_1',
+  spaceId: 10,
+  name: 'Coding 小队',
+  description: '需求分析、开发与验证',
+  status: 'active' as const,
+  publishedRevisionId: 'todo_tplv_1',
+  createdBy: 'u-1',
+  updatedBy: 'u-1',
+  createdAt: '2026-11-27T00:00:00Z',
+  updatedAt: '2026-11-27T00:00:00Z',
+};
+
 const createdTodo: TodoRecord = {
   ...awaitingAcceptanceTodo,
   todoId: 'todo-new',
@@ -147,7 +160,7 @@ beforeEach(() => {
   mockedService.loadTodoSourceProjects.mockResolvedValue([]);
   mockedService.loadTodoSourceWorkItems.mockResolvedValue([]);
   mockedService.loadTodoAutoImportRules.mockResolvedValue([]);
-  mockedService.loadBotTeams.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100 });
+  mockedService.loadBotTeams.mockResolvedValue({ items: [publishedBotTeam], total: 1, page: 1, pageSize: 100 });
   mockedService.importTodoDimaItems.mockResolvedValue([]);
 });
 
@@ -207,8 +220,8 @@ describe('LabTodosPage（产品待办工作台）', () => {
       pageSize: 10,
     }));
 
-    await chooseSelect('负责人', '写作助手');
-    expect(screen.getByRole('combobox', { name: '负责人' })).toHaveTextContent('写作助手');
+    await chooseSelect('负责人', 'Coding 小队');
+    expect(screen.getByRole('combobox', { name: '负责人' })).toHaveTextContent('Coding 小队');
     expect(mockedService.loadTodos.mock.calls.at(-1)?.[0]).not.toHaveProperty('botId');
   });
 
@@ -231,7 +244,7 @@ describe('LabTodosPage（产品待办工作台）', () => {
       spaceId: 10,
       title: '分析本周用户反馈',
       description: '输出问题分类和改进建议',
-      executor: { type: 'bot', id: 'bot-owned:u-1' },
+      executor: { type: 'bot_team', id: 'todo_tpl_1', revisionId: 'todo_tplv_1' },
       owner: { userId: 'u-1', userName: '测试用户' },
     }));
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
@@ -280,7 +293,7 @@ describe('LabTodosPage（产品待办工作台）', () => {
 
     await waitFor(() => expect(mockedService.importTodoDimaItems).toHaveBeenCalledWith({
       spaceId: 10,
-      executor: { type: 'bot', id: 'bot-owned:u-1' },
+      executor: { type: 'bot_team', id: 'todo_tpl_1', revisionId: 'todo_tplv_1' },
       owner: { userId: 'u-1', userName: '测试用户' },
       items: [{
         title: '优化支付体验',
@@ -295,7 +308,12 @@ describe('LabTodosPage（产品待办工作台）', () => {
         },
       }],
     }));
-    expect(await within(dialog).findByText('成功 1')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenCalledWith({
+      spaceId: 10,
+      page: 1,
+      pageSize: 10,
+    }));
   });
 
   it('Dima 来源失败时展示可恢复错误且不执行导入', async () => {
@@ -322,6 +340,15 @@ describe('LabTodosPage（产品待办工作台）', () => {
     fireEvent.click(await screen.findByRole('button', { name: '自动化' }));
     expect(await screen.findByRole('heading', { name: '自动化' })).toBeInTheDocument();
     expect(mockedService.loadTodoAutoImportRules).toHaveBeenCalledWith(10);
+
+    const createAutomation = await screen.findByRole('button', { name: '创建自动化' });
+    expect(createAutomation).toBeEnabled();
+    fireEvent.click(createAutomation);
+    const automationDialog = await screen.findByRole('dialog');
+    await chooseSelect('选择待办执行小队', 'Coding 小队');
+    await chooseSelect('选择定时任务执行者', '写作助手');
+    expect(within(automationDialog).getByRole('combobox', { name: '选择待办执行小队' })).toHaveTextContent('Coding 小队');
+    expect(within(automationDialog).getByRole('combobox', { name: '选择定时任务执行者' })).toHaveTextContent('写作助手');
   });
 
   it('点击表格行进入独立待办详情页', async () => {

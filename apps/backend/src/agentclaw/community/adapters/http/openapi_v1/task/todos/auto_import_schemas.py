@@ -43,7 +43,7 @@ class CreateTodoAutoImportRuleRequest(BaseModel):
     bot_id: str = Field(
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
-        description="Space-eligible Bot assigned to imported Todos.",
+        description="Published Bot Team assigned to imported Todos.",
     )
     scheduler_bot_id: str = Field(
         min_length=1,
@@ -83,7 +83,7 @@ class UpdateTodoAutoImportRuleRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
-        description="Replacement Space-eligible Bot.",
+        description="Replacement published Bot Team.",
     )
     scheduler_bot_id: str | None = Field(
         default=None,
@@ -120,7 +120,7 @@ class TodoAutoImportRuleResponse(BaseModel):
     filter_text: str = Field(
         description="Natural-language filter interpreted by the external Agent."
     )
-    bot_id: str = Field(description="Bot assigned to Todos created by this rule.")
+    bot_id: str = Field(description="Published Bot Team assigned to Todos created by this rule.")
     scheduler_bot_id: str | None = Field(
         description="Bot that executes this scheduled automation, or null for legacy rules."
     )

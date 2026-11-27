@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import type { TodoAutoImportRule, TodoBotOption, TodoSourceProject } from '@/domain/todos/models';
+import type { TodoAutoImportRule, TodoBotOption, TodoExecutorOption, TodoSourceProject } from '@/domain/todos/models';
 import { cn } from '@/utils/cn';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -13,7 +13,7 @@ interface TodoAutomationEditorProps {
   rule?: TodoAutoImportRule;
   projects: TodoSourceProject[];
   projectsLoading: boolean;
-  bots: TodoBotOption[];
+  executorOptions: TodoExecutorOption[];
   schedulerBots: TodoBotOption[];
   saving: boolean;
   onOpenChange: (open: boolean) => void;
@@ -50,7 +50,7 @@ export function TodoAutomationEditor({
   rule,
   projects,
   projectsLoading,
-  bots,
+  executorOptions,
   schedulerBots,
   saving,
   onOpenChange,
@@ -69,12 +69,12 @@ export function TodoAutomationEditor({
     const nextCron = rule?.cronExpression ?? DEFAULT_CRON_EXPRESSION;
     setContainerIds(rule?.sourceContainerIds ?? []);
     setFilterText(rule?.filterText ?? '');
-    setBotId(rule?.botId ?? bots[0]?.botId ?? '');
+    setBotId(rule?.botId ?? executorOptions[0]?.id ?? '');
     setSchedulerBotId(rule?.schedulerBotId ?? schedulerBots[0]?.botId ?? '');
     setTriggerIntervalSeconds(String(rule?.triggerIntervalSeconds ?? DEFAULT_TRIGGER_INTERVAL_SECONDS));
     setCronExpression(nextCron);
     setScheduleMode(CRON_PRESETS.some((preset) => preset.value === nextCron) ? 'preset' : 'custom');
-  }, [bots, open, rule, schedulerBots]);
+  }, [executorOptions, open, rule, schedulerBots]);
 
   const normalizedTriggerInterval = Number(triggerIntervalSeconds);
   const triggerIntervalValid =
@@ -124,19 +124,22 @@ export function TodoAutomationEditor({
             <span className="block text-xs font-normal text-muted-foreground">使用单一自由文本描述筛选条件。</span>
           </label>
           <label className="block space-y-1.5 text-sm font-medium text-foreground">
-            <span>待办执行 Bot</span>
-            <Select value={botId || undefined} onValueChange={setBotId} disabled={bots.length === 0}>
-              <SelectTrigger aria-label="选择导入后待办执行 Bot">
-                <SelectValue placeholder="请选择 Bot" />
+            <span>待办执行小队</span>
+            <Select value={botId || undefined} onValueChange={setBotId} disabled={executorOptions.length === 0}>
+              <SelectTrigger aria-label="选择待办执行小队">
+                <SelectValue placeholder="请选择发布后的 Bot 小队" />
               </SelectTrigger>
               <SelectContent>
-                {bots.map((bot) => (
-                  <SelectItem key={bot.botId} value={bot.botId}>
-                    {bot.botName}
+                {executorOptions.map((team) => (
+                  <SelectItem key={team.id} value={team.id}>
+                    {team.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <span className="block text-xs font-normal text-muted-foreground">
+              仅展示当前空间已发布、未归档的 Bot 小队。
+            </span>
           </label>
           <label className="block space-y-1.5 text-sm font-medium text-foreground">
             <span>定时任务执行者</span>

@@ -337,7 +337,7 @@ class _Profiles:
     def __init__(self) -> None:
         self.next_id = 100
 
-    async def create_product_profile(self, _name, _composition, _stages, **_kwargs):
+    async def create_product_profile(self, _name, _stages):
         self.next_id += 1
         return SimpleNamespace(id=self.next_id)
 

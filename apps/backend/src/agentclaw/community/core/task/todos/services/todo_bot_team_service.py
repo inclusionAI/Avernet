@@ -10,6 +10,7 @@ import yaml
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    actor_context_scope,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -56,8 +57,6 @@ from agentclaw.community.core.task.todos.template_management_models import (
 from agentclaw.community.core.task.todos.template_management_protocol import (
     TodoTemplateManagementServiceProtocol,
 )
-from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.todos.template_models import (
     TodoCompletionGate,
     TodoParticipantDefinition,
@@ -100,11 +99,6 @@ class TodoBotTeamProductCompositionFactory:
             )
         )
 
-
-def build_profile_request_id(tenant: str, env: str, revision_id: str) -> str:
-    """Build the stable idempotency key for one revision publication."""
-
-    return f"todo:profile:{tenant}:{env}:{revision_id}:v1"
 
 
 def build_bot_team_product_profile_spec(
@@ -352,20 +346,16 @@ class TodoBotTeamService(TodoBotTeamServiceProtocol):
     ) -> TodoTemplateVersionRecord:
         composition = self._composition_factory.build()
         spec = build_bot_team_product_profile_spec(definition, composition)
-        profile = await self._product_profiles.create_product_profile(
-            spec.name,
-            spec.composition,
-            spec.stages,
-            context=ActorContext(
+        with actor_context_scope(
+            ActorContext(
                 PrincipalRef("human", actor_id),
                 "todo_product",
-            ),
-            request_id=build_profile_request_id(
-                get_current_avernet_tenant(),
-                get_current_env(),
-                version.template_version_id,
-            ),
-        )
+            )
+        ):
+            profile = await self._product_profiles.create_product_profile(
+                spec.name,
+                spec.stages,
+            )
         return await asyncio.to_thread(
             self._templates.publish_product_version,
             template_id=template_id,
