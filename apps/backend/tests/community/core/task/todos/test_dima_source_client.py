@@ -19,19 +19,6 @@ _ENDPOINT = "https://dima-mcp.example/mcp"
 
 
 @dataclass
-class _Auth:
-    token: str | None = "access-token"
-    error: Exception | None = None
-    calls: list[str] = field(default_factory=list)
-
-    def exchange_iam_token(self, subject_token: str) -> str | None:
-        self.calls.append(subject_token)
-        if self.error:
-            raise self.error
-        return self.token
-
-
-@dataclass
 class _Center:
     detail: object = field(
         default_factory=lambda: {
@@ -115,18 +102,16 @@ def _tool_response(result: object) -> httpx.Response:
 def _client(
     outcomes: list[httpx.Response | Exception],
     *,
-    auth: _Auth | None = None,
     center: _Center | None = None,
-) -> tuple[DimaSourceClient, _Auth, _Center, _Http]:
-    auth = auth or _Auth()
+) -> tuple[DimaSourceClient, _Center, _Http]:
     center = center or _Center()
     http = _Http(outcomes)
-    return DimaSourceClient(auth, center, http), auth, center, http
+    return DimaSourceClient(center, http), center, http
 
 
 def test_calls_dima_tool_over_streamable_http_lifecycle() -> None:
     expected = {"content": [{"type": "text", "text": '{"data": []}'}]}
-    client, auth, center, http = _client(
+    client, center, http = _client(
         [_init_response(), _notification_response(), _tool_response(expected)]
     )
 
@@ -138,7 +123,6 @@ def test_calls_dima_tool_over_streamable_http_lifecycle() -> None:
     )
 
     assert result == expected
-    assert auth.calls == ["iam-cookie"]
     assert center.calls == ["mcp.ant.arkai.dimamcpserver"]
     assert [call["path"] for call in http.calls] == [_ENDPOINT] * 3
     assert [call["json"]["method"] for call in http.calls] == [
@@ -146,7 +130,12 @@ def test_calls_dima_tool_over_streamable_http_lifecycle() -> None:
         "notifications/initialized",
         "tools/call",
     ]
-    assert http.calls[0]["headers"]["Authorization"] == "Bearer access-token"
+    assert http.calls[0]["headers"]["Authorization"] == "iam-cookie"
+    assert http.calls[0]["headers"]["Cookie"] == "IAM_TOKEN=iam-cookie"
+    assert http.calls[0]["headers"]["x-buc-token"] == "iam-cookie"
+    assert http.calls[0]["headers"]["x-mcpgw-agentid"] == "agentid"
+    assert http.calls[0]["headers"]["Referer"] == "https://yuyan.antfin-inc.com/console"
+    assert http.calls[0]["headers"]["sofa-ai-mcp"] == "sofa-ai-mcp:1.0"
     assert "Mcp-Session-Id" not in http.calls[0]["headers"]
     assert http.calls[1]["headers"]["Mcp-Session-Id"] == "session-1"
     assert http.calls[2]["headers"]["Mcp-Session-Id"] == "session-1"
@@ -168,7 +157,7 @@ def test_reads_session_from_initialize_body_and_parses_sse_tool_result() -> None
             b'[{"type":"text","text":"{\\"data\\": [1]}"}]}}\n\n'
         ),
     )
-    client, _, _, http = _client(
+    client, _, http = _client(
         [
             _init_response(session_id=None, body_session_id="body-session"),
             _notification_response(),
@@ -189,19 +178,13 @@ def test_reads_session_from_initialize_body_and_parses_sse_tool_result() -> None
 
 
 @pytest.mark.parametrize(
-    ("auth_request", "auth"),
-    [
-        (_request(cookies={}), _Auth()),
-        (_request(actor_id="another-user"), _Auth()),
-        (_request(), _Auth(token=None)),
-        (_request(), _Auth(error=RuntimeError("exchange failed"))),
-    ],
+    "auth_request",
+    [_request(cookies={}), _request(actor_id="another-user")],
 )
 def test_rejects_unusable_human_identity(
     auth_request: AuthRequestContext,
-    auth: _Auth,
 ) -> None:
-    client, _, _, http = _client([], auth=auth)
+    client, _, http = _client([])
 
     with pytest.raises(TodoSourceAuthError):
         client.call(
@@ -251,7 +234,7 @@ def test_rejects_unusable_human_identity(
     ],
 )
 def test_rejects_missing_or_unsupported_mcp_metadata(detail: object) -> None:
-    client, _, _, http = _client([], center=_Center(detail=detail))
+    client, _, http = _client([], center=_Center(detail=detail))
 
     with pytest.raises(TodoSourceUnavailableError, match="metadata is unavailable"):
         client.call(
@@ -265,7 +248,7 @@ def test_rejects_missing_or_unsupported_mcp_metadata(detail: object) -> None:
 
 
 def test_normalizes_mcp_metadata_provider_failure() -> None:
-    client, _, _, http = _client(
+    client, _, http = _client(
         [],
         center=_Center(error=RuntimeError("metadata failed")),
     )
@@ -288,7 +271,7 @@ def test_normalizes_mcp_metadata_provider_failure() -> None:
 def test_normalizes_initialize_failures(
     initialize: httpx.Response | Exception,
 ) -> None:
-    client, _, _, _ = _client([initialize])
+    client, _, _ = _client([initialize])
 
     with pytest.raises(TodoSourceUnavailableError, match="Dima MCP call failed"):
         client.call(
@@ -319,9 +302,7 @@ def test_normalizes_initialize_failures(
 def test_rejects_failed_or_malformed_tool_responses(
     tool_response: httpx.Response,
 ) -> None:
-    client, _, _, _ = _client(
-        [_init_response(), _notification_response(), tool_response]
-    )
+    client, _, _ = _client([_init_response(), _notification_response(), tool_response])
 
     with pytest.raises(TodoSourceUnavailableError, match="Dima MCP call failed"):
         client.call(
@@ -334,7 +315,7 @@ def test_rejects_failed_or_malformed_tool_responses(
 
 def test_initialized_notification_is_fire_and_forget() -> None:
     expected = {"content": []}
-    client, _, _, http = _client(
+    client, _, http = _client(
         [
             _init_response(),
             RuntimeError("notification failed"),

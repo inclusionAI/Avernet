@@ -19,12 +19,24 @@ from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_GENERAL,
     HttpClient,
 )
-from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 
 _DIMA_SERVER_CODE = "mcp.ant.arkai.dimamcpserver"
 _ALLOWED_NETWORK_TYPES = frozenset({"INTERNET", "OFFICE"})
 _STREAMABLE_HTTP = "STREAMABLE_HTTP"
+
+
+def _gateway_headers(token: str) -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "x-mcpgw-agentid": "agentid",
+        "Cookie": f"IAM_TOKEN={token}",
+        "x-buc-token": token,
+        "Authorization": token,
+        "Referer": "https://yuyan.antfin-inc.com/console",
+        "sofa-ai-mcp": "sofa-ai-mcp:1.0",
+    }
 
 
 class _HttpResponse(Protocol):
@@ -41,11 +53,9 @@ class DimaSourceClient(TodoSourceClientProtocol):
     @inject
     def __init__(
         self,
-        auth: MCPAuthPlugin,
         center: MCPCenterPlugin,
         http: Annotated[HttpClient, QUALIFIER_GENERAL],
     ) -> None:
-        self._auth = auth
         self._center = center
         self._http = http
 
@@ -57,13 +67,9 @@ class DimaSourceClient(TodoSourceClientProtocol):
         tool_name: str,
         arguments: dict[str, object],
     ) -> object:
-        access_token = self._access_token(actor_id, auth_request)
+        token = self._iam_token(actor_id, auth_request)
         endpoint = self._endpoint()
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Authorization": f"Bearer {access_token}",
-        }
+        headers = _gateway_headers(token)
 
         initialize = self._post(
             endpoint,
@@ -116,7 +122,7 @@ class DimaSourceClient(TodoSourceClientProtocol):
             raise TodoSourceUnavailableError("Dima MCP call failed")
         return envelope["result"]
 
-    def _access_token(
+    def _iam_token(
         self,
         actor_id: str,
         auth_request: AuthRequestContext,
@@ -128,13 +134,7 @@ class DimaSourceClient(TodoSourceClientProtocol):
         )
         if not iam_token:
             raise TodoSourceAuthError("IAM token is unavailable")
-        try:
-            access_token = self._auth.exchange_iam_token(iam_token)
-        except Exception as exc:  # noqa: BLE001 -- provider failures are normalized
-            raise TodoSourceAuthError("IAM token exchange failed") from exc
-        if not access_token:
-            raise TodoSourceAuthError("IAM token exchange failed")
-        return access_token
+        return iam_token
 
     def _endpoint(self) -> str:
         try:

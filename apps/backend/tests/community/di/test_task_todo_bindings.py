@@ -42,7 +42,6 @@ from agentclaw.community.di.modules.task.todo_bindings import (
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_GENERAL
-from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 
 
@@ -146,7 +145,9 @@ def test_task_todo_bindings_wire_in_process_collaboration_adapter():
     context_collab = object.__new__(ContextCollabService)
 
     repository, executor = object(), object()
-    adapter = TaskTodoBindings().todo_collaboration_port(context_collab, repository, executor)
+    adapter = TaskTodoBindings().todo_collaboration_port(
+        context_collab, repository, executor
+    )
 
     assert isinstance(adapter, InProcessTodoCollaborationAdapter)
     assert adapter._service is context_collab
@@ -178,13 +179,12 @@ def test_task_todo_bindings_resolve_template_repository_and_service():
 
 def test_task_todo_bindings_resolve_source_client_and_service():
     """Source import bindings survive alongside the Todo collaboration runtime."""
-    auth, center, http = object(), object(), object()
+    center, http = object(), object()
     injector = Injector(
         [
             TaskTodoBindings(),
             _InstanceModule(
                 {
-                    MCPAuthPlugin: auth,
                     MCPCenterPlugin: center,
                     Annotated[HttpClient, QUALIFIER_GENERAL]: http,
                 }
@@ -199,7 +199,6 @@ def test_task_todo_bindings_resolve_source_client_and_service():
     assert isinstance(service, TodoSourceService)
     assert client is injector.get(TodoSourceClientProtocol)
     assert service is injector.get(TodoSourceServiceProtocol)
-    assert client._auth is auth
     assert client._center is center
     assert client._http is http
     assert service._client is client
