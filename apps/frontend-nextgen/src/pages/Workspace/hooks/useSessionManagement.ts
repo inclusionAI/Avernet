@@ -5,6 +5,7 @@ import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { markSessionGone } from './useStaleSessionFallback';
 
 export interface UseSessionManagementResult {
   addMember: (actorId: string) => Promise<boolean>;
@@ -68,11 +69,13 @@ export function useSessionManagement(
         notifyError(res);
         return false;
       }
-      applySessionUpdate(session.sessionId, res.data);
+      markSessionGone(session.sessionId);
+      const store = useWorkspaceStore.getState();
+      if (store.selectedSessionId === session.sessionId) store.selectSession(null);
       toast.success('已退出会话');
       return true;
     },
-    [applySessionUpdate, session],
+    [session],
   );
 
   const createShare = useCallback(

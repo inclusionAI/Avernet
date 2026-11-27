@@ -38,6 +38,17 @@ query result when available and the same ID-seeded fallback as Bot management;
 friend user avatars are unchanged. See the
 [friend roster regression tests](test/components/CollaborationPrivacy/BotFriendRoster.test.tsx).
 
+## Leaving a collaboration Session
+
+[Session leave](src/services/workspace/sessionService.ts) succeeds when the
+participant DELETE succeeds. It does not reload Session detail: the selected Bot
+may no longer have participant access. Removing another member still refreshes
+the detail. The workspace removes a successfully departed Session from its list
+and rotates or clears selection; the existing route projection updates the URL
+so refresh does not restore the departed target. Failed DELETEs preserve selection.
+Regression coverage: [leave and refresh](test/pages/Workspace/hooks/useGroupSessions.leaveRefresh.test.tsx)
+and [Session service](test/services/workspace/sessionService.test.ts).
+
 ## Group and Session invitation links
 
 The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
