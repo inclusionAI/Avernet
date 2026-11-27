@@ -65,6 +65,8 @@ Bounded, read-only failover in `BaasInvokeTransport`:
   rotation path is case-normalized, so a BaaS reply whose status casing
   varies cannot silently disable rotation.
 
+- The Devices README owns the reusable [BaaS file read failover](../../src/agentclaw/community/core/devices/README.md#baas-file-read-failover) guidance; this spec records the change rationale and accepted gaps.
+
 The resolver passes `bot_uuid=conn_info["paas_device_id"]` for provider `baas`
 only; teclaw and desktop transports never rotate (their device ids are not
 BaaS bot uuids; the desktop transparent proxy routes by bot, single VM).
