@@ -138,7 +138,10 @@ The [session member list](src/pages/Workspace/components/ManagePanel/MemberList.
 shows Human `present` as 在线 and `absent` as 勿扰 alongside the existing Bot
 mode badges, even in the narrow management panel. This indicates participation
 in the Session, not global presence. The [mention menu](src/pages/Workspace/components/GroupChatPane/mentionHelpers.ts)
-keeps 勿扰 members visible but muted and unavailable for mouse or keyboard selection.
+keeps 勿扰 members visible but muted and unavailable for mouse or keyboard selection. In
+ManagerWorker groups, only the manager Bot can be selected; worker Bots remain
+listed with their role badges and `ALL-Bots` is not offered. Bot avatars reuse the
+same configured image and ID-based fallback as the member list.
 
 ## Group message sender identity
 
