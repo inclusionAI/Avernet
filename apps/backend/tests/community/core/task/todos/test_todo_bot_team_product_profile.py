@@ -46,10 +46,6 @@ from agentclaw.community.core.task.todos.template_management_models import (
     TodoTemplateVersionRecord,
     TodoTemplateVersionStatus,
 )
-from agentclaw.community.core.task.todos.template_models import (
-    TodoCompletionGate,
-    TodoRequiredArtifactGate,
-)
 
 _NOW = datetime(2026, 11, 27, 8, 0, tzinfo=timezone.utc)
 _COMPOSITION = MethodCompositionTemplate(
@@ -74,21 +70,16 @@ def _definition() -> BotTeamDefinition:
             BotTeamNode(
                 code="requirement_analysis",
                 name="需求分析",
-                bot_id="bot-requirement",
+                bot_ids=("bot-requirement",),
                 approval_required=False,
-                completion_gate=TodoCompletionGate(),
+                completion_gate="需求理解和验收项完整",
             ),
             BotTeamNode(
                 code="code_development",
                 name="代码开发",
-                bot_id="bot-developer",
+                bot_ids=("bot-developer", "bot-reviewer"),
                 approval_required=True,
-                completion_gate=TodoCompletionGate(
-                    required_artifacts=(
-                        TodoRequiredArtifactGate("commit", "created", 1),
-                        TodoRequiredArtifactGate("test_report", "passed", 2),
-                    )
-                ),
+                completion_gate="代码已提交并通过验证",
             ),
         ),
     )
@@ -108,11 +99,11 @@ def test_product_profile_spec_is_deterministic_and_uses_only_original_bot_nodes(
     ]
     assert compiled[0].depends_on == ()
     assert compiled[1].depends_on == ("requirement_analysis",)
-    assert compiled[1].candidates[0].agent_id == "bot-developer"
-    assert compiled[1].conditions == (
-        "artifact commit must reach state created with min_count 1",
-        "artifact test_report must reach state passed with min_count 2",
-    )
+    assert [candidate.agent_id for candidate in compiled[1].candidates] == [
+        "bot-developer",
+        "bot-reviewer",
+    ]
+    assert compiled[1].conditions == ("代码已提交并通过验证",)
     assert "__approval" not in first.stages
 
 

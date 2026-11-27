@@ -1,5 +1,5 @@
 import type { Space } from '@/domain/admin/models';
-import { botBelongsToCurrentSpace, eligibleTodoBots } from '@/pages/Lab/Todos/botScope';
+import { botBelongsToCurrentSpace, creatorOwnedTodoBots, eligibleTodoBots } from '@/pages/Lab/Todos/botScope';
 
 const personalSpace: Space = {
   spaceId: 10,
@@ -37,8 +37,8 @@ describe('Lab Todos Bot scope', () => {
       'u-1',
     );
     expect(options).toEqual([
-      { botId: 'bot-1', botName: 'One' },
-      { botId: 'bot-2', botName: 'Two' },
+      { botId: 'bot-1', botName: 'One', ownerId: 'u-1' },
+      { botId: 'bot-2', botName: 'Two', ownerId: 'u-2' },
     ]);
   });
 
@@ -53,9 +53,22 @@ describe('Lab Todos Bot scope', () => {
       'u-1',
     );
     expect(options).toEqual([
-      { botId: 'bot-1', botName: 'One' },
-      { botId: 'bot-2', botName: 'Two' },
+      { botId: 'bot-1', botName: 'One', ownerId: 'u-1' },
+      { botId: 'bot-2', botName: 'Two', ownerId: 'u-1' },
     ]);
+  });
+
+  it('scheduled-task executors are limited to bots owned by the creator', () => {
+    expect(
+      creatorOwnedTodoBots(
+        [
+          { botId: 'bot-1', botName: 'Mine', ownerId: 'u-1' },
+          { botId: 'bot-2', botName: 'Foreign', ownerId: 'u-2' },
+          { botId: 'bot-3', botName: 'Unknown' },
+        ],
+        'u-1',
+      ),
+    ).toEqual([{ botId: 'bot-1', botName: 'Mine', ownerId: 'u-1' }]);
   });
 
   it('unknown spaces fail closed', () => {

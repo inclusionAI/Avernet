@@ -27,9 +27,9 @@ export function emptyBotTeamNode(nodes: BotTeamNode[], botId = ''): BotTeamNode 
   return {
     code,
     name: `节点 ${displayIndex}`,
-    botId,
+    botIds: botId ? [botId] : [],
     approvalRequired: false,
-    completionGate: { requiredArtifacts: [] },
+    completionGate: '',
   };
 }
 

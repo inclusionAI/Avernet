@@ -15,8 +15,11 @@ interface TodoAutoImportFormProps {
   projectsLoading: boolean;
   projectsError: string;
   bots: TodoBotOption[];
+  schedulerBots: TodoBotOption[];
   botId: string;
+  schedulerBotId: string;
   onBotIdChange: (botId: string) => void;
+  onSchedulerBotIdChange: (botId: string) => void;
   onRetryProjects: () => void;
 }
 
@@ -27,8 +30,11 @@ export function TodoAutoImportForm({
   projectsLoading,
   projectsError,
   bots,
+  schedulerBots,
   botId,
+  schedulerBotId,
   onBotIdChange,
+  onSchedulerBotIdChange,
   onRetryProjects,
 }: TodoAutoImportFormProps) {
   const [selectedContainerIds, setSelectedContainerIds] = useState<string[]>([]);
@@ -42,12 +48,15 @@ export function TodoAutoImportForm({
   };
 
   const save = async () => {
-    if (!spaceId || selectedContainerIds.length === 0 || !filterText.trim() || !botId) return;
+    if (!spaceId || selectedContainerIds.length === 0 || !filterText.trim() || !botId || !schedulerBotId) return;
     const success = await rules.createRule({
       spaceId,
       sourceContainerIds: selectedContainerIds,
       filterText: filterText.trim(),
       botId,
+      schedulerBotId,
+      triggerIntervalSeconds: 1800,
+      cronExpression: '*/30 * * * *',
     });
     if (success) {
       setSelectedContainerIds([]);
@@ -126,7 +135,7 @@ export function TodoAutoImportForm({
         </label>
 
         <label className="block space-y-1.5 text-xs font-medium text-foreground">
-          <span>执行 Bot</span>
+          <span>待办执行 Bot</span>
           <Select value={botId || undefined} onValueChange={onBotIdChange} disabled={bots.length === 0}>
             <SelectTrigger aria-label="自动导入执行 Bot">
               <SelectValue placeholder={bots.length === 0 ? '当前空间暂无可用 Bot' : '请选择 Bot'} />
@@ -141,10 +150,30 @@ export function TodoAutoImportForm({
           </Select>
         </label>
 
+        <label className="block space-y-1.5 text-xs font-medium text-foreground">
+          <span>定时任务执行者</span>
+          <Select
+            value={schedulerBotId || undefined}
+            onValueChange={onSchedulerBotIdChange}
+            disabled={schedulerBots.length === 0}
+          >
+            <SelectTrigger aria-label="定时任务执行者">
+              <SelectValue placeholder={schedulerBots.length === 0 ? '当前创建者名下暂无 Bot' : '请选择 Bot'} />
+            </SelectTrigger>
+            <SelectContent>
+              {schedulerBots.map((bot) => (
+                <SelectItem key={bot.botId} value={bot.botId}>
+                  {bot.botName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+
         <Button
           onClick={() => void save()}
           loading={rules.saving}
-          disabled={!spaceId || selectedContainerIds.length === 0 || !filterText.trim() || !botId}
+          disabled={!spaceId || selectedContainerIds.length === 0 || !filterText.trim() || !botId || !schedulerBotId}
         >
           保存自动导入规则
         </Button>

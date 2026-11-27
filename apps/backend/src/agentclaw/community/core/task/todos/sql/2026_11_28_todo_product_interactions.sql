@@ -16,8 +16,8 @@ CREATE TABLE ac_todo_product_interaction (
     failure_code VARCHAR(64) NULL,
     env VARCHAR(20) NOT NULL,
     avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
-    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_todo_product_interaction_tenant_env_id (avernet_tenant, env, interaction_id),
     KEY idx_todo_product_interaction_list (avernet_tenant, env, todo_id, gmt_create, id),
     KEY idx_todo_product_interaction_state (avernet_tenant, env, todo_id, delivery_state, id)

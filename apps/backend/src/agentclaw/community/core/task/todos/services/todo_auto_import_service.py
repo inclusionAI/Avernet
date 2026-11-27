@@ -13,8 +13,13 @@ from agentclaw.community.core.repository.protocols.task.todo_auto_imports import
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.todos.auto_import_models import (
+    DEFAULT_TODO_AUTO_IMPORT_CRON_EXPRESSION,
+    DEFAULT_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
+    MAX_TODO_AUTO_IMPORT_CRON_LENGTH,
     MAX_TODO_AUTO_IMPORT_FILTER_LENGTH,
     MAX_TODO_AUTO_IMPORT_PROGRESS_DETAIL_LENGTH,
+    MAX_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
+    MIN_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
     TodoAutoImportCheckpoint,
     TodoAutoImportProgressRecord,
     TodoAutoImportProgressStatus,
@@ -28,6 +33,8 @@ from agentclaw.community.core.task.todos.auto_import_service_protocol import (
 from agentclaw.community.core.task.todos.bot_scope import resolve_todo_bot
 from agentclaw.community.core.task.todos.errors import (
     TodoAutoImportRuleDisabledError,
+    TodoBotAmbiguousError,
+    TodoBotScopeError,
 )
 from agentclaw.community.core.task.todos.models import (
     MAX_ACTOR_ID_LENGTH,
@@ -67,6 +74,9 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
         source_container_ids: tuple[str, ...],
         filter_text: str,
         bot_id: str,
+        scheduler_bot_id: str,
+        trigger_interval_seconds: int = DEFAULT_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
+        cron_expression: str = DEFAULT_TODO_AUTO_IMPORT_CRON_EXPRESSION,
     ) -> TodoAutoImportRuleRecord:
         actor = _required_text(actor_id, "actor_id", MAX_ACTOR_ID_LENGTH)
         normalized_space_id = _space_id(space_id)
@@ -75,6 +85,13 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
             filter_text, "filter_text", MAX_TODO_AUTO_IMPORT_FILTER_LENGTH
         )
         selected_bot_id = _required_text(bot_id, "bot_id", MAX_BOT_ID_LENGTH)
+        selected_scheduler_bot_id = _required_text(
+            scheduler_bot_id, "scheduler_bot_id", MAX_BOT_ID_LENGTH
+        )
+        normalized_trigger_interval = _trigger_interval_seconds(
+            trigger_interval_seconds
+        )
+        normalized_cron = _cron_expression(cron_expression)
         space, _member = self._space_access.require_space_member(
             space_id=normalized_space_id,
             user_id=actor,
@@ -85,11 +102,19 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
             actor_id=actor,
             bot_id=selected_bot_id,
         )
+        _require_creator_owned_bot(
+            bot_repository=self._bot_repository,
+            actor_id=actor,
+            bot_id=selected_scheduler_bot_id,
+        )
         return self._repository.create_rule(
             space_id=normalized_space_id,
             source_container_ids=containers,
             filter_text=rule_filter,
             bot_id=selected_bot_id,
+            scheduler_bot_id=selected_scheduler_bot_id,
+            trigger_interval_seconds=normalized_trigger_interval,
+            cron_expression=normalized_cron,
             created_by=actor,
         )
 
@@ -143,6 +168,9 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
         source_container_ids: tuple[str, ...] | None = None,
         filter_text: str | None = None,
         bot_id: str | None = None,
+        scheduler_bot_id: str | None = None,
+        trigger_interval_seconds: int | None = None,
+        cron_expression: str | None = None,
         status: TodoAutoImportRuleStatus | str | None = None,
     ) -> TodoAutoImportRuleRecord:
         actor = _required_text(actor_id, "actor_id", MAX_ACTOR_ID_LENGTH)
@@ -172,6 +200,21 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
             if bot_id is not None
             else None
         )
+        selected_scheduler_bot_id = (
+            _required_text(
+                scheduler_bot_id, "scheduler_bot_id", MAX_BOT_ID_LENGTH
+            )
+            if scheduler_bot_id is not None
+            else None
+        )
+        normalized_trigger_interval = (
+            _trigger_interval_seconds(trigger_interval_seconds)
+            if trigger_interval_seconds is not None
+            else None
+        )
+        normalized_cron = (
+            _cron_expression(cron_expression) if cron_expression is not None else None
+        )
         normalized_status = _rule_status(status)
         if all(
             value is None
@@ -179,6 +222,9 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
                 containers,
                 rule_filter,
                 selected_bot_id,
+                selected_scheduler_bot_id,
+                normalized_trigger_interval,
+                normalized_cron,
                 normalized_status,
             )
         ):
@@ -190,12 +236,21 @@ class TodoAutoImportService(TodoAutoImportServiceProtocol):
                 actor_id=actor,
                 bot_id=selected_bot_id,
             )
+        if selected_scheduler_bot_id is not None:
+            _require_creator_owned_bot(
+                bot_repository=self._bot_repository,
+                actor_id=actor,
+                bot_id=selected_scheduler_bot_id,
+            )
         return self._repository.update_rule(
             rule_id=normalized_rule_id,
             created_by=actor,
             source_container_ids=containers,
             filter_text=rule_filter,
             bot_id=selected_bot_id,
+            scheduler_bot_id=selected_scheduler_bot_id,
+            trigger_interval_seconds=normalized_trigger_interval,
+            cron_expression=normalized_cron,
             status=normalized_status,
         )
 
@@ -348,6 +403,40 @@ def _containers(values: object) -> tuple[str, ...]:
         if len(container_id) > MAX_TODO_SOURCE_CONTAINER_ID_LENGTH:
             raise ValidationError("source container id exceeds the maximum length")
     return containers
+
+
+def _require_creator_owned_bot(
+    *, bot_repository: BotRepository, actor_id: str, bot_id: str
+) -> None:
+    matches = bot_repository.list_matches_by_current_owner(bot_id, actor_id)
+    if not matches:
+        raise TodoBotScopeError("Scheduler Bot must be owned by the rule creator")
+    if len(matches) > 1:
+        raise TodoBotAmbiguousError("Scheduler Bot id is ambiguous for the rule creator")
+
+
+def _trigger_interval_seconds(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValidationError("trigger_interval_seconds must be an integer")
+    if not (
+        MIN_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS
+        <= value
+        <= MAX_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS
+    ):
+        raise ValidationError(
+            f"trigger_interval_seconds must be between {MIN_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS} "
+            f"and {MAX_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS}"
+        )
+    return value
+
+
+def _cron_expression(value: object) -> str:
+    normalized = _required_text(
+        value, "cron_expression", MAX_TODO_AUTO_IMPORT_CRON_LENGTH
+    )
+    if len(normalized.split()) != 5:
+        raise ValidationError("cron_expression must contain exactly 5 fields")
+    return normalized
 
 
 def _rule_status(

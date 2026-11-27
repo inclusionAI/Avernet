@@ -304,6 +304,14 @@ export function downloadTodoArtifactContent(
   return downloadTodoArtifactContentRequest(todoId, artifactId, disposition);
 }
 
+function positiveInteger(value: unknown, path: string, response: unknown): number {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw invalidResponse(path, 'Dima 自动导入规则响应无效', response);
+  }
+  return parsed;
+}
+
 function requiredText(value: unknown, path: string, response: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number') {
     throw invalidResponse(path, 'Dima 待办来源响应无效', response);
@@ -389,6 +397,12 @@ function mapAutoImportRule(dto: TodoAutoImportRuleDto, path: string): TodoAutoIm
     sourceContainerIds,
     filterText: requiredText(dto.filter_text, path, dto),
     botId: requiredText(dto.bot_id, path, dto),
+    schedulerBotId:
+      typeof dto.scheduler_bot_id === 'string' && dto.scheduler_bot_id.trim()
+        ? dto.scheduler_bot_id
+        : undefined,
+    triggerIntervalSeconds: positiveInteger(dto.trigger_interval_seconds, path, dto),
+    cronExpression: requiredText(dto.cron_expression, path, dto),
     status: dto.status,
     cursorUpdatedAt:
       typeof dto.cursor_updated_at === 'string' && dto.cursor_updated_at.trim() ? dto.cursor_updated_at : undefined,

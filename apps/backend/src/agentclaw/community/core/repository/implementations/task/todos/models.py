@@ -347,7 +347,7 @@ class TodoSourceBindingModel(Base):
     source_item_id = Column(String(128), nullable=False)
     source_url = Column(String(2048), nullable=True)
     source_updated_at = Column(String(128), nullable=True)
-    source_metadata_json = Column(Text, nullable=False, default="{}")
+    source_metadata_json = Column(Text, nullable=True, default="{}")
     imported_by = Column(String(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -401,6 +401,9 @@ class TodoAutoImportRuleModel(Base):
     source_container_ids_json = Column(Text, nullable=False)
     filter_text = Column(Text, nullable=False)
     bot_id = Column(String(256), nullable=False)
+    scheduler_bot_id = Column(String(256), nullable=True)
+    trigger_interval_seconds = Column(Integer, nullable=False, default=1800)
+    cron_expression = Column(String(128), nullable=False, default="*/30 * * * *")
     status = Column(String(32), nullable=False)
     cursor_updated_at = Column(DateTime, nullable=True)
     created_by = Column(String(256), nullable=False)
@@ -449,6 +452,9 @@ class TodoAutoImportRuleModel(Base):
             source_container_ids=tuple(str(item) for item in container_ids),
             filter_text=self.filter_text,
             bot_id=self.bot_id,
+            scheduler_bot_id=self.scheduler_bot_id,
+            trigger_interval_seconds=self.trigger_interval_seconds,
+            cron_expression=self.cron_expression,
             status=TodoAutoImportRuleStatus(self.status),
             cursor_updated_at=self.cursor_updated_at,
             created_by=self.created_by,

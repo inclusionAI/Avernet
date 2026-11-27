@@ -18,6 +18,7 @@ from agentclaw.community.core.task.todos.auto_import_models import (
 )
 from agentclaw.community.core.task.todos.errors import (
     TodoAutoImportRuleDisabledError,
+    TodoBotAmbiguousError,
     TodoBotScopeError,
 )
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
@@ -70,6 +71,16 @@ class _Bots:
             ]
         return []
 
+    def list_matches_by_current_owner(self, bot_id: str, owner_id: str):
+        if bot_id == "scheduler_bot" and owner_id == "user_1":
+            return [{"bot_id": bot_id, "owner_id": owner_id}]
+        if bot_id == "ambiguous_scheduler" and owner_id == "user_1":
+            return [
+                {"bot_id": bot_id, "owner_id": owner_id},
+                {"bot_id": bot_id, "owner_id": owner_id},
+            ]
+        return []
+
 
 class _Repository:
     def __init__(self) -> None:
@@ -84,6 +95,9 @@ class _Repository:
             source_container_ids=kwargs["source_container_ids"],
             filter_text=kwargs["filter_text"],
             bot_id=kwargs["bot_id"],
+            scheduler_bot_id=kwargs["scheduler_bot_id"],
+            trigger_interval_seconds=kwargs["trigger_interval_seconds"],
+            cron_expression=kwargs["cron_expression"],
             status=TodoAutoImportRuleStatus.ENABLED,
             cursor_updated_at=None,
             created_by=kwargs["created_by"],
@@ -131,6 +145,12 @@ class _Repository:
             or rule.source_container_ids,
             filter_text=kwargs["filter_text"] or rule.filter_text,
             bot_id=kwargs["bot_id"] or rule.bot_id,
+            scheduler_bot_id=kwargs["scheduler_bot_id"] or rule.scheduler_bot_id,
+            trigger_interval_seconds=(
+                kwargs["trigger_interval_seconds"]
+                or rule.trigger_interval_seconds
+            ),
+            cron_expression=kwargs["cron_expression"] or rule.cron_expression,
             status=kwargs["status"] or rule.status,
         )
         self.rules[rule.rule_id] = updated
@@ -227,17 +247,24 @@ def test_create_update_and_active_list_validate_space_and_bot_scope() -> None:
         source_container_ids=("W1", "W1", "P1"),
         filter_text=" 只导入高优任务 ",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
     assert rule.source_container_ids == ("W1", "P1")
     assert rule.filter_text == "只导入高优任务"
+    assert rule.trigger_interval_seconds == 1800
+    assert rule.cron_expression == "*/30 * * * *"
     assert service.list_active_rules() == (rule,)
 
     updated = service.update_rule(
         rule_id=rule.rule_id,
         actor_id="user_1",
+        trigger_interval_seconds=3600,
+        cron_expression="0 9 * * 1-5",
         status="disabled",
     )
     assert updated.status is TodoAutoImportRuleStatus.DISABLED
+    assert updated.trigger_interval_seconds == 3600
+    assert updated.cron_expression == "0 9 * * 1-5"
     assert service.list_active_rules() == ()
 
     with pytest.raises(TodoBotScopeError):
@@ -249,6 +276,54 @@ def test_create_update_and_active_list_validate_space_and_bot_scope() -> None:
     assert repository.rules[rule.rule_id].bot_id == "bot_1"
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("trigger_interval_seconds", 0, "trigger_interval_seconds"),
+        ("trigger_interval_seconds", 86_401, "trigger_interval_seconds"),
+        ("cron_expression", "not-a-cron", "cron_expression"),
+    ],
+)
+def test_rule_schedule_validation(field: str, value: object, message: str) -> None:
+    service, _, _, _ = _service()
+    kwargs = {
+        "space_id": 7,
+        "actor_id": "user_1",
+        "source_container_ids": ("W1",),
+        "filter_text": "all",
+        "bot_id": "bot_1",
+        "scheduler_bot_id": "scheduler_bot",
+        field: value,
+    }
+
+    with pytest.raises(ValidationError, match=message):
+        service.create_rule(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("scheduler_bot_id", "error_type"),
+    [
+        ("other_bot", TodoBotScopeError),
+        ("ambiguous_scheduler", TodoBotAmbiguousError),
+    ],
+)
+def test_rule_scheduler_must_be_uniquely_owned_by_creator(
+    scheduler_bot_id: str,
+    error_type: type[Exception],
+) -> None:
+    service, _, _, _ = _service()
+
+    with pytest.raises(error_type):
+        service.create_rule(
+            space_id=7,
+            actor_id="user_1",
+            source_container_ids=("W1",),
+            filter_text="all",
+            bot_id="bot_1",
+            scheduler_bot_id=scheduler_bot_id,
+        )
+
+
 def test_cross_space_owner_list_hides_rules_after_membership_is_lost() -> None:
     service, repository, access, _ = _service()
     visible = service.create_rule(
@@ -257,6 +332,7 @@ def test_cross_space_owner_list_hides_rules_after_membership_is_lost() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
     repository.rules["rule_hidden"] = replace(
         visible, rule_id="rule_hidden", space_id=8
@@ -275,6 +351,7 @@ def test_checkpoint_and_progress_do_not_require_rule_owner() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     result = service.record_checkpoint(
@@ -294,6 +371,7 @@ def test_checkpoint_validates_outcome_container_and_aware_times() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     invalid = [
@@ -316,6 +394,7 @@ def test_failed_checkpoint_may_omit_cursor_and_todo() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     service.record_checkpoint(
@@ -339,6 +418,7 @@ def test_progress_filter_rejects_naive_source_time() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     with pytest.raises(ValidationError, match="timezone"):
@@ -356,6 +436,7 @@ def test_any_rule_reader_can_create_with_rule_owned_scope() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     result = service.create_todo_from_rule(
@@ -386,6 +467,7 @@ def test_create_from_rule_rejects_disabled_or_unconfigured_source() -> None:
         source_container_ids=("W1",),
         filter_text="all",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot",
     )
 
     with pytest.raises(ValidationError, match="not configured"):

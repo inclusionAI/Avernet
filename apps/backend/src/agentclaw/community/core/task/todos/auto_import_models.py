@@ -10,6 +10,11 @@ MAX_TODO_AUTO_IMPORT_RULE_ID_LENGTH = 64
 MAX_TODO_AUTO_IMPORT_FILTER_LENGTH = 4_000
 MAX_TODO_AUTO_IMPORT_CONTAINERS = 20
 MAX_TODO_AUTO_IMPORT_PROGRESS_DETAIL_LENGTH = 2_000
+MIN_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS = 1
+MAX_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS = 86_400
+MAX_TODO_AUTO_IMPORT_CRON_LENGTH = 128
+DEFAULT_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS = 1_800
+DEFAULT_TODO_AUTO_IMPORT_CRON_EXPRESSION = "*/30 * * * *"
 
 
 class TodoAutoImportRuleStatus(str, Enum):
@@ -33,6 +38,9 @@ class TodoAutoImportRuleRecord:
     source_container_ids: tuple[str, ...]
     filter_text: str
     bot_id: str
+    scheduler_bot_id: str | None
+    trigger_interval_seconds: int
+    cron_expression: str
     status: TodoAutoImportRuleStatus
     cursor_updated_at: datetime | None
     created_by: str

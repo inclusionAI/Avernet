@@ -1,7 +1,6 @@
-import { Button, Input, Switch } from '@/components/ui';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Button, Checkbox, Input, Switch, Textarea } from '@/components/ui';
 import type { BotTeamNode, TodoBotOption } from '@/domain/todos/models';
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface BotTeamNodeEditorProps {
   node?: BotTeamNode;
@@ -13,89 +12,60 @@ interface BotTeamNodeEditorProps {
   onMove: (direction: -1 | 1) => void;
 }
 
-function CompletionGateEditor({
+function BotMultiSelect({
   node,
+  bots,
   editable,
   onUpdate,
 }: {
   node: BotTeamNode;
+  bots: TodoBotOption[];
   editable: boolean;
   onUpdate: (update: Partial<BotTeamNode>) => void;
 }) {
-  const gates = node.completionGate.requiredArtifacts;
-  const updateGate = (gateIndex: number, update: Partial<(typeof gates)[number]>) => {
-    const requiredArtifacts = gates.map((item, itemIndex) => (itemIndex === gateIndex ? { ...item, ...update } : item));
-    onUpdate({ completionGate: { requiredArtifacts } });
+  const toggleBot = (botId: string, checked: boolean) => {
+    onUpdate({
+      botIds: checked
+        ? [...new Set([...node.botIds, botId])]
+        : node.botIds.filter((selectedBotId) => selectedBotId !== botId),
+    });
   };
 
   return (
-    <div className="border-t border-divider pt-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <p className="m-0 text-xs font-semibold text-foreground">完成门禁</p>
-          <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">按产物类型、状态和最少数量判断节点是否完成。</p>
-        </div>
-        {editable ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<Plus className="size-3.5" aria-hidden />}
-            onClick={() =>
-              onUpdate({
-                completionGate: {
-                  requiredArtifacts: [...gates, { artifactType: 'text', artifactState: 'created', minCount: 1 }],
-                },
-              })
-            }
-          >
-            添加门禁
-          </Button>
-        ) : null}
-      </div>
-
-      {gates.length === 0 ? (
-        <p className="m-0 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">未配置产物门禁</p>
+    <fieldset className="space-y-2 md:col-span-2">
+      <legend className="text-xs font-medium text-foreground">执行 Bot（可多选）</legend>
+      {bots.length === 0 ? (
+        <p className="m-0 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+          当前空间暂无可选 Bot
+        </p>
       ) : (
-        <div className="space-y-2">
-          {gates.map((gate, gateIndex) => (
-            <div key={`${gate.artifactType}-${gateIndex}`} className="grid gap-2 md:grid-cols-[1fr_1fr_120px_32px]">
-              <Input
-                aria-label="产物类型"
-                value={gate.artifactType}
-                disabled={!editable}
-                placeholder="产物类型"
-                onChange={(event) => updateGate(gateIndex, { artifactType: event.target.value })}
-              />
-              <Input
-                aria-label="产物状态"
-                value={gate.artifactState}
-                disabled={!editable}
-                placeholder="产物状态"
-                onChange={(event) => updateGate(gateIndex, { artifactState: event.target.value })}
-              />
-              <Input
-                aria-label="最少数量"
-                type="number"
-                min={1}
-                value={gate.minCount}
-                disabled={!editable}
-                onChange={(event) => updateGate(gateIndex, { minCount: Math.max(1, Number(event.target.value) || 1) })}
-              />
-              {editable ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="删除门禁"
-                  onClick={() => onUpdate({ completionGate: { requiredArtifacts: gates.filter((_, index) => index !== gateIndex) } })}
-                >
-                  <Trash2 className="size-3.5" aria-hidden />
-                </Button>
-              ) : null}
-            </div>
-          ))}
+        <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-border p-2 sm:grid-cols-2">
+          {bots.map((bot) => {
+            const checked = node.botIds.includes(bot.botId);
+            return (
+              <label
+                key={bot.botId}
+                className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted/40"
+              >
+                <Checkbox
+                  checked={checked}
+                  disabled={!editable}
+                  onCheckedChange={(nextChecked) => toggleBot(bot.botId, nextChecked)}
+                  aria-label={`选择执行 Bot ${bot.botName}`}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-foreground">{bot.botName}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">{bot.botId}</span>
+                </span>
+              </label>
+            );
+          })}
         </div>
       )}
-    </div>
+      <p className="m-0 text-[11px] text-muted-foreground">
+        已选择 {node.botIds.length} 个 Bot；该节点会把全部候选 Bot 写入小队协议。
+      </p>
+    </fieldset>
   );
 }
 
@@ -108,8 +78,6 @@ export function BotTeamNodeEditor({
   onUpdate,
   onMove,
 }: BotTeamNodeEditorProps) {
-  const selectedBot = node ? bots.find((bot) => bot.botId === node.botId) : undefined;
-
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -149,26 +117,7 @@ export function BotTeamNodeEditor({
                 onChange={(event) => onUpdate({ code: event.target.value })}
               />
             </label>
-            <label className="space-y-1.5 text-xs font-medium text-foreground">
-              <span>执行 Bot</span>
-              <Select
-                value={node.botId || undefined}
-                disabled={!editable || bots.length === 0}
-                onValueChange={(botId) => onUpdate({ botId })}
-              >
-                <SelectTrigger aria-label={`节点 ${nodeIndex + 1} 执行 Bot`}>
-                  <SelectValue placeholder="选择 Bot" />
-                </SelectTrigger>
-                <SelectContent>
-                  {bots.map((bot) => (
-                    <SelectItem key={bot.botId} value={bot.botId}>
-                      {bot.botName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!editable ? <span className="block text-[11px] text-muted-foreground">{selectedBot?.botName}</span> : null}
-            </label>
+            <BotMultiSelect node={node} bots={bots} editable={editable} onUpdate={onUpdate} />
             <div className="space-y-1.5 text-xs font-medium text-foreground">
               <span className="block">是否审批</span>
               <div className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3">
@@ -182,7 +131,20 @@ export function BotTeamNodeEditor({
               </div>
             </div>
           </div>
-          <CompletionGateEditor node={node} editable={editable} onUpdate={onUpdate} />
+          <label className="block space-y-1.5 border-t border-divider pt-4 text-xs font-medium text-foreground">
+            <span>完成门禁</span>
+            <Textarea
+              aria-label="完成门禁"
+              value={node.completionGate}
+              disabled={!editable}
+              rows={4}
+              placeholder="例如：代码已提交，自动化测试通过，并给出验证结论"
+              onChange={(event) => onUpdate({ completionGate: event.target.value })}
+            />
+            <span className="block text-[11px] font-normal text-muted-foreground">
+              使用一段文本描述节点完成条件，不再逐条配置产物类型和状态。
+            </span>
+          </label>
         </div>
       ) : (
         <div className="py-8 text-center text-sm text-muted-foreground">暂无可配置节点</div>

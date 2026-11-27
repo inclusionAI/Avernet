@@ -32,22 +32,12 @@ export interface TodoExecutorOption extends TodoExecutor {
   description?: string;
 }
 
-export interface TodoRequiredArtifactGate {
-  artifactType: string;
-  artifactState: string;
-  minCount: number;
-}
-
-export interface TodoCompletionGate {
-  requiredArtifacts: TodoRequiredArtifactGate[];
-}
-
 export interface BotTeamNode {
   code: string;
   name: string;
-  botId: string;
+  botIds: string[];
   approvalRequired: boolean;
-  completionGate: TodoCompletionGate;
+  completionGate: string;
 }
 
 export interface BotTeamRecord {
@@ -140,6 +130,9 @@ export interface TodoAutoImportRule {
   sourceContainerIds: string[];
   filterText: string;
   botId: string;
+  schedulerBotId?: string;
+  triggerIntervalSeconds: number;
+  cronExpression: string;
   status: TodoAutoImportRuleStatus;
   cursorUpdatedAt?: string;
   createdAt: string;
@@ -151,12 +144,18 @@ export interface CreateTodoAutoImportRuleInput {
   sourceContainerIds: string[];
   filterText: string;
   botId: string;
+  schedulerBotId: string;
+  triggerIntervalSeconds: number;
+  cronExpression: string;
 }
 
 export interface UpdateTodoAutoImportRuleInput {
   sourceContainerIds?: string[];
   filterText?: string;
   botId?: string;
+  schedulerBotId?: string;
+  triggerIntervalSeconds?: number;
+  cronExpression?: string;
   status?: TodoAutoImportRuleStatus;
 }
 
@@ -387,6 +386,7 @@ export interface TodoProgress {
 export interface TodoBotOption {
   botId: string;
   botName: string;
+  ownerId?: string;
 }
 
 export type TodoProductInteractionKind = 'human_message' | 'stop_request';

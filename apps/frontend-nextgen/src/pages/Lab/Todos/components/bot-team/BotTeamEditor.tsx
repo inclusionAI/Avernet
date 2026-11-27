@@ -116,7 +116,7 @@ export function BotTeamEditor({ editor, bots, loading, onChange, onBack, onEdit,
   const valid = Boolean(
     editor.name.trim() &&
       editor.nodes.length > 0 &&
-      editor.nodes.every((node) => node.name.trim() && node.code.trim() && node.botId),
+      editor.nodes.every((node) => node.name.trim() && node.code.trim() && node.botIds.length > 0),
   );
 
   return (

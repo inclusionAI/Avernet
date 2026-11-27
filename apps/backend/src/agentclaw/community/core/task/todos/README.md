@@ -180,8 +180,14 @@ listing, and updates remain Human owner-scoped. Execution is tenant-scoped: any
 authenticated caller, including an application-only Bot caller, may list enabled
 rules, read rule detail and progress, create a Todo through a rule, and write a
 checkpoint. `created_by` is audit and imported-Todo ownership, not an execution
-permission. Rule-bound Todo creation takes `space_id`, `bot_id`, and `created_by`
-only from the rule; the caller cannot override them. An external Agent scans every
+permission. Each rule keeps two Bot roles separate: `bot_id` is the Space-eligible
+Bot assigned to imported Todos, while `scheduler_bot_id` is a Bot owned by the
+rule creator and selected to execute the scheduled automation. The service
+validates both scopes independently. `trigger_interval_seconds` is the interval
+between automation triggers, not a Todo or Bot execution timeout; the optional
+five-field `cron_expression` is an additional scheduling hint for the external
+Agent. Rule-bound Todo creation takes `space_id`, `bot_id`, and `created_by` only
+from the rule; the caller cannot override them. An external Agent scans every
 configured Dima container, interprets the natural-language filter, creates
 matching Todos, and writes one checkpoint per processed item. It should query Dima with
 `source_updated_at >= cursor_updated_at`, use persisted progress to de-duplicate

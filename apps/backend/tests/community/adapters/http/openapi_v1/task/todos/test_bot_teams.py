@@ -28,11 +28,6 @@ from agentclaw.community.core.task.todos.bot_team_models import (
     BotTeamRevisionRecord,
     BotTeamStatus,
 )
-from agentclaw.community.core.task.todos.template_models import (
-    TodoCompletionGate,
-    TodoRequiredArtifactGate,
-)
-
 _NOW = datetime(2026, 11, 26, 10, 0, tzinfo=timezone.utc)
 
 
@@ -56,17 +51,9 @@ def _definition(name: str = "Coding team") -> BotTeamDefinition:
             BotTeamNode(
                 code="develop",
                 name="代码开发",
-                bot_id="bot_developer",
+                bot_ids=("bot_developer", "bot_reviewer"),
                 approval_required=True,
-                completion_gate=TodoCompletionGate(
-                    required_artifacts=(
-                        TodoRequiredArtifactGate(
-                            artifact_type="commit",
-                            artifact_state="created",
-                            min_count=1,
-                        ),
-                    )
-                ),
+                completion_gate="代码已提交并通过验证",
             ),
         ),
     )
@@ -80,17 +67,9 @@ def _payload(name: str = "Coding team") -> dict[str, Any]:
             {
                 "code": "develop",
                 "name": "代码开发",
-                "bot_id": "bot_developer",
+                "bot_ids": ["bot_developer", "bot_reviewer"],
                 "approval_required": True,
-                "completion_gate": {
-                    "required_artifacts": [
-                        {
-                            "artifact_type": "commit",
-                            "artifact_state": "created",
-                            "min_count": 1,
-                        }
-                    ]
-                },
+                "completion_gate": "代码已提交并通过验证",
             }
         ],
     }
@@ -179,7 +158,11 @@ async def test_create_bot_team_returns_product_contract_and_delegates() -> None:
     assert result.code == 201000
     assert result.request_id == "trace-bot-team"
     assert result.data.bot_team.bot_team_id == "todo_tpl_1"
-    assert result.data.revisions[0].nodes[0].bot_id == "bot_developer"
+    assert result.data.revisions[0].nodes[0].bot_ids == [
+        "bot_developer",
+        "bot_reviewer",
+    ]
+    assert result.data.revisions[0].nodes[0].completion_gate == "代码已提交并通过验证"
     assert "template_id" not in result.data.model_dump()
     assert service.calls == [
         {
