@@ -53,6 +53,11 @@ at the Service API boundary; this crate stores its immutable reference and diges
   namespaces. Removing a pending input must not remove its deduplication proof.
 - `RequestAccepted`, `ConfirmedCanceled` and `OutcomeUnknown` remain distinct.
   Unknown is not a successful or failed terminal result.
+- The `s<digits>.` shard prefix of a Sid — and of the Tid/Did string forms that
+  embed it — is parsed only by `shard_of`/`Sid::shard`/`Sid::parts` and
+  rendered only by `ShardId::prefix` in [ids](src/ids.rs). They check the
+  prefix shape and the u32 range only; tighter digit-count caps and charset
+  policy on the rest stay with each admitting boundary.
 
 Serializable top-level records carry schema/format versions; nested enums use
 explicit stable tags. Readers must reject unsupported versions and unknown

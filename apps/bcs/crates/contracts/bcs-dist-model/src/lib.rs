@@ -2,7 +2,10 @@
 //!
 //! Declarations only: no storage, transport, identity generation or runtime policy.
 //! Backend cursor encoding is opaque; stable business identities survive backend
-//! replacement. Validation belongs to the admitting service and repository port.
+//! replacement. Validation belongs to the admitting service and repository port;
+//! the exceptions are the shared `s<digits>.` prefix read (`shard_of`/
+//! `Sid::shard`/`Sid::parts`) and its text form `ShardId::prefix`; the u32
+//! range they read and render is inherent in `ShardId`.
 
 pub mod dispatch;
 pub mod ids;

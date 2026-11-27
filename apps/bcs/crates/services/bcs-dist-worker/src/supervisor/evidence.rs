@@ -27,7 +27,7 @@ impl Facts {
             || !did.0.starts_with(&format!("{}.", spec.tid.0))
             || record.revision.0.is_empty()
             || record.revision.0.len() > 256
-            || shard_of(&spec.sid) != Some(shard)
+            || spec.sid.shard().ok() != Some(shard)
         {
             return Err(invalid("supervisor_dispatch_identity"));
         }
@@ -84,7 +84,7 @@ impl Facts {
         if spec.schema_version != 1
             || spec.sid != self.sid
             || spec.shard != shard
-            || shard_of(&spec.sid) != Some(shard)
+            || spec.sid.shard().ok() != Some(shard)
             || !identifier(&spec.scope.tenant.0)
             || !identifier(&spec.scope.principal.0)
         {
@@ -144,13 +144,4 @@ impl Facts {
         }
         Ok(request)
     }
-}
-fn shard_of(sid: &Sid) -> Option<ShardId> {
-    sid.0
-        .split_once('.')?
-        .0
-        .strip_prefix('s')?
-        .parse()
-        .ok()
-        .map(ShardId)
 }

@@ -36,6 +36,72 @@ identities!(
 #[serde(transparent)]
 pub struct ShardId(pub u32);
 
+/// Why a shard cannot be read from a prefixed id string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShardParseError {
+    /// The id has no `s<digits>.` segment before the first `.`.
+    MissingShardPrefix,
+    /// The digits name a shard past the u32 range.
+    ShardOutOfRange,
+}
+
+impl std::error::Error for ShardParseError {}
+
+impl std::fmt::Display for ShardParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingShardPrefix => write!(f, "id has no s<digits>. shard prefix"),
+            Self::ShardOutOfRange => write!(f, "shard digits exceed the u32 range"),
+        }
+    }
+}
+
+/// The shard an id string carries: the u32 of the `s<digits>` segment before
+/// the first `.`. Task and dispatch ids embed their session's segment, so
+/// their string forms are accepted too. Only the prefix shape is checked:
+/// length caps and charset policy on the rest of the id stay with the
+/// boundary that admits the caller's input.
+pub fn shard_of(id: &str) -> Result<ShardId, ShardParseError> {
+    shard_parts(id).map(|(shard, _, _)| shard)
+}
+
+/// `(shard, digits, rest)` of `s<digits>.<rest>` split at the first `.`.
+fn shard_parts(id: &str) -> Result<(ShardId, &str, &str), ShardParseError> {
+    let (head, rest) = id.split_once('.').ok_or(ShardParseError::MissingShardPrefix)?;
+    let digits = head
+        .strip_prefix('s')
+        .ok_or(ShardParseError::MissingShardPrefix)?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ShardParseError::MissingShardPrefix);
+    }
+    let shard = digits
+        .parse::<u32>()
+        .map_err(|_| ShardParseError::ShardOutOfRange)?;
+    Ok((ShardId(shard), digits, rest))
+}
+
+impl Sid {
+    /// The shard this session is pinned to: the `s<digits>` before the first `.`.
+    pub fn shard(&self) -> Result<ShardId, ShardParseError> {
+        shard_of(&self.0)
+    }
+
+    /// The shard, its digit text and the text after the first `.`: the pieces
+    /// of `s<digits>.<rest>`. Extra digit caps and charset rules for the rest
+    /// belong to the boundary that owns the caller's input.
+    pub fn parts(&self) -> Result<(ShardId, &str, &str), ShardParseError> {
+        shard_parts(&self.0)
+    }
+}
+
+impl ShardId {
+    /// Text form of the shard prefix, at least four digits: `s0042`. It
+    /// round-trips through `shard_of`.
+    pub fn prefix(self) -> String {
+        format!("s{:04}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CommitSeq(pub u64);
@@ -124,4 +190,53 @@ pub struct BlobRef {
 pub enum Payload {
     Inline(serde_json::Value),
     Ref(BlobRef),
+}
+
+#[cfg(test)]
+mod shard_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_shard_before_the_first_dot() {
+        assert_eq!(shard_of("s0042.7f3a9c"), Ok(ShardId(42)));
+        assert_eq!(shard_of("s0000001.x"), Ok(ShardId(1)));
+        assert_eq!(shard_of("s4294967295.x"), Ok(ShardId(u32::MAX)));
+        assert_eq!(shard_of("s0042.x.y"), Ok(ShardId(42)));
+        assert_eq!(Sid("s0042.7f3a9c".into()).shard(), Ok(ShardId(42)));
+        assert_eq!(
+            Sid("s0042.7f3a9c".into()).parts(),
+            Ok((ShardId(42), "0042", "7f3a9c"))
+        );
+    }
+
+    #[test]
+    fn rejects_ids_without_a_plain_shard_prefix() {
+        for bad in [
+            "", "7f3a9c", "x0042.7f3a9c", "s.7f3a9c", "s0042", ".s0042.x",
+            "S0042.x", "s+1.7f3a9c", "s-1.7f3a9c", "s 1.x", "s１2.x",
+        ] {
+            assert_eq!(shard_of(bad), Err(ShardParseError::MissingShardPrefix), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_digits_past_the_u32_range() {
+        for bad in ["s4294967296.x", "s99999999999.a"] {
+            assert_eq!(shard_of(bad), Err(ShardParseError::ShardOutOfRange), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn renders_the_prefix_with_at_least_four_digits() {
+        assert_eq!(ShardId(0).prefix(), "s0000");
+        assert_eq!(ShardId(1).prefix(), "s0001");
+        assert_eq!(ShardId(42).prefix(), "s0042");
+        assert_eq!(ShardId(123456).prefix(), "s123456");
+        assert_eq!(ShardId(u32::MAX).prefix(), "s4294967295");
+        // The text form round-trips through the shared parser.
+        assert_eq!(
+            shard_of(&format!("{}.x", ShardId(42).prefix())),
+            Ok(ShardId(42))
+        );
+    }
 }

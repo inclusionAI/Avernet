@@ -36,8 +36,9 @@ pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId
     let digest = hash(&["sid", &scope.tenant.0, &scope.principal.0, &group.0, &message.0]);
     let mut head = [0u8; 8];
     head.copy_from_slice(&digest[..8]);
-    let shard = u64::from_be_bytes(head) % u64::from(shards.max(1));
-    Sid(format!("s{shard:04}.{}", hex::encode(&digest[8..16])))
+    // The modulus is below the shard count, so the narrowing is lossless.
+    let shard = ShardId((u64::from_be_bytes(head) % u64::from(shards.max(1))) as u32);
+    Sid(format!("{}.{}", shard.prefix(), hex::encode(&digest[8..16])))
 }
 
 pub(crate) fn task_id(sid: &Sid, message: &RequestId) -> Tid {
@@ -113,9 +114,9 @@ pub fn parse_session(sid: &Sid) -> Result<(), GatewayError> {
     if sid.0.len() > MAX_ID_BYTES {
         return Err(bad());
     }
-    let (shard, rest) = sid.0.split_once('.').ok_or_else(bad)?;
-    let digits = shard.strip_prefix('s').ok_or_else(bad)?;
-    if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|b| b.is_ascii_digit()) || !plain(rest) {
+    let (_, digits, rest) = sid.parts().map_err(|_| bad())?;
+    // Beyond the shared prefix shape, this boundary caps the digits and the rest.
+    if digits.len() > 9 || !plain(rest) {
         return Err(bad());
     }
     Ok(())

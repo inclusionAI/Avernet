@@ -5,6 +5,7 @@ use bcs_dist_model::*;
 use bcs_dist_worker::WorkerTaskAdmission;
 use bcs_service_api::core::dist_admission::{TaskAdmissionCommand, TaskAdmissionCoreService};
 use bcs_service_api::port::{dist_agent::FrozenGroupDefinition, repo::distributed::inbox::*};
+use bcs_service_api::port::repo::distributed::common::StoreError;
 use common::*;
 use std::sync::{
     Arc,
@@ -154,7 +155,7 @@ impl InboxProducerPort for RacingInbox {
         &self,
         s: &TaskScope,
         id: &InputId,
-    ) -> Result<Option<AdmitRequest>, bcs_service_api::port::repo::distributed::common::StoreError>
+    ) -> Result<Option<AdmitRequest>, StoreError>
     {
         let r = self.inner.lookup(s, id).await?;
         if r.is_none() {
@@ -165,13 +166,13 @@ impl InboxProducerPort for RacingInbox {
     async fn admit(
         &self,
         r: AdmitRequest,
-    ) -> Result<AdmitOutcome, bcs_service_api::port::repo::distributed::common::StoreError> {
+    ) -> Result<AdmitOutcome, StoreError> {
         self.inner.admit(r).await
     }
     async fn append_stream(
         &self,
         r: AppendAgentEvent,
-    ) -> Result<InboxPos, bcs_service_api::port::repo::distributed::common::StoreError> {
+    ) -> Result<InboxPos, StoreError> {
         self.inner.append_stream(r).await
     }
 }
@@ -267,4 +268,34 @@ async fn partial_admission_retries_preserve_repair_and_original_content() {
             AdmitOutcome::ContentConflict
         );
     }
+}
+
+#[tokio::test]
+async fn create_session_rejects_a_sid_without_a_well_formed_shard_prefix() {
+    let store = Arc::new(Recorder::default());
+    let inbox = Arc::new(producer(&store));
+    let service = WorkerTaskAdmission::new(inbox, Arc::new(|| TimestampMillis(NOW)));
+    for bad in [
+        "s+1.7f3a9c",
+        "x0042.7f3a9c",
+        "s.7f3a9c",
+        "s0042",
+        "s 1.7f3a9c",
+        "s4294967296.a",
+    ] {
+        let mut cmd = command();
+        cmd.input.sid = Sid(bad.into());
+        assert_eq!(
+            service.admit(&scope(), cmd).await,
+            Err(StoreError::Invalid {
+                code: "session_id_format".into()
+            }),
+            "{bad:?}"
+        );
+    }
+    // An invariant, not the distinguishing check: the store also refused these
+    // ids before the fix, but only after admission had accepted some of them
+    // (s+1.7f3a9c) with the store's own code. The error-code assertions above
+    // pin that the admission boundary rejects before any inbox write.
+    assert_eq!(inbox_len(&store).await, 0);
 }
