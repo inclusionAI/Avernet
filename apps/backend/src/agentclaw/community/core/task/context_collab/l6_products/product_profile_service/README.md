@@ -28,6 +28,7 @@ consumes:
   - MultiRolloutController
 internal_dependencies:
   - agentclaw.community.core.errors
+  - agentclaw.community.log
   - agentclaw.community.core.task.context_collab
   - agentclaw.community.core.task.task_runner.client
 ```
@@ -114,6 +115,10 @@ unchanged.
 
 Inline POST bodies are bounded to 2 MiB before JSON parsing (including streamed
 requests); individual domain content remains bounded to 256 KiB.
+Creation paths emit operation-scoped INFO diagnostics for start, validation,
+authorization, MultiRollout setup, and persistence. Failures log the failed step,
+exception type/message, and stack; raw stages/content are not logged, only bounded
+byte sizes.
 HTTP base: `/api/v1/collaboration/task/products`. Routes are `POST /profiles`,
 `POST /collets`, `GET /collets/{id}/rollouts`, `POST /rollouts/{id}/interactive`,
 and `GET /stages/{id}/messages`. Auth context and tenant/environment are not body

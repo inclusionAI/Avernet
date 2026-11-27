@@ -7,10 +7,13 @@ from uuid import uuid4
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
     ContextCollabVersionConflict as Conflict,
+    ContextCollabNotFoundError as Missing,
 )
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     current_actor_context,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
 )
@@ -61,6 +64,16 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from ...l5_methods.multi_rollout_projection import control_metadata
 from ...l5_methods.multi_rollout_controller import MultiRolloutController
 
+logger = get_logger(__name__)
+
+
+def _payload_size(value) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except Exception:
+        return 0
+
+
 
 class ProductProfileService(ProductProfileServiceProtocol):
     def __init__(
@@ -85,45 +98,209 @@ class ProductProfileService(ProductProfileServiceProtocol):
         stages: YAML,
     ) -> ProductProfile:
         context = current_actor_context()
-        text(name, maximum=256)
-        composition = default_composition()
-        specs, execution_policy = await asyncio.to_thread(
-            validate_configuration, composition, stages, self._execution
-        )
-        await self._multi_setup(composition, specs, execution_policy, context)
-        return await asyncio.to_thread(
-            self._repository.create_profile,
+        operation_id = uuid4().hex
+        logger.info(
+            "product_profile.create.start operation_id=%s name=%r stage_bytes=%d actor=%r/%r",
+            operation_id,
             name,
-            composition,
-            stages,
-            context,
-            uuid4().hex,
+            _payload_size(stages),
+            context.actor.principal_type,
+            context.actor.principal_id,
         )
+        step = "input-validation"
+        try:
+            text(name, maximum=256)
+            step = "configuration-validation"
+            logger.info(
+                "product_profile.create.step.start operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            composition = default_composition()
+            specs, execution_policy = await asyncio.to_thread(
+                validate_configuration, composition, stages, self._execution
+            )
+            logger.info(
+                "product_profile.create.step.complete operation_id=%s step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                operation_id,
+                step,
+                len(specs),
+                execution_policy.execution_ref,
+                execution_policy.acceptance_ref,
+            )
+            step = "multi-rollout-setup"
+            logger.info(
+                "product_profile.create.step.start operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            await self._multi_setup(composition, specs, execution_policy, context)
+            logger.info(
+                "product_profile.create.step.complete operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            step = "repository-persistence"
+            logger.info(
+                "product_profile.create.step.start operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            profile = await asyncio.to_thread(
+                self._repository.create_profile,
+                name,
+                composition,
+                stages,
+                context,
+                operation_id,
+            )
+            logger.info(
+                "product_profile.create.complete operation_id=%s profile_id=%d stage_count=%d",
+                operation_id,
+                profile.id,
+                len(specs),
+            )
+            return profile
+        except Exception as exc:
+            self._log_creation_failure("product_profile.create", operation_id, step, exc)
+            raise
 
     async def create_product_collet(self, profile_id: int, content: str) -> Collet:
         context = current_actor_context()
-        positive_id(profile_id)
-        text(content)
-        profile, owner = await asyncio.to_thread(
-            self._repository.get_profile, profile_id
+        operation_id = uuid4().hex
+        logger.info(
+            "product_collet.create.start operation_id=%s profile_id=%d content_bytes=%d actor=%r/%r",
+            operation_id,
+            profile_id,
+            _payload_size(content),
+            context.actor.principal_type,
+            context.actor.principal_id,
         )
-        self._authorization.check("create", context, owner)
-        specs, execution_policy = await asyncio.to_thread(
-            validate_configuration, profile.composition, profile.stages, self._execution
-        )
-        setup = await self._multi_setup(
-            profile.composition, specs, execution_policy, context
-        )
-        kwargs = {"multi_setup": setup} if setup else {}
-        snapshot = await asyncio.to_thread(
-            self._repository.create_collet,
-            profile,
-            content,
-            context,
-            uuid4().hex,
-            **kwargs
-        )
-        return snapshot.collet
+        step = "input-validation"
+        try:
+            positive_id(profile_id)
+            text(content)
+            step = "repository-load-profile"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile_id,
+                step,
+            )
+            profile, owner = await asyncio.to_thread(
+                self._repository.get_profile, profile_id
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s owner=%r/%r",
+                operation_id,
+                profile.id,
+                step,
+                owner.principal_type,
+                owner.principal_id,
+            )
+            step = "runtime-authorization"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            self._authorization.check("create", context, owner)
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            step = "configuration-validation"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            specs, execution_policy = await asyncio.to_thread(
+                validate_configuration,
+                profile.composition,
+                profile.stages,
+                self._execution,
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                operation_id,
+                profile.id,
+                step,
+                len(specs),
+                execution_policy.execution_ref,
+                execution_policy.acceptance_ref,
+            )
+            step = "multi-rollout-setup"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            setup = await self._multi_setup(
+                profile.composition, specs, execution_policy, context
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            kwargs = {"multi_setup": setup} if setup else {}
+            step = "repository-persistence"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            snapshot = await asyncio.to_thread(
+                self._repository.create_collet,
+                profile,
+                content,
+                context,
+                operation_id,
+                **kwargs
+            )
+            logger.info(
+                "product_collet.create.complete operation_id=%s profile_id=%d collet_id=%d rollout_id=%d stage_count=%d",
+                operation_id,
+                profile.id,
+                snapshot.collet.id,
+                snapshot.current_rollout_id,
+                len(snapshot.current().stages),
+            )
+            return snapshot.collet
+        except Exception as exc:
+            self._log_creation_failure("product_collet.create", operation_id, step, exc)
+            raise
+
+    @staticmethod
+    def _log_creation_failure(operation_name, operation_id, step, exc):
+        if isinstance(exc, (Invalid, Conflict, Missing, Forbidden)):
+            logger.warning(
+                "%s.error operation_id=%s step=%s error_type=%s error=%s",
+                operation_name,
+                operation_id,
+                step,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
+        else:
+            logger.error(
+                "%s.error operation_id=%s step=%s error_type=%s error=%s",
+                operation_name,
+                operation_id,
+                step,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
 
     async def _multi_setup(self, composition, specs, execution_policy, context):
         policy = multi_policy(composition)
