@@ -174,4 +174,3 @@ def exec_resolve_supported() -> bool:
                 and callable(getattr(chat, "stream_for_a2a", None)))
     except Exception:
         return False
-
