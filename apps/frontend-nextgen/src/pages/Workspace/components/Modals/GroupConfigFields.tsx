@@ -138,8 +138,8 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                   disabled={disabled}
                   onClick={() => onKindChange(option.value)}
                   className={cn(
-                    'h-auto min-w-0 items-start justify-start gap-3 whitespace-normal rounded-xl border p-3 text-left sm:flex-col sm:gap-2',
-                    yamlValidated && 'items-center justify-center gap-2 px-2 py-2.5 sm:flex-row',
+                    'h-auto min-w-0 flex-col items-start justify-start gap-1 whitespace-normal rounded-xl border p-3 text-left',
+                    yamlValidated && 'items-center justify-center px-2 py-2.5',
                     disabled
                       ? 'cursor-not-allowed border-border bg-muted opacity-60'
                       : kind === option.value
@@ -147,13 +147,13 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                       : 'border-border bg-background hover:border-primary/40 hover:bg-muted/40',
                   )}
                 >
-                  <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', yamlValidated && 'hidden sm:block', kind === option.value ? 'text-primary' : 'text-muted-foreground')} />
-                  <span className="min-w-0">
-                    <span className={cn('block text-xs font-medium', kind === option.value ? 'text-primary' : 'text-foreground')}>{option.label}</span>
-                    {!yamlValidated && <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
-                      {disabled ? '切换为 Bot 身份后可用' : option.description}
-                    </span>}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Icon aria-hidden className={cn('size-4 shrink-0', yamlValidated && 'hidden sm:block', kind === option.value ? 'text-primary' : 'text-muted-foreground')} />
+                    <span className={cn('text-xs font-medium', kind === option.value ? 'text-primary' : 'text-foreground')}>{option.label}</span>
                   </span>
+                  {!yamlValidated && <span className="block text-xs font-normal leading-5 text-muted-foreground">
+                    {disabled ? '切换为 Bot 身份后可用' : option.description}
+                  </span>}
                 </Button>
               );
             })(),
