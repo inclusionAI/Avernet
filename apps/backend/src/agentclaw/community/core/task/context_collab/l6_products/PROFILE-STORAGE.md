@@ -1,3 +1,10 @@
+> Storage migration warning (2026-11-27): the retained versioned-string ORM now
+> targets `ac_context_collab_product_profile_legacy_v1`; integer-ID/YAML Profiles
+> own the unqualified name. Stop writers and inspect/rename an existing legacy
+> schema before deploying this change. No rename is performed automatically.
+> See the [storage foundation and deployment boundary](persistence/RELATIONAL-STORAGE.md).
+> Historical DDL below records the pre-rename installation, not the new target.
+
 # Published ProductProfile storage and Swarm DAG configuration
 
 ## New runtime/configuration storage

@@ -197,6 +197,10 @@ profile. A host must supply the real capabilities and schedule the worker.
 
 ## Storage, recovery and compatibility
 
+> Partial implementation, no runtime cutover: the [storage foundation](../persistence/RELATIONAL-STORAGE.md)
+> now provides five-table models, strict codecs, business creation/read UoW and isolated SQL tests.
+> The [relational-storage design](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md) proposes using five `ac_context_collab_*` business tables without separate control/identity/receipt/Outbox/slot tables, with Collet content/status and retained Profile/current-rollout associations but no runtime_collet_id/revision/execution_state columns; it records row-lock and feedback-event replay plans plus unresolved full-runtime recovery and protocol compatibility gaps. Execution/progress/feedback migration is not implemented and this does not replace the current runtime storage contract below.
+
 Apply the [v2 DDL](../../sql/2026_11_26_product_runtime_v2.sql). Five base tables hold
 complete configuration, explicit integer identity mappings, a versioned runtime
 snapshot, operation receipts and durable intents; MultiRollout adds one tenant-wide

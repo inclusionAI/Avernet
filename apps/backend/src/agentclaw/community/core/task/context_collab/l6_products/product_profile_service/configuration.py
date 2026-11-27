@@ -1,5 +1,7 @@
 """Joint composition/YAML validation and strict immutable configuration codec."""
 
+from ..profile_record import ProductProfileRecord
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
 )
@@ -131,7 +133,7 @@ def decode_composition(data: dict) -> MethodCompositionTemplate:
     return decode(data, MethodCompositionTemplate, COMPOSITION_TYPES, get_profile)
 
 
-def validate_configuration(composition, stages, execution):
+def compile_configuration(composition, stages):
     if type(composition) is not MethodCompositionTemplate:
         raise Invalid("composition is required")
     required, optional = composition.required_methods, composition.optional_methods
@@ -213,8 +215,13 @@ def validate_configuration(composition, stages, execution):
         raise Invalid("YAML stages require exactly one selected SwarmStagesPolicy")
     # Open admission/Single/Group execution need their own governed adapters.
     # A binding or eligibility declaration alone is never authority to dispatch.
-    execution.require(policies[0].execution_ref, policies[0].acceptance_ref, specs)
     return specs, policies[0]
+
+
+def validate_configuration(composition, stages, execution):
+    specs, policy = compile_configuration(composition, stages)
+    execution.require(policy.execution_ref, policy.acceptance_ref, specs)
+    return specs, policy
 
 
 def encode_profile(profile: ProductProfile) -> dict:
@@ -245,3 +252,14 @@ def multi_policy(composition):
         ),
         None,
     )
+
+
+def encode_profile_response(record: "ProductProfileRecord") -> dict:
+    """Metadata is intentionally excluded from the frozen execution encoding."""
+    return {
+        **encode_profile(record.definition),
+        "description": record.description,
+        "status": record.status.value,
+        "creator": record.creator,
+        "modifer": record.modifer,
+    }
