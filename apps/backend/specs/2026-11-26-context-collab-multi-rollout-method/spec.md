@@ -565,7 +565,20 @@ MultiRollout 本身仍是 Draft，尚未实现。独立的 MethodRelationTemplat
 不声称未经证明的局部证据复用。§12.3 保留为方案阶段历史，不是当前实现状态。
 
 当前 owning 合同：[L5 MultiRollout](../../src/agentclaw/community/core/task/context_collab/l5_methods/MULTI-ROLLOUT.md)、
-[ProductProfile 配置与集成](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-opt-in)。
+[ProductProfile 配置与集成](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-default-creation)。
 新增测试位于 `tests/community/core/task/context_collab/multi_rollout/`。
 执行命令、失败修复、最终 CI、DDL 与外部能力缺口分别记录在 [delivery](delivery.md)，
 不将方案阶段或端点改名的旧测试统计当作本次验收。
+
+### 12.5 2026-11-27 创建入口收口
+
+后续用户要求将 `create_product_profile` 收口为 `(name, stages)`，不再由调用方传入
+composition。服务内部固定生成 MultiRollout@1.0 NEST Swarm@0.2；Swarm 使用现有
+YAML 唯一图的静态 workflow 路径，而不是动态规划 Agent 或额外的 legacy workflow
+DAG。MultiRollout 使用 interactive 策略：可信验收失败或已确认的执行失败后等待
+human 反馈，收到反馈后才由 adaptation Agent 提案并由 controller 裁决是否重跑。
+未知派发不转换为可重试失败，自主模式仍不因运行失败自动质量重试。
+
+这是创建 Service API / HTTP body 的显式不兼容调整；ProductProfile 保存/返回的
+composition、既有持久化 Profile 和 SQL DDL 不变。当前 owning 合同及本轮实际验证、
+宿主能力缺口见 [delivery 后续记录](delivery.md)，不复用上一轮 CI 统计作为本轮结果。

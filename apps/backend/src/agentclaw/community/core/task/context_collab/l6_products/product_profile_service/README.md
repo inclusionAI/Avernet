@@ -3,9 +3,11 @@
 Owner: Backend `context_collab` L6. The [Service API](contracts.py) has exactly
 five async methods, implemented by [ProductProfileService](service.py). Canonical
 [ProductProfile](../product_profile.py) contains only `id/name/composition/stages`.
-`composition` selects exact L5 Method contracts/policies; strict [YAML](stages_yaml.py)
-is the sole stage DAG input. Required Methods are selected, optional Methods are
-validated and retained but never implicitly activated.
+`composition` records exact L5 Method contracts/policies; public creation takes
+only `name` and strict [YAML](stages_yaml.py) `stages`, installing the product-owned
+interactive MultiRollout NEST Swarm composition. YAML is the sole, static workflow
+DAG input; no planning Agent chooses or changes that graph. Required Methods are
+selected, optional Methods are validated and retained but never implicitly activated.
 
 ## Context Boundary
 
@@ -17,6 +19,7 @@ provides:
   - InteractiveResult
   - StageRolloutDetails
   - ProductProfileRepository
+  - default_composition
 consumes:
   - ProductProfilePublicationAuthorizer
   - ProductRuntimeAuthorization
@@ -85,9 +88,12 @@ unchanged.
 
 ## Creation, queries and revision metadata
 
-- `create_product_profile` checks the existing independent publication authority,
-  validates the Method composition and YAML jointly, requires installed execution
-  and evidence contracts, and commits the complete immutable configuration.
+- `create_product_profile(name, stages)` checks the independent publication
+  authority, creates the [default composition](configuration.py) internally,
+  validates it with the static YAML workflow, and requires installed execution,
+  evidence, adaptation Agent, isolation and notification capabilities before
+  committing the complete immutable configuration. Callers cannot supply or
+  override a composition; the stored/returned ProductProfile still includes it.
 - `create_product_collet` commits the Collet, independent first rollout/stage IDs,
   actual MethodBinding/relations, owner, frozen policy/graph, receipt and initial
   advance intent together. Network IO is never inside that transaction.
@@ -121,9 +127,11 @@ source → target edge, not a generic parent/child relationship. `relation` owns
 its meaning: for `NEST`, the source Method contains the target Method. Other
 relations do not acquire containment semantics from their endpoint names.
 
-Python callers and new HTTP composition objects use `source_method` and
-`target_method`; remove the old `parent_method`/`child_method` keywords. Public
-composition input rejects old, mixed and unknown fields. Persisted v2 Profile
+Stored/returned composition objects and the standalone value codec use
+`source_method` and `target_method`, not `parent_method`/`child_method`. Profile
+creation no longer accepts a composition at all; HTTP rejects even a correctly
+encoded caller composition as an extra field. The value codec still rejects
+old, mixed and unknown fields. Persisted v2 Profile
 reads alone translate the exact old tagged relation shape before strict decoding;
 new writes use the new names, and reads never rewrite stored history. Ambiguous,
 partial or unknown legacy shapes are rejected. No SQL DDL change is needed for
@@ -171,8 +179,12 @@ requested-but-unconfirmed cancellation remain distinguishable durable facts.
 
 Progress checks current rollout, attempt, lease, revision and trusted validator.
 Success covers exactly all frozen conditions. Failure facts can have no artifacts.
-Runtime failures stop scheduling. Accepted facts, state and receipt commit under
-one aggregate CAS, competing with interactive/stop. Separate owner/root Task
+Confirmed runtime failures stop the failed candidate; interactive MultiRollout
+waits for human feedback before an Agent can propose a successor. Autonomous
+MultiRollout still terminates on runtime failure instead of treating it as
+automatic quality feedback. Unknown dispatch is never a confirmed failure.
+Accepted facts, state and receipt commit under one aggregate CAS, competing
+with interactive/stop. Separate owner/root Task
 acceptance remains separate: `overall_acceptance=owner` leaves a fully accepted
 rollout's Collet RUN_FINISHED; it does not fabricate a root Work transition.
 
@@ -228,76 +240,64 @@ The change's actual commands/results and remaining migration work belong in its
 [delivery report](../../../../../../../../specs/2026-11-26-context-collab-protocol-optimization/delivery.md).
 
 
-## MultiRollout NEST Swarm (opt-in)
+## MultiRollout NEST Swarm (default creation)
 
-The [L5 runtime contract](../../l5_methods/MULTI-ROLLOUT.md) owns candidate execution,
-state, bounded strategies, isolation, unknown outcomes and recovery. This service
-only validates/instantiates composition and exposes the same five public methods.
-It does not implement a second retry loop or activate optional methods.
-
-A ProductProfile still has only `id/name/composition/stages`. Use **one** Swarm
-MethodTemplate and an explicit directed relation; do not add `body_method` or
-repeat Swarm templates N times:
+The [L5 runtime contract](../../l5_methods/MULTI-ROLLOUT.md) owns execution,
+state, bounded strategies, isolation, unknown outcomes and recovery. New public
+Profiles always select exactly `MultiRollout@1.0 NEST Swarm@0.2` through the
+[product-owned default](configuration.py). The five-method Service API is otherwise
+unchanged; existing persisted serial, parallel or autonomous Profiles are not
+rewritten or silently reconfigured.
 
 ```python
-from agentclaw.community.core.task.context_collab.l5_methods.method_profile import get_profile
-from agentclaw.community.core.task.context_collab.l5_methods.method_policies import SwarmStagesPolicy
-from agentclaw.community.core.task.context_collab.l5_methods.method_composition import CompositionRelation
-from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_policy import (
-    MultiRolloutMethodPolicy, MultiRolloutLimits, ParallelBestOf, AdaptiveUntilAccepted,
-)
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodCompositionTemplate, MethodTemplate, MethodRelationTemplate,
-)
-
-multi_policy = MultiRolloutMethodPolicy(
-    strategy=ParallelBestOf(samples=4, max_concurrency=2, selection_ref="highest-score@1"),
-    limits=MultiRolloutLimits(
-        max_rollouts=4, max_elapsed_seconds=3600, max_stage_dispatches=100,
-        max_strategy_calls=8, max_no_progress=2,
-    ),
-    isolation_ref="per-candidate-workspace@1",  # requires a real host binding
-)
-composition = MethodCompositionTemplate(
-    required_methods=(
-        MethodTemplate(get_profile("MultiRollout", "1.0"), multi_policy),
-        MethodTemplate(get_profile("Swarm", "0.2"), SwarmStagesPolicy(
-            execution_ref="openapi-bot/v1", acceptance_ref="trusted-evidence/v1",
-            overall_acceptance="owner",
-        )),
-    ),
-    relations=(MethodRelationTemplate(
-        source_method="MultiRollout", target_method="Swarm", relation=CompositionRelation.NEST,
-    ),),
-)
 # In an authenticated actor scope with governed host capabilities installed:
-# profile = await service.create_product_profile("best-of-swarm", composition, stages_yaml)
+profile = await service.create_product_profile("coding", stages_yaml)
+collet = await service.create_product_collet(profile.id, "Implement the feature")
 ```
 
-For iterative operation replace **only the MultiRollout policy strategy**, not
-its composition relation:
+The HTTP `POST /api/v1/collaboration/task/products/profiles` body likewise has
+only `name` and `stages`. Supplying the removed `composition` field is a 422 error.
+The response still contains the generated composition for inspection. This is a
+breaking creation-contract change: Python callers must remove the positional or
+keyword composition argument; HTTP clients must omit it rather than send null.
+No DDL or stored-Profile migration is needed. Roll back clients and API versions
+together; do not rewrite immutable configurations to restore an old request body.
 
-```python
-strategy = AdaptiveUntilAccepted(
-    feedback_mode="interactive", adaptation_ref="stage-improvement-agent@1",
-    feedback_timeout_seconds=600,
-)
-# Autonomous mode omits feedback_timeout_seconds entirely:
-strategy = AdaptiveUntilAccepted(
-    feedback_mode="autonomous", adaptation_ref="stage-improvement-agent@1",
-)
-```
+### Static Swarm plan and human-gated iteration
 
-These example references are installation requirements, not claims that an
-enterprise Agent, workspace provider or trusted evaluator is installed publicly.
-`ProductProfileRuntimeModule` binds unavailable strategy/isolation/notification
-ports; publication and create recheck the host capabilities. Autonomous delegation
-and resource access are also rechecked on real strategy/execution paths.
+- `SwarmStagesPolicy` executes the frozen YAML dependency graph as a static
+  workflow. It does **not** use dynamic `SwarmMethodPolicy` planning or embed a
+  second, independently writable legacy `SwarmWorkflowPolicy.workflow` graph.
+  Stage candidates, dependencies and acceptance conditions come only from YAML.
+- One candidate starts at a time. Confirmed execution failure (`RUN_FAILED`) or
+  trusted acceptance failure (`ACCEPTANCE_FAILED`) enters `WAITING_FEEDBACK` and
+  emits one idempotent human notification. Repeated worker ticks cannot start
+  another rollout or invoke an adaptation Agent while waiting.
+- Only after an authorized human submits feedback using `interactive(...)` does
+  `stage-improvement-agent@1` receive the failed snapshot and feedback. Its typed
+  proposal is adjudicated by the controller: `RE_DO` reruns unchanged, `OPTIMIZE`
+  creates a bounded immutable plan patch, `SHUTDOWN` stops, and `DO_NOTHING`
+  keeps waiting without extending the original deadline. Neither feedback alone
+  nor a failure automatically authorizes a retry. Successful Swarm acceptance
+  completes the controller without calling a planning/adaptation Agent.
+- Default limits: four total rollouts, 3,600 seconds overall, 400 stage dispatches,
+  eight strategy calls and two no-progress decisions; each human-feedback wait
+  is bounded to 600 seconds and the overall absolute deadline. Every successor
+  reruns the workflow with fresh candidate/session/workspace identities.
+
+These defaults require installed exact capabilities: `openapi-bot/v1`,
+`trusted-evidence/v1`, `stage-improvement-agent@1`, `per-candidate-workspace@1`
+and idempotent feedback notifications. They identify host contracts, not import
+paths, URLs or bundled production Agents. `ProductProfileRuntimeModule` still
+binds unavailable external ports by default; creation fails closed before writing
+anything when the host has not installed the required capabilities. Host adapters
+must implement these exact references. No Agent/provider integration is fabricated.
 
 ### Query and interaction contract
 
-Only new MultiRollout profiles receive `multi_rollout_control` in the HTTP Envelope
-alongside existing rollouts/revision/current_rollout_id/stopped. The published
+Only MultiRollout profiles (including all newly created profiles) receive
+`multi_rollout_control` in the HTTP Envelope alongside existing
+rollouts/revision/current_rollout_id/stopped. The published
 HTTP response schema describes the extension. It includes controller phase/outcome,
 focus/winner, all actual candidate IDs, plan versions/digests, body Bindings,
 trusted scores, hard budget usage, reservations/peak, absolute waiting deadline,
@@ -305,7 +305,7 @@ strategy-call dispositions/durations and cancel requested/unknown/confirmed fact
 No raw feedback or credentials are in this projection. Legacy HTTP JSON omits the
 extension; `all_rollout=false` returns the focus only, not all active candidates.
 
-Interactive UUID/actor authorization and the signature are unchanged. MultiRollout
+Interactive UUID/actor authorization and its signature are unchanged. MultiRollout
 adds a durable in-flight operation fence: same or competing adaptive feedback
 cannot call two Agents at once. Committed results replay before focus/terminal
 checks, with fresh authorization. New UUIDs cannot alter a terminal run. Parallel

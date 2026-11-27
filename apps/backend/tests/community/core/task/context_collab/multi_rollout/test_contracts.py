@@ -166,9 +166,7 @@ async def test_explicit_relation_order_capabilities_and_opt_in(multi):
             h.interaction,
             h.service._messages,
         )
-        await service.create_product_profile(
-            "denied", composition(policy()), h.profile.stages
-        )
+        await service.create_product_profile("denied", h.profile.stages)
 
 
 @pytest.mark.asyncio

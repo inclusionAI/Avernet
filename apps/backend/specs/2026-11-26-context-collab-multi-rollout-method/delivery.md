@@ -28,7 +28,7 @@
 
 Owning reusable knowledge:
 - [L5 controller/host/recovery contract](../../src/agentclaw/community/core/task/context_collab/l5_methods/MULTI-ROLLOUT.md).
-- [ProductProfile configuration and integration](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-opt-in).
+- [ProductProfile configuration and integration](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-default-creation).
 - [Module navigation/boundary](../../src/agentclaw/community/core/task/context_collab/README.md).
 
 ## Verification performed
@@ -168,3 +168,96 @@ unstaged; the validation tree did not commit, switch branches or push anything.
   recovery; recomputation is charged again. No hidden background retry loop.
 - ACCS source document was not accessible; no claim of full ACCS compliance or a
   new official RFC number. This implementation is the repository-local extension.
+
+## 2026-11-27 follow-up: product-owned creation defaults
+
+Baseline: `510a068bdb67ae295900bd12432c8ca6d8d5d263` (the initial implementation
+was committed and pushed). The verification above records that earlier delivery,
+not evidence for this subsequent creation-contract change. This follow-up is local
+work; no new commit/push, merge, host integration or deployment is claimed.
+
+### Contract and behavior
+
+- `create_product_profile(name, stages)` removes caller `composition` entirely
+  from both the Service API and HTTP body. The stored/returned ProductProfile
+  retains its generated composition. Unknown/removed HTTP fields fail with 422;
+  old Python positional/keyword invocations fail rather than silently overriding
+  the product default.
+- [The owning creation contract](../../src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md#multirollout-nest-swarm-default-creation)
+  now fixes MultiRollout@1.0 NEST Swarm@0.2, interactive feedback and the bounded
+  product-owned defaults. The Swarm graph is the existing static YAML workflow
+  (`SwarmStagesPolicy`), not another authored legacy workflow graph or dynamic
+  planning Agent.
+- Trusted acceptance failure or confirmed execution failure waits for human
+  feedback. Only then does the installed adaptation Agent propose RE_DO,
+  OPTIMIZE, DO_NOTHING or SHUTDOWN. No feedback means no Agent invocation or
+  successor rollout. Unknown dispatch keeps its fence/slot and cannot become a
+  human-authorized blind resend. Autonomous runtime failures still terminate.
+- Existing stored serial, parallel and autonomous Profiles are not rewritten.
+  Their compatibility tests explicitly seed those immutable configurations through
+  the repository; new public-creation tests exercise the new Service API instead
+  of adding a hidden custom-composition creation path.
+- No schema/DDL changes. Hosts still must install the exact execution, evidence,
+  adaptation Agent, safe isolation and notification capabilities. Public missing
+  capabilities fail closed before profile persistence.
+
+### Verification performed for this follow-up
+
+From `apps/backend/` with `DEPLOY_PROFILE=test`:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/community/core/task/context_collab/multi_rollout \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/core/task/context_collab/test_method_profiles.py \
+  tests/community/core/task/context_collab/test_method_composition.py \
+  tests/community/core/task/context_collab/test_network_profiles.py \
+  tests/community/architecture/test_http_adapter_layer_is_http_only.py \
+  tests/community/endpoints/test_endpoint_runner.py \
+  -k 'context_collab or collaboration/task/products'
+```
+
+Result: **458 passed**, 2,091 deselected, 19 warnings, 74.06 seconds. The selector
+intentionally excludes unrelated endpoint cases and the standalone HTTP-layer
+architecture check; the latter is covered by the complete architecture gate.
+The new default suite covers actual SQL/engine/worker execution, fixed dependency
+order, both failure kinds, all four Agent decisions, UUID replay, unknown dispatch,
+removed Python arguments, invalid YAML and unavailable host capabilities.
+
+The full architecture/API command recorded above was rerun against this change:
+**524 passed**, 45 warnings, 90.03 seconds. Black checks all 18 changed/new Python
+files; Ruff F rules pass on those files and the configured full rules pass on the
+two new files. All changed/new source files stay below 1,000 lines. The repository
+SAST block scan, plaintext-secret scan and `git diff --check` pass. Markdown checks
+introduced no missing file targets; pre-existing missing links are not claimed fixed.
+
+### Complete Backend CI for the follow-up
+
+The unchanged `scripts/ci_test.sh` ran with four workers, against the temporary
+validation tree `53c70c959c7cafd3c8addb72f3de1ed951b2224d` and baseline HEAD
+`510a068bdb67ae295900bd12432c8ca6d8d5d263`. This tree includes all 18 changed/new
+Python files (including tests); it was created with a temporary index and did
+not stage or commit the user's work. Subsequent changes are Markdown-only.
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" BACKEND_CI_PYTEST_WORKERS=4 \
+  bash scripts/ci_test.sh --base HEAD \
+  --head 53c70c959c7cafd3c8addb72f3de1ed951b2224d
+```
+
+| Check | Actual result |
+| --- | --- |
+| Pytest | **35,557 passed**, 41 skipped, 645 warnings; **13 subtests passed**, 629.01 seconds |
+| Case pass rate | **100.00%**, required 100% |
+| Overall line coverage | **90.80%**, required 75% |
+| Changed executable-line coverage | **100.00% — 4/4**, required 80% |
+| Outcome | **`backend CI gate passed`**, exit status 0 |
+
+The small changed-line denominator is the coverage producer's executable-line
+intersection, not all lines of the nested declarative default or a replacement
+for the behavior tests. No coverage threshold, exclusion or gate was changed.
+Reports are the ignored `apps/backend/pytest_report/TEST-junit.xml` and
+`TEST-cov.xml`. Skipped/external-service checks are not integration evidence.
+Live adaptation Agent, actual external isolation/notification/provider services,
+Singlebox E2E, enterprise deployment and production behavior were **not verified**
+in this follow-up; those boundaries remain as documented above.

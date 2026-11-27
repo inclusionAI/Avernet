@@ -332,7 +332,10 @@ def transitions(snapshot, now):
         snapshot.current_rollout_id = rollout.rollout_id
         project(snapshot)
         return []
-    if rollout.status is S.RUN_FAILED:
+    if (
+        rollout.status is S.RUN_FAILED
+        and c.policy.strategy.feedback_mode == "autonomous"
+    ):
         return stop(
             snapshot,
             "INFRASTRUCTURE_RUN_FAILED",
@@ -342,10 +345,16 @@ def transitions(snapshot, now):
         [
             {
                 "stage": s.name,
-                "failed": [a.condition for a in s.acceptances if not a.passed],
+                **(
+                    {"runtime_error": s.error_msg}
+                    if s.status is S.RUN_FAILED
+                    else {
+                        "failed": [a.condition for a in s.acceptances if not a.passed]
+                    }
+                ),
             }
             for s in rollout.stages
-            if s.status is S.ACCEPTANCE_FAILED
+            if s.status in {S.ACCEPTANCE_FAILED, S.RUN_FAILED}
         ]
     )
     if evidence == c.failure_digest:

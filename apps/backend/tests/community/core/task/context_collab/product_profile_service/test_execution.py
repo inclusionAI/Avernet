@@ -49,6 +49,8 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
+from .helpers import persist_profile
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -91,6 +93,7 @@ async def test_full_journey_failure_successor_old_report_and_real_messages(creat
     failure_context = report_context(h, failed, "failure-1")
     accepted = await h.engine.report(failed, failure_context)
     assert accepted["accepted"] is True
+    assert snapshot(h).revision == old.revision + 1
     assert snapshot(h).current().status is S.ACCEPTANCE_FAILED
     assert snapshot(h).collet.status is S.ACCEPTANCE_FAILED
     assert len(h.calls) == 1
@@ -335,7 +338,7 @@ async def test_real_database_transaction_failure_rolls_back_all_creation(
     runtime, engine
 ):
     h = runtime
-    profile = await h.service.create_product_profile("coding", h.composition, h.stages)
+    profile = persist_profile(h, "coding", h.composition, h.stages)
 
     def fail_receipt(conn, cursor, statement, parameters, context, executemany):
         if statement.startswith("INSERT INTO ac_product_receipt_v2"):
@@ -467,9 +470,7 @@ async def test_whole_product_owner_acceptance_is_not_fabricated(runtime):
             ),
         ),
     )
-    profile = await h.service.create_product_profile(
-        "owner-contract", h.composition, h.stages
-    )
+    profile = persist_profile(h, "owner-contract", h.composition, h.stages)
     h.collet = await h.service.create_product_collet(profile.id, "work")
     for request in ("owner-design", "owner-implementation"):
         await run_finished(h)

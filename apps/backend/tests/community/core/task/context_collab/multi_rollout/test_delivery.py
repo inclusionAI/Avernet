@@ -20,13 +20,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_contr
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
 )
-from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
-    encode_composition,
-)
 from agentclaw.community.di.modules.task.product_profile_runtime import (
     ProductProfileRuntimeModule,
 )
-from .conftest import policy, composition, STAGE
+from .conftest import policy, STAGE
 
 
 @pytest.fixture
@@ -44,13 +41,12 @@ def client(multi):
         yield client
 
 
-def test_http_multi_opt_in_schema_metadata_and_historical_session_query(client, multi):
+def test_http_default_multi_schema_metadata_and_historical_session_query(client, multi):
     base = "/api/v1/collaboration/task/products"
     response = client.post(
         base + "/profiles",
         json=dict(
             name="http-multi",
-            composition=encode_composition(composition(policy())),
             stages=STAGE,
         ),
     )
@@ -64,8 +60,9 @@ def test_http_multi_opt_in_schema_metadata_and_historical_session_query(client, 
     response = client.get(f"{base}/collets/{cid}/rollouts")
     data = response.json()["data"]
     assert response.status_code == 200, response.text
-    assert len(data["rollouts"]) == 4
+    assert len(data["rollouts"]) == 1
     assert data["multi_rollout_control"]["phase"] == "CREATED"
+    assert data["multi_rollout_control"]["strategy"] == "adaptive_until_accepted"
     assert data["multi_rollout_control"]["configured"] == 4
     assert data["current_rollout_id"] == data["rollouts"][0]["rollout_id"]
     sid = data["rollouts"][-1]["stages"][0]["stage_rollout_id"]

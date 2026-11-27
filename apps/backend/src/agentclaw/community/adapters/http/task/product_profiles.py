@@ -22,7 +22,6 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
-    decode_composition,
     encode_profile,
 )
 from agentclaw.community.adapters.http.task.product_body_limits import (
@@ -57,13 +56,10 @@ class ProfileCreate(ProductRequest):
         max_length=256,
         description="Immutable product configuration name.",
     )
-    composition: dict = Field(
-        description="Closed MethodCompositionTemplate value codec."
-    )
     stages: str = Field(
         min_length=1,
         max_length=262144,
-        description="Strict stages YAML; sole stage graph input.",
+        description="Static Swarm workflow YAML; creation installs human-feedback MultiRollout.",
     )
 
 
@@ -98,7 +94,6 @@ async def create_profile(
 ) -> Envelope[dict]:
     result = await service.create_product_profile(
         private_body.name,
-        decode_composition(private_body.composition),
         private_body.stages,
     )
     return envelope(encode_profile(result), request)

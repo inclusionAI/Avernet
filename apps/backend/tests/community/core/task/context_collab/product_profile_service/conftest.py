@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
+from .helpers import persist_profile
 
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.context_collab.errors import (
@@ -197,8 +198,6 @@ def runtime(db):
 @pytest_asyncio.fixture
 async def created(runtime):
     h = runtime
-    h.profile = await h.service.create_product_profile(
-        "coding", h.composition, h.stages
-    )
+    h.profile = persist_profile(h, "coding", h.composition, h.stages)
     h.collet = await h.service.create_product_collet(h.profile.id, "build a feature")
     return h

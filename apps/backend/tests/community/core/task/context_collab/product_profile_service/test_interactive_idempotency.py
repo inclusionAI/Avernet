@@ -49,6 +49,8 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
+from .helpers import persist_profile
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -175,9 +177,7 @@ async def test_same_uuid_is_isolated_by_trusted_tenant_scope(created):
     await h.service.interactive(rid, "intervention-1", "first tenant")
     saved = persisted(h)
     with avernet_tenant_scope("other-public-tenant"):
-        profile = await h.service.create_product_profile(
-            "coding", h.composition, h.stages
-        )
+        profile = persist_profile(h, "coding", h.composition, h.stages)
         collet = await h.service.create_product_collet(profile.id, "other request")
         other = h.repository.get_collet(collet.id)
         await h.service.interactive(

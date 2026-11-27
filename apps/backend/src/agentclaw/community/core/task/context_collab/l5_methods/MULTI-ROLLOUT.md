@@ -32,6 +32,11 @@ to `0.2`, so request `get_profile("MultiRollout", "1.0")` explicitly.
 
 ## Strategies and guarded plans
 
+New [public Profile creation](../l6_products/product_profile_service/README.md#multirollout-nest-swarm-default-creation)
+accepts only name/YAML and defaults to interactive AdaptiveUntilAccepted NEST
+Swarm with a static YAML workflow. Other strategies remain valid for existing
+stored Profiles; creation no longer accepts arbitrary Method selections.
+
 `ParallelBestOf(samples, max_concurrency, selection_ref)` creates one fixed batch
 of 1–32 independent runs, at most 8 concurrently. It waits for all actual terminal
 candidate outcomes; one failed candidate does not fail its siblings. There is no
@@ -42,11 +47,13 @@ validates complete, unique, finite scores and breaks ties by candidate ordinal,
 not completion order. Worker self-reported scores are not trusted inputs.
 
 `AdaptiveUntilAccepted(feedback_mode, adaptation_ref, ...)` runs one candidate at
-a time. Only ACCEPTANCE_FAILED triggers quality adaptation; runtime failure,
-unknown delivery, unavailable authority or validator is not quality feedback.
-Interactive mode stores WAITING_FEEDBACK, one notification key and an absolute
-bounded deadline. Autonomous mode requires an explicit host delegation grant,
-rechecked at the actual strategy call. Autonomous no-op may request bounded human
+a time. Interactive mode enters WAITING_FEEDBACK after trusted ACCEPTANCE_FAILED
+or a confirmed RUN_FAILED; it stores one notification key and an absolute bounded
+deadline. No Agent runs and no successor is created until human feedback arrives.
+Autonomous mode treats only ACCEPTANCE_FAILED as quality adaptation; runtime
+failure terminates it. Unknown delivery, unavailable authority or validator never
+becomes quality feedback in either mode. Autonomous mode requires an explicit
+host delegation grant, rechecked at the actual strategy call. Autonomous no-op may request bounded human
 feedback; otherwise it terminates NO_PROGRESS rather than spinning.
 
 Human and autonomous proposals pass the **same controller validator**:

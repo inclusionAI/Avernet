@@ -4,6 +4,7 @@ import json
 from dataclasses import fields, replace
 
 import pytest
+from .helpers import persist_profile
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
@@ -120,7 +121,7 @@ async def test_sql_profile_and_runtime_preserve_relation_direction(
 ):
     h = runtime
     composition = _composition(h)
-    profile = await h.service.create_product_profile("composed", composition, h.stages)
+    profile = persist_profile(h, "composed", composition, h.stages)
     collet = await h.service.create_product_collet(profile.id, "request")
     with h.repository.db.orm_session() as session:
         row = session.query(ProductConfigurationRow).filter_by(id=profile.id).one()

@@ -55,6 +55,8 @@ from agentclaw.community.core.task.context_collab.l6_products.relation_storage i
 from ...l5_methods.multi_rollout_policy import (
     MULTI_POLICY_TYPES,
     MultiRolloutMethodPolicy,
+    MultiRolloutLimits,
+    AdaptiveUntilAccepted,
 )
 
 COMPOSITION_TYPES = (
@@ -74,6 +76,51 @@ COMPOSITION_TYPES = (
     OpenPublicationProfile,
     DesignatedOpenAdmission,
 )
+
+
+def default_composition() -> MethodCompositionTemplate:
+    """Product-owned interactive iteration over the static YAML workflow.
+
+    References identify required host capabilities, not concrete implementations.
+    The host must install them; missing capabilities still fail closed.
+    """
+    return MethodCompositionTemplate(
+        required_methods=(
+            MethodTemplate(
+                get_profile("MultiRollout", "1.0"),
+                MultiRolloutMethodPolicy(
+                    strategy=AdaptiveUntilAccepted(
+                        feedback_mode="interactive",
+                        adaptation_ref="stage-improvement-agent@1",
+                        feedback_timeout_seconds=600,
+                    ),
+                    limits=MultiRolloutLimits(
+                        max_rollouts=4,
+                        max_elapsed_seconds=3600,
+                        max_stage_dispatches=400,
+                        max_strategy_calls=8,
+                        max_no_progress=2,
+                    ),
+                    isolation_ref="per-candidate-workspace@1",
+                ),
+            ),
+            MethodTemplate(
+                get_profile("Swarm", "0.2"),
+                SwarmStagesPolicy(
+                    execution_ref="openapi-bot/v1",
+                    acceptance_ref="trusted-evidence/v1",
+                    overall_acceptance="stages",
+                ),
+            ),
+        ),
+        relations=(
+            MethodRelationTemplate(
+                source_method="MultiRollout",
+                target_method="Swarm",
+                relation=CompositionRelation.NEST,
+            ),
+        ),
+    )
 
 
 def encode_composition(value: MethodCompositionTemplate) -> dict:

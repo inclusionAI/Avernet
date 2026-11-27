@@ -27,7 +27,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 
 METHOD_PARAMETERS = {
-    "create_product_profile": ("self", "name", "composition", "stages"),
+    "create_product_profile": ("self", "name", "stages"),
     "create_product_collet": ("self", "profile_id", "content"),
     "query_collet_rollout": ("self", "collet_id", "all_rollout"),
     "interactive": (
@@ -74,7 +74,7 @@ async def test_all_product_operations_require_a_trusted_actor_scope(created, met
     h = created
     saved = h.repository.get_collet(h.collet.id)
     arguments = {
-        "create_product_profile": (("blocked", h.composition, h.stages), {}),
+        "create_product_profile": (("blocked", h.stages), {}),
         "create_product_collet": ((h.profile.id, "blocked"), {}),
         "query_collet_rollout": ((h.collet.id,), {}),
         "interactive": (

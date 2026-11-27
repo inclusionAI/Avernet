@@ -12,9 +12,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.product_
 from agentclaw.community.core.task.context_collab.l5_methods.collet_rollout import (
     ColletRollout,
 )
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodCompositionTemplate,
-)
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
     YAML,
@@ -42,6 +39,11 @@ class StageRolloutDetails:
 class ProductProfileServiceProtocol(Protocol):
     """No context/request_id parameters; trusted entrypoints bind the G1 actor scope.
 
+    Profile creation accepts only name/stages and installs interactive
+    MultiRollout NEST Swarm over the static YAML workflow. Confirmed execution
+    or acceptance failure waits for human feedback before the strategy Agent
+    may propose another rollout.
+
     Creates are independent invocations. Interactive writes replay the result
     for the same actor/scoped interactive_uuid and identical rollout/content;
     changed content or rollout under that UUID conflicts. Revision CAS is internal.
@@ -51,7 +53,6 @@ class ProductProfileServiceProtocol(Protocol):
     async def create_product_profile(
         self,
         name: str,
-        composition: MethodCompositionTemplate,
         stages: YAML,
     ) -> ProductProfile: ...
     @abstractmethod

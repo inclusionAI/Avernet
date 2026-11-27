@@ -42,21 +42,9 @@ def client(runtime):
 BASE = "/api/v1/collaboration/task/products"
 
 
-def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
-    h = runtime
-    response = client.post(
-        BASE + "/profiles",
-        json={
-            "name": "coding",
-            "composition": encode_composition(h.composition),
-            "stages": h.stages,
-        },
-    )
-    assert response.status_code == 200, response.text
-    profile = response.json()["data"]
-    assert profile["stages"] == h.stages and profile[
-        "composition"
-    ] == encode_composition(h.composition)
+def test_http_legacy_query_messages_and_interaction_are_wired(client, created):
+    h = created
+    profile = {"id": h.profile.id}
     response = client.post(
         BASE + "/collets",
         json={
@@ -100,7 +88,6 @@ def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
 def test_http_rejects_caller_scope_or_session_override(client, runtime, field, value):
     body = {
         "name": "coding",
-        "composition": encode_composition(runtime.composition),
         "stages": runtime.stages,
         field: value,
     }
@@ -133,7 +120,6 @@ def test_http_uses_authenticated_actor_for_every_product_operation(client, creat
             BASE + "/profiles",
             json={
                 "name": "forbidden",
-                "composition": encode_composition(h.composition),
                 "stages": h.stages,
             },
         ).status_code
@@ -190,7 +176,6 @@ def test_http_error_logging_redacts_entire_inline_configuration(runtime):
 
     body = ProfileCreate(
         name="name",
-        composition=encode_composition(runtime.composition),
         stages="contains confidential content",
     )
     params = capture_call_params(
@@ -200,9 +185,7 @@ def test_http_error_logging_redacts_entire_inline_configuration(runtime):
     assert "confidential" not in str(params)
 
 
-def test_profile_inline_request_is_bounded_before_yaml_and_composition_decode(
-    client, runtime
-):
+def test_profile_inline_request_is_bounded_before_yaml_compilation(client, runtime):
     from agentclaw.community.adapters.http.task.product_body_limits import (
         MAX_PRODUCT_BODY_BYTES,
     )
@@ -283,7 +266,9 @@ def test_http_interaction_retries_replay_and_changed_uuid_content_conflicts(
 
 
 @pytest.mark.parametrize("endpoint_names", ["directed", "legacy", "mixed"])
-def test_http_composition_uses_source_and_target(client, runtime, endpoint_names):
+def test_http_create_rejects_all_caller_composition_shapes(
+    client, runtime, endpoint_names
+):
     composition = encode_composition(runtime.composition)
     composition["required_methods"].append(
         {
@@ -308,8 +293,12 @@ def test_http_composition_uses_source_and_target(client, runtime, endpoint_names
         BASE + "/profiles",
         json={"name": "composed", "composition": composition, "stages": runtime.stages},
     )
-    if endpoint_names == "directed":
-        assert response.status_code == 200, response.text
-        assert response.json()["data"]["composition"] == composition
-    else:
-        assert response.status_code == 422, response.text
+    assert response.status_code == 422, response.text
+    assert not runtime.calls
+
+
+def test_profile_create_schema_accepts_only_name_and_static_stages():
+    assert tuple(ProfileCreate.model_fields) == ("name", "stages")
+    schema = ProfileCreate.model_json_schema()
+    assert schema["required"] == ["name", "stages"]
+    assert schema["additionalProperties"] is False

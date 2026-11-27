@@ -6,7 +6,8 @@
 MethodCompositionTemplate relations. It supports bounded parallel best-of-N and
 human/autonomous feedback iteration, with candidate-scoped execution, SQL tenant
 admission, trusted scoring, immutable stage plans and fenced strategy operations.
-It is opt-in and unavailable by default without governed host capabilities; the
+New Profile creation selects interactive MultiRollout over a static YAML Swarm
+workflow; execution remains unavailable without governed host capabilities. The
 existing four ACCS core profile versions and legacy MethodStore path are unchanged.
 
 ## Durable product rollout path

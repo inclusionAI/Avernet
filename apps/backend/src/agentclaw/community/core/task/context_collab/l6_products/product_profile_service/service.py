@@ -42,9 +42,6 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile im
     ProductProfile,
     YAML,
 )
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodCompositionTemplate,
-)
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.contracts import (
     ProductProfileServiceProtocol,
     InteractiveResult,
@@ -53,6 +50,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     validate_configuration,
+    default_composition,
     multi_policy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.ports import (
@@ -89,13 +87,13 @@ class ProductProfileService(ProductProfileServiceProtocol):
     async def create_product_profile(
         self,
         name: str,
-        composition: MethodCompositionTemplate,
         stages: YAML,
     ) -> ProductProfile:
         context = current_actor_context()
         text(name, maximum=256)
         # Keep the existing independently configured management authority.
         self._publisher.check_publish(name, 1, context)
+        composition = default_composition()
         specs, execution_policy = await asyncio.to_thread(
             validate_configuration, composition, stages, self._execution
         )

@@ -6,11 +6,12 @@ The new [ProductProfileService](l6_products/product_profile_service/README.md)
 provides the five-method product API, canonical integer-ID objects, YAML-owned
 stages and durable rollouts. That guide owns its authority, DDL, worker/report
 integration, real session routing and finite v1 compatibility boundary.
-The opt-in [MultiRollout@1.0 local extension](l5_methods/MULTI-ROLLOUT.md) adds
+The [MultiRollout@1.0 local extension](l5_methods/MULTI-ROLLOUT.md) adds
 explicit NEST Swarm composition, parallel best-of-N and feedback-driven iteration
 on this same durable authority, not the process-local MethodStore. Its isolation,
 trusted strategy/evidence, tenant admission and explicit worker/deadline capabilities
-are required; public defaults fail closed.
+are required; new Profile creation defaults to its human-feedback strategy over
+a static Swarm YAML workflow, while uninstalled public host capabilities fail closed.
 The remaining sections describe the retained **legacy v1** collaboration path;
 its Event-backed logical sessions are not v2 runtime sessions.
 

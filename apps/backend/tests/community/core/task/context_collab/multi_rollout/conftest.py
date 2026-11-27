@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import create_engine
 
+from tests.community.core.task.context_collab.product_profile_service.helpers import (
+    persist_profile,
+)
 from tests.community.core.task.context_collab.product_profile_service.conftest import (
     runtime as runtime,
 )
@@ -124,7 +127,10 @@ class Isolation:
         )
 
     def require(self, reference, execution_ref, stages, context):
-        if reference != "isolated-workspace@1" or self.unsafe:
+        if (
+            reference not in {"isolated-workspace@1", "per-candidate-workspace@1"}
+            or self.unsafe
+        ):
             raise Invalid(
                 "independent workspace does not authorize irreversible side effects"
             )
@@ -190,12 +196,19 @@ class Strategies:
     def require(self, p, stages, context):
         if isinstance(p.strategy, ParallelBestOf):
             return self.selector.require(p, stages, context)
-        if p.strategy.adaptation_ref != "stage-agent@1":
+        if p.strategy.adaptation_ref not in {
+            "stage-agent@1",
+            "stage-improvement-agent@1",
+        }:
             raise Invalid("uninstalled adaptation reference")
         if p.strategy.feedback_mode == "autonomous" and not self.autonomous_grant:
             raise Forbidden("explicit autonomous delegation missing")
         return StrategyDescriptor(
-            "stage-agent@1", "frozen acceptance", "trusted-file-evaluator@1", 0, 100
+            p.strategy.adaptation_ref,
+            "frozen acceptance",
+            "trusted-file-evaluator@1",
+            0,
+            100,
         )
 
 
@@ -239,8 +252,8 @@ def multi(runtime, tmp_path):  # noqa: F811
     h.bot.send_message.side_effect = send
 
     async def create(p=None, stages=STAGE, overall="stages", reverse=False):
-        h.profile = await h.service.create_product_profile(
-            "multi", composition(p or policy(), overall, reverse), stages
+        h.profile = persist_profile(
+            h, "multi", composition(p or policy(), overall, reverse), stages
         )
         h.collet = await h.service.create_product_collet(
             h.profile.id, "build an isolated result"
