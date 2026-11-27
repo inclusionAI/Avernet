@@ -543,20 +543,17 @@ class CronRuntimeOperationsMixin:
         operator_id: str | None = None,
         authenticated_user_id: str | None = None,
     ) -> dict:
-        """获取任务运行记录；发布态可按实例筛选。"""
-        # Without a Caller identity, preserve the existing UUID-filtered response.
-        if operator_id is not None:
+        """获取任务运行记录；草稿和发布态均可按实例筛选。"""
+        # Draft instance reads use the same binding/membership checks as run.
+        # Published UUID-only reads retain their existing response aggregation.
+        if operator_id is not None or (
+            device_uuid is not None and runtime_stage == RUNTIME_STAGE_DRAFT
+        ):
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
                 device_uuid=device_uuid, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="GET", path=f"/api/cron/{task_id}/runs",
                 params={"limit": limit},
-            )
-
-        if device_uuid and runtime_stage == RUNTIME_STAGE_DRAFT:
-            raise CronRelayError(
-                "device_uuid requires published runtime_stage",
-                error_code=400,
             )
 
         path = f"/api/cron/{task_id}/runs"

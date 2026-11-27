@@ -1,6 +1,13 @@
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { sendRoutineRequest } from './http';
-import { routineIdentityParams, isStage, type ManagedRoutine, type RoutineContext, type RoutineEnvironment, type RoutineScope } from './types';
+import {
+  isStage,
+  routineIdentityParams,
+  type ManagedRoutine,
+  type RoutineContext,
+  type RoutineEnvironment,
+  type RoutineScope,
+} from './types';
 const string = (value: unknown) => (typeof value === 'string' ? value : '');
 /** Reuse published Bot/editor/Caller APIs; the previous local /api/cron/targets is not a contract. */
 export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineContext> {
@@ -42,7 +49,8 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
   if (service && caller === false && engine !== 'teclaw') {
     try {
       const containers = await sendRoutineRequest<{ instances: Array<{ id: string }> }>(`${path}/containers`, {
-        params,
+        // 未上线是正常的空清单；保留其他调用方原有的冲突语义。
+        params: { ...params, allow_unpublished: true },
       });
       environments[2].instances = containers.instances.flatMap((item) => (item.id ? [item.id] : []));
     } catch {

@@ -103,7 +103,8 @@ class ServicePublicationFacadeProtocol(Protocol):
     def get_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any: ...
 
     def list_containers(
-        self, bot_id: str, *, actor_id: str, owner_id: str
+        self, bot_id: str, *, actor_id: str, owner_id: str,
+        allow_unpublished: bool = False,
     ) -> dict[str, Any]: ...
 
     def restart_container(

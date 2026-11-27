@@ -1,5 +1,5 @@
-import { loadRoutineContext } from '@/services/botScheduledTasks/metadata';
 import { sendRoutineRequest } from '@/services/botScheduledTasks/http';
+import { loadRoutineContext } from '@/services/botScheduledTasks/metadata';
 import type { RoutineStage } from '@/services/botScheduledTasks/types';
 
 jest.mock('@/services/botScheduledTasks/http', () => ({ sendRoutineRequest: jest.fn() }));
@@ -31,8 +31,7 @@ const callerContextParams = () =>
     .filter(([url]) => typeof url === 'string' && url.endsWith('/caller-context'))
     .map(([, options]) => (options as { params?: Record<string, unknown> }).params)
     .pop();
-const load = (stage?: RoutineStage) =>
-  loadRoutineContext({ botId: 'b1', userId: 'u1', entityId: 'u1', stage });
+const load = (stage?: RoutineStage) => loadRoutineContext({ botId: 'b1', userId: 'u1', entityId: 'u1', stage });
 
 beforeEach(() => {
   sendMock.mockReset();
@@ -67,4 +66,32 @@ it('Caller 配置请求不传 stage 参数，由后端按 Bot 当前发布状态
   mockTransport(botDetail({}));
   await load('online');
   expect(callerContextParams()).not.toHaveProperty('stage');
+});
+
+it('仅草稿态时允许空线上清单，仍保留草稿管理能力', async () => {
+  mockTransport(botDetail({}));
+  sendMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/caller-context')) return { bot_call_type: 'owner' };
+    if (url.endsWith('/containers')) return { instances: [] };
+    return botDetail({});
+  });
+  const context = await load('draft');
+  expect(sendMock).toHaveBeenCalledWith(expect.stringMatching(/\/containers$/), {
+    params: expect.objectContaining({ allow_unpublished: true }),
+  });
+  expect(context.environments[2].instances).toEqual([]);
+  expect(context.warning).toBeUndefined();
+  expect(context.can_manage).toBe(true);
+  expect(context.supported).toBe(true);
+});
+
+it('线上清单的真实读取故障仍显示提示，不中断草稿上下文', async () => {
+  sendMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/caller-context')) return { bot_call_type: 'owner' };
+    if (url.endsWith('/containers')) throw new Error('provider unavailable');
+    return botDetail({});
+  });
+  const context = await load('draft');
+  expect(context.warning).toContain('生产运行实例暂不可读取');
+  expect(context.can_manage).toBe(true);
 });
