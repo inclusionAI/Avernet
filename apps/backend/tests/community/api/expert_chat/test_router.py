@@ -326,6 +326,26 @@ class TestAddChatBot:
         assert data["success"] is False
         assert data["error_code"] == 400
 
+    def test_add_chat_bot_stage_not_live(self, client_with_mock):
+        """A service Bot without a live online runtime is a publication
+        state, not a server error: answer 4001 like get/connect sessions,
+        never the generic retry-later 5999."""
+        client, mock_service = client_with_mock
+        mock_service.add_chat_bot.side_effect = EngineStageNotLiveError(
+            "no live online runtime for bot=test_bot env=prod"
+        )
+
+        response = client.post(
+            "/api/v1/expert-chats",
+            json={"bot_id": "test_bot", "owner_id": "test_owner"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["error_code"] == 4001
+        assert data["message"] == "Bot未发布或发布版本不可用"
+
 
 class TestListChatBots:
     """Tests for GET /api/v1/expert-chats endpoint."""
