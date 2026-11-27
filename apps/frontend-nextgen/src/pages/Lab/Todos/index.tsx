@@ -7,7 +7,7 @@ import { loadBotTeams, loadTodoBots, loadTodoOwners } from '@/services/todos/tod
 import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { eligibleTodoBots } from './botScope';
+import { creatorOwnedTodoBots, eligibleTodoBots } from './botScope';
 import { BotTeamPage } from './components/BotTeamPage';
 import { TodoAutomationPage } from './components/TodoAutomationPage';
 import { TodoBoard } from './components/TodoBoard';
@@ -125,6 +125,10 @@ export default function LabTodosPage() {
     ],
     [botTeams, bots],
   );
+  const schedulerBots = useMemo(
+    () => creatorOwnedTodoBots(bots, currentUserId),
+    [bots, currentUserId],
+  );
 
   useEffect(() => {
     if (!executorFilter) return;
@@ -161,7 +165,12 @@ export default function LabTodosPage() {
     return (
       <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-6 py-6">
-          <TodoAutomationPage spaceId={currentSpaceId} bots={bots} onBack={() => setView('list')} />
+          <TodoAutomationPage
+            spaceId={currentSpaceId}
+            bots={bots}
+            schedulerBots={schedulerBots}
+            onBack={() => setView('list')}
+          />
         </div>
       </main>
     );

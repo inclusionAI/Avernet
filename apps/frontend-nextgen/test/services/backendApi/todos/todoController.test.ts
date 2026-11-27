@@ -1,5 +1,6 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
 import {
+  createBotTeam,
   createTodoAutoImportRule,
   createTodo,
   createTodoInteraction,
@@ -124,6 +125,7 @@ describe('todoController', () => {
         space_id: 10,
         title: '标题',
         description: '描述',
+        bot_id: 'bot-1',
         executor: { type: 'bot', id: 'bot-1' },
         owner: { user_id: 'human-1', user_name: '测试用户' },
       },
@@ -158,6 +160,7 @@ describe('todoController', () => {
         space_id: 10,
         title: '标题',
         description: '描述',
+        bot_id: 'bot-1',
         executor: { type: 'bot', id: 'bot-1' },
         owner: { user_id: 'human-1', user_name: '测试用户' },
         source: {
@@ -189,6 +192,7 @@ describe('todoController', () => {
             type: 'dima',
             containerId: 'P1',
             itemId: '2026112400120935582',
+            metadata: {},
           },
         },
       ],
@@ -211,7 +215,7 @@ describe('todoController', () => {
               item_id: '2026112400120935582',
               url: undefined,
               updated_at: undefined,
-              metadata: undefined,
+              metadata: {},
             },
           },
         ],
@@ -267,6 +271,9 @@ describe('todoController', () => {
       sourceContainerIds: ['W1', 'P1'],
       filterText: '只导入需要研发处理且尚未完成的事项',
       botId: 'bot-owned:u-1',
+      schedulerBotId: 'scheduler-bot-owned:u-1',
+      triggerIntervalSeconds: 1800,
+      cronExpression: '*/30 * * * *',
     });
     expect(request).toHaveBeenLastCalledWith(
       '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
@@ -278,6 +285,9 @@ describe('todoController', () => {
           source_container_ids: ['W1', 'P1'],
           filter_text: '只导入需要研发处理且尚未完成的事项',
           bot_id: 'bot-owned:u-1',
+          scheduler_bot_id: 'scheduler-bot-owned:u-1',
+          trigger_interval_seconds: 1800,
+          cron_expression: '*/30 * * * *',
         },
         operation: 'create-todo-auto-import-rule',
       },
@@ -304,6 +314,43 @@ describe('todoController', () => {
         operation: 'update-todo-auto-import-rule',
       },
     );
+  });
+
+  it('创建 Bot 小队时保留节点的多个 Bot 和文本门禁', async () => {
+    await createBotTeam({
+      spaceId: 10,
+      name: 'Coding 小队',
+      description: '完成代码交付',
+      nodes: [
+        {
+          code: 'develop',
+          name: '代码开发',
+          botIds: ['bot-developer', 'bot-reviewer'],
+          approvalRequired: true,
+          completionGate: '代码已提交并通过验证',
+        },
+      ],
+    });
+
+    expect(request).toHaveBeenLastCalledWith('/api/v1/collaboration/tasks/bot-teams', {
+      method: 'POST',
+      params: userParams,
+      data: {
+        space_id: 10,
+        name: 'Coding 小队',
+        description: '完成代码交付',
+        nodes: [
+          {
+            code: 'develop',
+            name: '代码开发',
+            bot_ids: ['bot-developer', 'bot-reviewer'],
+            approval_required: true,
+            completion_gate: '代码已提交并通过验证',
+          },
+        ],
+      },
+      operation: 'create-todo-bot-team',
+    });
   });
 
   it('提交验收时下发当前用户', async () => {

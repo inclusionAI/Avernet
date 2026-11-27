@@ -52,16 +52,16 @@ def _bot_team_definition(name: str = "Coding delivery") -> BotTeamDefinition:
             BotTeamNode(
                 code="requirement_analysis",
                 name="需求分析",
-                bot_id="bot_requirement",
+                bot_ids=("bot_requirement",),
                 approval_required=False,
-                completion_gate=TodoCompletionGate(),
+                completion_gate="需求理解和验收项完整",
             ),
             BotTeamNode(
                 code="simulator_verification",
                 name="Simulator 验证",
-                bot_id="bot_simulator",
+                bot_ids=("bot_simulator", "bot_reviewer"),
                 approval_required=True,
-                completion_gate=TodoCompletionGate(),
+                completion_gate="Simulator 验证通过并给出结论",
             ),
         ),
     )
@@ -374,7 +374,7 @@ async def test_create_bot_team_expands_nodes_and_publishes_first_revision() -> N
     assert access.calls == [
         {"space_id": 7, "user_id": "admin_1", "env": "pre"}
     ]
-    assert bots.calls == ["bot_requirement", "bot_simulator"]
+    assert bots.calls == ["bot_requirement", "bot_simulator", "bot_reviewer"]
 
     created_definition = templates.calls[0]["definition"]
     assert [stage.key for stage in created_definition.stages] == [
@@ -387,6 +387,14 @@ async def test_create_bot_team_expands_nodes_and_publishes_first_revision() -> N
         source=TodoParticipantRefSource.FIXED,
         subject_type=TodoParticipantSubjectType.BOT,
         subject_id="bot_requirement",
+    )
+    assert [
+        candidate.subject_id
+        for candidate in created_definition.stages[1].executor_candidates
+    ] == ["bot_simulator", "bot_reviewer"]
+    assert (
+        created_definition.stages[1].completion_condition
+        == "Simulator 验证通过并给出结论"
     )
     assert [call["operation"] for call in templates.calls] == [
         "create_template",

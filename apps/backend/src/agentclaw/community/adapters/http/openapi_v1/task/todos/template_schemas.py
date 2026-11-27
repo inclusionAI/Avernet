@@ -213,6 +213,15 @@ class TodoStageDefinitionSchema(_StrictSchema):
         default_factory=TodoCompletionGateSchema,
         description="Optional deterministic hard artifact gates.",
     )
+    executor_candidates: list[TodoParticipantReferenceSchema] = Field(
+        default_factory=list,
+        description="Optional ordered executor candidates; executor_ref remains the legacy primary.",
+    )
+    completion_condition: str = Field(
+        default="",
+        max_length=4000,
+        description="Optional human-readable completion condition interpreted by the product protocol.",
+    )
 
     def to_domain(self) -> TodoStageDefinition:
         return TodoStageDefinition(
@@ -225,6 +234,10 @@ class TodoStageDefinitionSchema(_StrictSchema):
             if self.owner_ref is not None
             else None,
             completion_gate=self.completion_gate.to_domain(),
+            executor_candidates=tuple(
+                candidate.to_domain() for candidate in self.executor_candidates
+            ),
+            completion_condition=self.completion_condition,
         )
 
     @classmethod
@@ -241,6 +254,11 @@ class TodoStageDefinitionSchema(_StrictSchema):
                 else None
             ),
             completion_gate=TodoCompletionGateSchema.from_domain(value.completion_gate),
+            executor_candidates=[
+                TodoParticipantReferenceSchema.from_domain(candidate)
+                for candidate in value.executor_candidates
+            ],
+            completion_condition=value.completion_condition,
         )
 
 

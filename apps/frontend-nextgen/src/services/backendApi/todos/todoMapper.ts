@@ -104,23 +104,33 @@ function positiveInteger(value: unknown, field: string): number {
 }
 
 export function mapBotTeamNodeDto(dto: BotTeamNodeDto): BotTeamNode {
-  const requiredArtifacts = Array.isArray(dto.completion_gate?.required_artifacts)
-    ? dto.completion_gate.required_artifacts
-    : [];
+  const rawBotIds = Array.isArray(dto.bot_ids) ? dto.bot_ids : dto.bot_id ? [dto.bot_id] : [];
+  const botIds = rawBotIds.map((item) => requiredString(item, 'node.bot_ids'));
+  if (botIds.length === 0) throw new Error('Bot 小队字段缺失: node.bot_ids');
+
+  let completionGate = typeof dto.completion_gate === 'string' ? dto.completion_gate : '';
+  if (!completionGate && dto.completion_gate && typeof dto.completion_gate === 'object') {
+    const artifacts = Array.isArray(dto.completion_gate.required_artifacts)
+      ? dto.completion_gate.required_artifacts
+      : [];
+    completionGate = artifacts
+      .map((item) => {
+        const artifactType = requiredString(item.artifact_type ?? item.type, 'completion_gate.artifact_type');
+        const artifactState = requiredString(item.artifact_state ?? item.state, 'completion_gate.artifact_state');
+        const minCount = positiveInteger(item.min_count, 'completion_gate.min_count');
+        return `artifact ${artifactType} must reach state ${artifactState} with min_count ${minCount}`;
+      })
+      .join('; ');
+  }
   return {
     code: requiredString(dto.code, 'node.code'),
     name: requiredString(dto.name, 'node.name'),
-    botId: requiredString(dto.bot_id, 'node.bot_id'),
+    botIds,
     approvalRequired: Boolean(dto.approval_required),
-    completionGate: {
-      requiredArtifacts: requiredArtifacts.map((item) => ({
-        artifactType: requiredString(item.artifact_type, 'completion_gate.artifact_type'),
-        artifactState: requiredString(item.artifact_state, 'completion_gate.artifact_state'),
-        minCount: positiveInteger(item.min_count, 'completion_gate.min_count'),
-      })),
-    },
+    completionGate,
   };
 }
+
 
 export function mapBotTeamRecordDto(dto: BotTeamRecordDto): BotTeamRecord {
   const status = stringValue(dto.status);

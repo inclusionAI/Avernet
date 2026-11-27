@@ -292,6 +292,9 @@ def _auto_import_rule(
         source_container_ids=("W1", "P1"),
         filter_text="只导入需要研发处理且尚未完成的事项",
         bot_id="bot_1",
+        scheduler_bot_id="scheduler_bot_1",
+        trigger_interval_seconds=300,
+        cron_expression="0 */2 * * *",
         status=status,
         cursor_updated_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
         created_by="human_1",
@@ -591,14 +594,14 @@ async def test_create_todo_maps_legacy_bot_id_with_owner_to_product_service():
 @pytest.mark.parametrize(
     ("request_fields", "message"),
     [
-        ({}, "exactly one"),
+        ({}, "must be provided"),
         (
             {
                 "bot_id": "bot_1",
-                "executor": {"type": "bot", "id": "bot_1"},
+                "executor": {"type": "bot", "id": "bot_other"},
                 "owner": {"user_id": "owner_1", "user_name": "Owner One"},
             },
-            "exactly one",
+            "must match",
         ),
         (
             {"executor": {"type": "bot_team", "id": "team_1", "revision_id": "rev_1"}},
@@ -700,6 +703,7 @@ async def test_auto_import_rule_routes_forward_authenticated_human_fields():
             source_container_ids=["W1", "P1"],
             filter_text="只导入需要研发处理且尚未完成的事项",
             bot_id="bot_1",
+            scheduler_bot_id="scheduler_bot_1",
         ),
         request=_request(
             "POST",
@@ -745,6 +749,9 @@ async def test_auto_import_rule_routes_forward_authenticated_human_fields():
             "source_container_ids": ("W1", "P1"),
             "filter_text": "只导入需要研发处理且尚未完成的事项",
             "bot_id": "bot_1",
+            "scheduler_bot_id": "scheduler_bot_1",
+            "trigger_interval_seconds": 1800,
+            "cron_expression": "*/30 * * * *",
         },
         {
             "operation": "list_rules",
@@ -857,6 +864,9 @@ async def test_auto_import_detail_update_progress_and_checkpoint_routes():
             "source_container_ids": ("P2",),
             "filter_text": "只导入缺陷",
             "bot_id": "bot_2",
+            "scheduler_bot_id": None,
+            "trigger_interval_seconds": None,
+            "cron_expression": None,
             "status": "disabled",
         },
         {

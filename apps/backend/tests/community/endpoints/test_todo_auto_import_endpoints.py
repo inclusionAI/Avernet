@@ -53,6 +53,9 @@ def _rule(
         source_container_ids=("dima-space-1", "dima-project-1"),
         filter_text="只导入需要我处理的高优任务",
         bot_id=BOT_ID,
+        scheduler_bot_id=BOT_ID,
+        trigger_interval_seconds=1800,
+        cron_expression="*/30 * * * *",
         status=status,
         cursor_updated_at=None,
         created_by=USER_ID,
@@ -111,6 +114,9 @@ class _FixedTodoAutoImports:
             source_container_ids=kwargs["source_container_ids"],
             filter_text=kwargs["filter_text"],
             bot_id=kwargs["bot_id"],
+            scheduler_bot_id=kwargs["scheduler_bot_id"],
+            trigger_interval_seconds=kwargs["trigger_interval_seconds"],
+            cron_expression=kwargs["cron_expression"],
         )
 
     def list_rules(self, **kwargs: Any) -> tuple[TodoAutoImportRuleRecord, ...]:
@@ -141,6 +147,12 @@ class _FixedTodoAutoImports:
             or rule.source_container_ids,
             filter_text=kwargs.get("filter_text") or rule.filter_text,
             bot_id=kwargs.get("bot_id") or rule.bot_id,
+            scheduler_bot_id=kwargs.get("scheduler_bot_id") or rule.scheduler_bot_id,
+            trigger_interval_seconds=(
+                kwargs.get("trigger_interval_seconds")
+                or rule.trigger_interval_seconds
+            ),
+            cron_expression=kwargs.get("cron_expression") or rule.cron_expression,
             status=TodoAutoImportRuleStatus(status) if status else rule.status,
         )
 
@@ -182,6 +194,7 @@ def _bind_auto_import_world(world) -> None:
             "source_container_ids": ["dima-space-1", "dima-project-1"],
             "filter_text": "只导入需要我处理的高优任务",
             "bot_id": BOT_ID,
+            "scheduler_bot_id": BOT_ID,
         },
     ),
     seed=_bind_auto_import_world,
@@ -193,6 +206,9 @@ def _bind_auto_import_world(world) -> None:
                 "rule_id": _RULE_ID,
                 "status": "enabled",
                 "source_container_ids": ["dima-space-1", "dima-project-1"],
+                "scheduler_bot_id": BOT_ID,
+                "trigger_interval_seconds": 1800,
+                "cron_expression": "*/30 * * * *",
             },
         },
     ),
@@ -213,6 +229,7 @@ def create_dima_auto_import_rule_ok():
             "source_container_ids": [],
             "filter_text": "只导入高优任务",
             "bot_id": BOT_ID,
+            "scheduler_bot_id": BOT_ID,
         },
     ),
     seed=_bind_auto_import_world,
@@ -306,13 +323,22 @@ def get_dima_auto_import_rule_not_found():
         path_params={"rule_id": _RULE_ID},
         query_params=_QUERY,
         headers=principal_headers(),
-        json_body={"status": "disabled"},
+        json_body={
+            "trigger_interval_seconds": 3600,
+            "cron_expression": "0 9 * * 1-5",
+            "status": "disabled",
+        },
     ),
     seed=_bind_auto_import_world,
     expect=ExpectSuccess(
         json_contains={
             "code": 200000,
-            "data": {"rule_id": _RULE_ID, "status": "disabled"},
+            "data": {
+                "rule_id": _RULE_ID,
+                "trigger_interval_seconds": 3600,
+                "cron_expression": "0 9 * * 1-5",
+                "status": "disabled",
+            },
         }
     ),
 )

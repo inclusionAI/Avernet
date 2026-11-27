@@ -165,7 +165,7 @@ export function BotTeamPage({ spaceId, bots, onBack, onChanged }: BotTeamPagePro
         onEdit={() => setEditor((current) => (current ? { ...current, mode: 'edit' } : current))}
         onSave={async () => {
           if (!spaceId || !editor.name.trim() || editor.nodes.length === 0) return;
-          if (editor.nodes.some((node) => !node.name.trim() || !node.code.trim() || !node.botId)) return;
+          if (editor.nodes.some((node) => !node.name.trim() || !node.code.trim() || node.botIds.length === 0)) return;
           const input: SaveBotTeamInput = {
             name: editor.name.trim(),
             description: editor.description.trim(),

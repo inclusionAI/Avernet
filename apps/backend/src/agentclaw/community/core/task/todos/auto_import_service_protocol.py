@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.task.todos.auto_import_models import (
+    DEFAULT_TODO_AUTO_IMPORT_CRON_EXPRESSION,
+    DEFAULT_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
     TodoAutoImportCheckpoint,
     TodoAutoImportProgressRecord,
     TodoAutoImportRuleRecord,
@@ -27,6 +29,9 @@ class TodoAutoImportServiceProtocol(Protocol):
         source_container_ids: tuple[str, ...],
         filter_text: str,
         bot_id: str,
+        scheduler_bot_id: str,
+        trigger_interval_seconds: int = DEFAULT_TODO_AUTO_IMPORT_TRIGGER_INTERVAL_SECONDS,
+        cron_expression: str = DEFAULT_TODO_AUTO_IMPORT_CRON_EXPRESSION,
     ) -> TodoAutoImportRuleRecord: ...
 
     @abstractmethod
@@ -57,6 +62,9 @@ class TodoAutoImportServiceProtocol(Protocol):
         source_container_ids: tuple[str, ...] | None = None,
         filter_text: str | None = None,
         bot_id: str | None = None,
+        scheduler_bot_id: str | None = None,
+        trigger_interval_seconds: int | None = None,
+        cron_expression: str | None = None,
         status: TodoAutoImportRuleStatus | str | None = None,
     ) -> TodoAutoImportRuleRecord: ...
 

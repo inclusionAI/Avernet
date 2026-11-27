@@ -15,6 +15,7 @@ import { useTodoAutoImportRules } from './useTodoAutoImportRules';
 interface TodoAutomationPageProps {
   spaceId?: number;
   bots: TodoBotOption[];
+  schedulerBots: TodoBotOption[];
   onBack: () => void;
 }
 
@@ -31,7 +32,7 @@ function projectNames(rule: TodoAutoImportRule, projects: TodoSourceProject[]): 
   return resolvedNames.length ? resolvedNames.join('、') : rule.sourceContainerIds.join('、');
 }
 
-export function TodoAutomationPage({ spaceId, bots, onBack }: TodoAutomationPageProps) {
+export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: TodoAutomationPageProps) {
   const rules = useTodoAutoImportRules({ active: true, spaceId });
   const [projects, setProjects] = useState<TodoSourceProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -73,11 +74,23 @@ export function TodoAutomationPage({ spaceId, bots, onBack }: TodoAutomationPage
       },
       {
         id: 'bot',
-        header: '执行 Bot',
+        header: '待办执行 Bot',
         width: '16%',
         cell: (rule) => (
           <span className="block truncate text-xs text-muted-foreground">
             {bots.find((bot) => bot.botId === rule.botId)?.botName || rule.botId}
+          </span>
+        ),
+      },
+      {
+        id: 'schedulerBot',
+        header: '定时任务执行者',
+        width: '16%',
+        cell: (rule) => (
+          <span className="block truncate text-xs text-muted-foreground">
+            {schedulerBots.find((bot) => bot.botId === rule.schedulerBotId)?.botName ||
+              rule.schedulerBotId ||
+              '未配置'}
           </span>
         ),
       },
@@ -119,7 +132,7 @@ export function TodoAutomationPage({ spaceId, bots, onBack }: TodoAutomationPage
         ),
       },
     ],
-    [bots, projects, rules.setRuleEnabled, rules.updatingRuleId],
+    [bots, projects, rules.setRuleEnabled, rules.updatingRuleId, schedulerBots],
   );
 
   return (
@@ -134,7 +147,7 @@ export function TodoAutomationPage({ spaceId, bots, onBack }: TodoAutomationPage
       <div className="flex items-center justify-end">
         <Button
           leftIcon={<Plus className="size-3.5" aria-hidden />}
-          disabled={!spaceId || bots.length === 0}
+          disabled={!spaceId || bots.length === 0 || schedulerBots.length === 0}
           onClick={() => setEditing('create')}
         >
           创建自动化
@@ -172,6 +185,7 @@ export function TodoAutomationPage({ spaceId, bots, onBack }: TodoAutomationPage
         projects={projects}
         projectsLoading={projectsLoading}
         bots={bots}
+        schedulerBots={schedulerBots}
         saving={rules.saving || Boolean(editing !== 'create' && rules.updatingRuleId)}
         onOpenChange={(open) => {
           if (!open) setEditing(null);

@@ -19,7 +19,7 @@ interface BotTeamWorkflowProps {
 function BotTeamWorkflowNode({
   node,
   index,
-  bot,
+  botNames,
   selected,
   editable,
   hasNext,
@@ -29,7 +29,7 @@ function BotTeamWorkflowNode({
 }: {
   node: BotTeamNode;
   index: number;
-  bot?: TodoBotOption;
+  botNames: string[];
   selected: boolean;
   editable: boolean;
   hasNext: boolean;
@@ -63,15 +63,20 @@ function BotTeamWorkflowNode({
                 {node.name || `节点 ${index + 1}`}
               </span>
             </span>
-            <span className="block truncate text-xs text-muted-foreground">{bot?.botName || node.botId || '未选择 Bot'}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {botNames.length > 0 ? botNames.join('、') : node.botIds.join('、') || '未选择 Bot'}
+            </span>
             <span className="mt-3 flex flex-wrap gap-1.5">
               {node.approvalRequired ? (
                 <Badge className="border-0 bg-warning/10 px-1.5 py-0.5 text-[10px] text-warning">需审批</Badge>
               ) : null}
-              {node.completionGate.requiredArtifacts.length ? (
-                <Badge className="border-0 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                  {node.completionGate.requiredArtifacts.length} 项门禁
+              {node.botIds.length > 1 ? (
+                <Badge className="border-0 bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {node.botIds.length} 个 Bot
                 </Badge>
+              ) : null}
+              {node.completionGate.trim() ? (
+                <Badge className="border-0 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">已配置门禁</Badge>
               ) : null}
             </span>
           </span>
@@ -136,7 +141,7 @@ export function BotTeamWorkflow({
               key={`${node.code}-${index}`}
               node={node}
               index={index}
-              bot={bots.find((item) => item.botId === node.botId)}
+              botNames={node.botIds.map((botId) => bots.find((item) => item.botId === botId)?.botName ?? botId)}
               selected={index === selectedNodeIndex}
               editable={editable}
               hasNext={index < editor.nodes.length - 1}

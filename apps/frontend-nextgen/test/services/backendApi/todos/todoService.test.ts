@@ -238,6 +238,9 @@ describe('todoService Dima auto import rule normalization', () => {
     source_container_ids: ['W1', 'P1'],
     filter_text: '只导入需要研发处理且尚未完成的事项',
     bot_id: 'bot-owned:u-1',
+    scheduler_bot_id: 'scheduler-bot-owned:u-1',
+    trigger_interval_seconds: 1800,
+    cron_expression: '*/30 * * * *',
     status: 'enabled',
     cursor_updated_at: '2026-11-25T08:00:00+00:00',
     created_at: '2026-11-25T07:00:00+00:00',
@@ -250,6 +253,9 @@ describe('todoService Dima auto import rule normalization', () => {
     sourceContainerIds: ['W1', 'P1'],
     filterText: '只导入需要研发处理且尚未完成的事项',
     botId: 'bot-owned:u-1',
+    schedulerBotId: 'scheduler-bot-owned:u-1',
+    triggerIntervalSeconds: 1800,
+    cronExpression: '*/30 * * * *',
     status: 'enabled' as const,
     cursorUpdatedAt: '2026-11-25T08:00:00+00:00',
     createdAt: '2026-11-25T07:00:00+00:00',
@@ -266,9 +272,23 @@ describe('todoService Dima auto import rule normalization', () => {
         sourceContainerIds: ['W1', 'P1'],
         filterText: '只导入需要研发处理且尚未完成的事项',
         botId: 'bot-owned:u-1',
+        schedulerBotId: 'scheduler-bot-owned:u-1',
+        triggerIntervalSeconds: 1800,
+        cronExpression: '*/30 * * * *',
       }),
     ).resolves.toEqual(rule);
     await expect(loadTodoAutoImportRules(10)).resolves.toEqual([rule]);
+  });
+
+  it('兼容没有定时任务执行者的历史规则', async () => {
+    listAutoImportRules.mockResolvedValue({
+      code: 200000,
+      data: [{ ...ruleDto, scheduler_bot_id: null }],
+    });
+
+    await expect(loadTodoAutoImportRules(10)).resolves.toEqual([
+      { ...rule, schedulerBotId: undefined },
+    ]);
   });
 
   it('映射规则更新结果', async () => {

@@ -99,6 +99,9 @@ class TodoAutoImportRepository(TodoAutoImportRepositoryProtocol):
         source_container_ids: tuple[str, ...],
         filter_text: str,
         bot_id: str,
+        scheduler_bot_id: str,
+        trigger_interval_seconds: int,
+        cron_expression: str,
         created_by: str,
     ) -> TodoAutoImportRuleRecord:
         with self._transaction() as db:
@@ -113,6 +116,9 @@ class TodoAutoImportRepository(TodoAutoImportRepositoryProtocol):
                 ),
                 filter_text=filter_text,
                 bot_id=bot_id,
+                scheduler_bot_id=scheduler_bot_id,
+                trigger_interval_seconds=trigger_interval_seconds,
+                cron_expression=cron_expression,
                 status=TodoAutoImportRuleStatus.ENABLED.value,
                 cursor_updated_at=None,
                 created_by=created_by,
@@ -186,6 +192,9 @@ class TodoAutoImportRepository(TodoAutoImportRepositoryProtocol):
         source_container_ids: tuple[str, ...] | None = None,
         filter_text: str | None = None,
         bot_id: str | None = None,
+        scheduler_bot_id: str | None = None,
+        trigger_interval_seconds: int | None = None,
+        cron_expression: str | None = None,
         status: TodoAutoImportRuleStatus | None = None,
     ) -> TodoAutoImportRuleRecord:
         with self._transaction() as db:
@@ -202,6 +211,12 @@ class TodoAutoImportRepository(TodoAutoImportRepositoryProtocol):
                 row.filter_text = filter_text
             if bot_id is not None:
                 row.bot_id = bot_id
+            if scheduler_bot_id is not None:
+                row.scheduler_bot_id = scheduler_bot_id
+            if trigger_interval_seconds is not None:
+                row.trigger_interval_seconds = trigger_interval_seconds
+            if cron_expression is not None:
+                row.cron_expression = cron_expression
             if status is not None:
                 row.status = status.value
             db.flush()

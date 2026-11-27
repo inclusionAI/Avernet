@@ -21,5 +21,11 @@ export function eligibleTodoBots(
 ): TodoBotOption[] {
   return bots
     .filter((bot) => botBelongsToCurrentSpace(bot, space, currentUserId))
-    .map((bot) => ({ botId: bot.id, botName: bot.name || bot.id }));
+    .map((bot) => ({ botId: bot.id, botName: bot.name || bot.id, ownerId: bot.ownerId }));
+}
+
+export function creatorOwnedTodoBots(bots: TodoBotOption[], currentUserId: string | undefined): TodoBotOption[] {
+  const ownerId = currentUserId?.trim();
+  if (!ownerId) return [];
+  return bots.filter((bot) => bot.ownerId?.trim() === ownerId);
 }

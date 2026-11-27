@@ -25,6 +25,9 @@ class TodoAutoImportRepositoryProtocol(Protocol):
         source_container_ids: tuple[str, ...],
         filter_text: str,
         bot_id: str,
+        scheduler_bot_id: str,
+        trigger_interval_seconds: int,
+        cron_expression: str,
         created_by: str,
     ) -> TodoAutoImportRuleRecord: ...
 
@@ -61,6 +64,9 @@ class TodoAutoImportRepositoryProtocol(Protocol):
         source_container_ids: tuple[str, ...] | None = None,
         filter_text: str | None = None,
         bot_id: str | None = None,
+        scheduler_bot_id: str | None = None,
+        trigger_interval_seconds: int | None = None,
+        cron_expression: str | None = None,
         status: TodoAutoImportRuleStatus | None = None,
     ) -> TodoAutoImportRuleRecord: ...
 

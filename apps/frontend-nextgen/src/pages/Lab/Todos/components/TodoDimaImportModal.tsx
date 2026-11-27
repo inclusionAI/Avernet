@@ -208,11 +208,14 @@ export function TodoDimaImportModal({
       const duplicateCount = imported.filter((item) => item.status === 'duplicate').length;
       const failedCount = imported.filter((item) => item.status === 'failed').length;
       if (importedCount > 0) {
-        notifySuccess(`已导入 ${importedCount} 个 Dima 工作项`);
+        notifySuccess(`已导入 ${importedCount} 个 Dima 工作项，待办列表已刷新`);
         await onImported();
       }
       if (duplicateCount > 0 || failedCount > 0) {
         notifyWarning(`重复 ${duplicateCount} 个，失败 ${failedCount} 个`);
+      }
+      if (importedCount + duplicateCount > 0) {
+        onOpenChange(false);
       }
     } catch (cause) {
       setError('Dima 工作项导入失败，请重试。');

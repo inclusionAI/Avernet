@@ -457,6 +457,9 @@ async def create_dima_auto_import_rule(
         source_container_ids=tuple(body.source_container_ids),
         filter_text=body.filter_text,
         bot_id=body.bot_id,
+        scheduler_bot_id=body.scheduler_bot_id,
+        trigger_interval_seconds=body.trigger_interval_seconds,
+        cron_expression=body.cron_expression,
     )
     response.status_code = 201
     return created(TodoAutoImportRuleResponse.from_record(rule), request)
@@ -528,6 +531,9 @@ async def update_dima_auto_import_rule(
         ),
         filter_text=body.filter_text,
         bot_id=body.bot_id,
+        scheduler_bot_id=body.scheduler_bot_id,
+        trigger_interval_seconds=body.trigger_interval_seconds,
+        cron_expression=body.cron_expression,
         status=body.status,
     )
     return envelope(TodoAutoImportRuleResponse.from_record(rule), request)

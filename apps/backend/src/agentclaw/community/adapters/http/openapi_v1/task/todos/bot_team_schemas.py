@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentclaw.community.core.task.todos.bot_team_models import (
     BotTeamDefinition,
@@ -15,7 +15,6 @@ from agentclaw.community.core.task.todos.bot_team_models import (
     BotTeamStatus,
 )
 
-from .template_schemas import TodoCompletionGateSchema
 
 
 class _StrictSchema(BaseModel):
@@ -37,27 +36,55 @@ class BotTeamNodeSchema(_StrictSchema):
         max_length=200,
         description="Human-readable node name.",
     )
-    bot_id: str = Field(
+    bot_ids: list[str] = Field(
         min_length=1,
-        max_length=256,
-        description="Bot that executes this node.",
+        max_length=20,
+        description="Ordered Bots eligible to execute this node.",
     )
     approval_required: bool = Field(
         default=False,
         description="Whether the Todo owner must approve immediately after this node.",
     )
-    completion_gate: TodoCompletionGateSchema = Field(
-        default_factory=TodoCompletionGateSchema,
-        description="Deterministic artifact gates required before node completion.",
+    completion_gate: str = Field(
+        default="",
+        max_length=4000,
+        description="Free-text condition describing when this node is complete.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_node_shape(cls, value):
+        """Keep old single-Bot/structured-gate callers readable during rollout."""
+
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        legacy_bot_id = normalized.pop("bot_id", None)
+        if "bot_ids" not in normalized and legacy_bot_id is not None:
+            normalized["bot_ids"] = [legacy_bot_id]
+        gate = normalized.get("completion_gate")
+        if isinstance(gate, dict):
+            conditions: list[str] = []
+            for artifact in gate.get("required_artifacts", []):
+                if not isinstance(artifact, dict):
+                    continue
+                artifact_type = artifact.get("artifact_type", artifact.get("type", "artifact"))
+                artifact_state = artifact.get("artifact_state", artifact.get("state", "created"))
+                min_count = artifact.get("min_count", 1)
+                conditions.append(
+                    f"artifact {artifact_type} must reach state {artifact_state} "
+                    f"with min_count {min_count}"
+                )
+            normalized["completion_gate"] = "; ".join(conditions)
+        return normalized
 
     def to_domain(self) -> BotTeamNode:
         return BotTeamNode(
             code=self.code,
             name=self.name,
-            bot_id=self.bot_id,
+            bot_ids=tuple(self.bot_ids),
             approval_required=self.approval_required,
-            completion_gate=self.completion_gate.to_domain(),
+            completion_gate=self.completion_gate,
         )
 
     @classmethod
@@ -65,11 +92,9 @@ class BotTeamNodeSchema(_StrictSchema):
         return cls(
             code=value.code,
             name=value.name,
-            bot_id=value.bot_id,
+            bot_ids=list(value.bot_ids),
             approval_required=value.approval_required,
-            completion_gate=TodoCompletionGateSchema.from_domain(
-                value.completion_gate
-            ),
+            completion_gate=value.completion_gate,
         )
 
 

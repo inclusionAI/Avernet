@@ -116,19 +116,14 @@ def build_bot_team_product_profile_spec(
     stages: list[dict[str, object]] = []
     previous: str | None = None
     for node in definition.nodes:
-        conditions = [
-            (
-                f"artifact {gate.artifact_type} must reach state "
-                f"{gate.artifact_state} with min_count {gate.min_count}"
-            )
-            for gate in node.completion_gate.required_artifacts
-        ]
-        if not conditions:
-            conditions = ["stage output must be complete"]
+        conditions = [node.completion_gate or "stage output must be complete"]
         stages.append(
             {
                 "name": node.code,
-                "candidates": [{"type": "bot", "uuid": node.bot_id}],
+                "candidates": [
+                    {"type": "bot", "uuid": bot_id}
+                    for bot_id in node.bot_ids
+                ],
                 "depends_on": [] if previous is None else [previous],
                 "acceptance": [
                     {"condition": condition} for condition in conditions
@@ -388,12 +383,13 @@ class TodoBotTeamService(TodoBotTeamServiceProtocol):
         nodes: tuple[BotTeamNode, ...],
     ) -> None:
         for node in nodes:
-            resolve_todo_bot(
-                bot_repository=self._bot_repository,
-                space=space,
-                actor_id=actor_id,
-                bot_id=node.bot_id,
-            )
+            for bot_id in node.bot_ids:
+                resolve_todo_bot(
+                    bot_repository=self._bot_repository,
+                    space=space,
+                    actor_id=actor_id,
+                    bot_id=bot_id,
+                )
 
     @classmethod
     def _to_template_definition(
@@ -407,19 +403,25 @@ class TodoBotTeamService(TodoBotTeamServiceProtocol):
         )
         stages: list[TodoStageDefinition] = []
         for node in definition.nodes:
+            candidates = tuple(
+                TodoParticipantReference(
+                    source=TodoParticipantRefSource.FIXED,
+                    subject_type=TodoParticipantSubjectType.BOT,
+                    subject_id=bot_id,
+                )
+                for bot_id in node.bot_ids
+            )
             stages.append(
                 TodoStageDefinition(
                     key=node.code,
                     name=node.name,
                     purpose=node.name,
                     stage_kind=TodoStageKind.BOT,
-                    executor_ref=TodoParticipantReference(
-                        source=TodoParticipantRefSource.FIXED,
-                        subject_type=TodoParticipantSubjectType.BOT,
-                        subject_id=node.bot_id,
-                    ),
+                    executor_ref=candidates[0],
                     owner_ref=owner,
-                    completion_gate=node.completion_gate,
+                    completion_gate=TodoCompletionGate(),
+                    executor_candidates=candidates,
+                    completion_condition=node.completion_gate,
                 )
             )
             if node.approval_required:
@@ -474,9 +476,26 @@ class TodoBotTeamService(TodoBotTeamServiceProtocol):
                 raise TodoTemplateValidationError(
                     f"Bot team node {node.code!r} name must not be empty"
                 )
-            if not isinstance(node.bot_id, str) or not node.bot_id.strip():
+            if not isinstance(node.bot_ids, tuple) or not node.bot_ids:
                 raise TodoTemplateValidationError(
-                    f"Bot team node {node.code!r} bot_id must not be empty"
+                    f"Bot team node {node.code!r} must select at least one Bot"
+                )
+            normalized_bot_ids = tuple(
+                bot_id.strip()
+                for bot_id in node.bot_ids
+                if isinstance(bot_id, str) and bot_id.strip()
+            )
+            if len(normalized_bot_ids) != len(node.bot_ids):
+                raise TodoTemplateValidationError(
+                    f"Bot team node {node.code!r} bot_ids must be non-empty text"
+                )
+            if len(set(normalized_bot_ids)) != len(normalized_bot_ids):
+                raise TodoTemplateValidationError(
+                    f"Bot team node {node.code!r} bot_ids must be unique"
+                )
+            if not isinstance(node.completion_gate, str):
+                raise TodoTemplateValidationError(
+                    f"Bot team node {node.code!r} completion_gate must be text"
                 )
             if not isinstance(node.approval_required, bool):
                 raise TodoTemplateValidationError(
@@ -562,13 +581,30 @@ class TodoBotTeamService(TodoBotTeamServiceProtocol):
                         cls._not_representable()
                     approval_required = True
                     index += 1
+            candidate_refs = stage.executor_candidates or (stage.executor_ref,)
+            bot_ids = tuple(
+                candidate.subject_id
+                for candidate in candidate_refs
+                if candidate.source is TodoParticipantRefSource.FIXED
+                and candidate.subject_type is TodoParticipantSubjectType.BOT
+                and candidate.subject_id
+            )
+            if len(bot_ids) != len(candidate_refs):
+                cls._not_representable()
+            completion_gate = stage.completion_condition
+            if not completion_gate and stage.completion_gate.required_artifacts:
+                completion_gate = "; ".join(
+                    f"artifact {gate.artifact_type} must reach state "
+                    f"{gate.artifact_state} with min_count {gate.min_count}"
+                    for gate in stage.completion_gate.required_artifacts
+                )
             nodes.append(
                 BotTeamNode(
                     code=stage.key,
                     name=stage.name,
-                    bot_id=stage.executor_ref.subject_id,
+                    bot_ids=bot_ids,
                     approval_required=approval_required,
-                    completion_gate=stage.completion_gate,
+                    completion_gate=completion_gate,
                 )
             )
             index += 1

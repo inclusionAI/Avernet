@@ -24,9 +24,10 @@ const TODO_SPACES_API_PATH = `${TODO_INTERNAL_API_BASE}/spaces`;
 export interface BotTeamNodeDto extends BackendUnknownRecord {
   code?: string;
   name?: string;
+  bot_ids?: unknown[];
   bot_id?: string;
   approval_required?: boolean;
-  completion_gate?: { required_artifacts?: Array<BackendUnknownRecord> };
+  completion_gate?: string | { required_artifacts?: Array<BackendUnknownRecord> };
 }
 
 export interface BotTeamRecordDto extends BackendUnknownRecord {
@@ -216,6 +217,9 @@ export interface TodoAutoImportRuleDto extends BackendUnknownRecord {
   source_container_ids?: unknown[];
   filter_text?: string;
   bot_id?: string;
+  scheduler_bot_id?: string | null;
+  trigger_interval_seconds?: number | string;
+  cron_expression?: string;
   status?: string;
   cursor_updated_at?: string | null;
   created_at?: string;
@@ -334,6 +338,7 @@ export function createTodo(input: CreateTodoInput) {
     space_id: input.spaceId,
     title: input.title,
     description: input.description,
+    ...(input.executor.type === 'bot' ? { bot_id: input.executor.id } : {}),
     executor: executorData(input.executor),
     owner: { user_id: input.owner.userId, user_name: input.owner.userName },
   };
@@ -511,6 +516,9 @@ export function createTodoAutoImportRule(input: CreateTodoAutoImportRuleInput) {
       source_container_ids: input.sourceContainerIds,
       filter_text: input.filterText,
       bot_id: input.botId,
+      scheduler_bot_id: input.schedulerBotId,
+      trigger_interval_seconds: input.triggerIntervalSeconds,
+      cron_expression: input.cronExpression,
     },
     operation: 'create-todo-auto-import-rule',
   });
@@ -533,6 +541,9 @@ export function updateTodoAutoImportRule(ruleId: string, input: UpdateTodoAutoIm
   if (input.sourceContainerIds) data.source_container_ids = input.sourceContainerIds;
   if (input.filterText !== undefined) data.filter_text = input.filterText;
   if (input.botId !== undefined) data.bot_id = input.botId;
+  if (input.schedulerBotId !== undefined) data.scheduler_bot_id = input.schedulerBotId;
+  if (input.triggerIntervalSeconds !== undefined) data.trigger_interval_seconds = input.triggerIntervalSeconds;
+  if (input.cronExpression !== undefined) data.cron_expression = input.cronExpression;
   if (input.status !== undefined) data.status = input.status;
   return backendRequest<BackendApiEnvelope<TodoAutoImportRuleDto>>(TODO_ENDPOINTS.dimaAutoImportRule(ruleId), {
     method: 'PATCH',
@@ -550,15 +561,9 @@ function botTeamDefinitionData(input: SaveBotTeamInput): BackendUnknownRecord {
     nodes: input.nodes.map((node) => ({
       code: node.code,
       name: node.name,
-      bot_id: node.botId,
+      bot_ids: node.botIds,
       approval_required: node.approvalRequired,
-      completion_gate: {
-        required_artifacts: node.completionGate.requiredArtifacts.map((artifact) => ({
-          artifact_type: artifact.artifactType,
-          artifact_state: artifact.artifactState,
-          min_count: artifact.minCount,
-        })),
-      },
+      completion_gate: node.completionGate,
     })),
   };
 }

@@ -27,6 +27,9 @@ def _create(repo: TodoAutoImportRepository, **overrides):
         "source_container_ids": ("W1", "P1"),
         "filter_text": "只导入需要我处理的高优任务",
         "bot_id": "bot_1",
+        "scheduler_bot_id": "scheduler_bot",
+        "trigger_interval_seconds": 1800,
+        "cron_expression": "*/30 * * * *",
         "created_by": "user_1",
     }
     values.update(overrides)
@@ -68,12 +71,18 @@ def test_management_is_owner_scoped_but_execution_reads_are_tenant_scoped(db) ->
         source_container_ids=("P2",),
         filter_text="只导入缺陷",
         bot_id="bot_2",
+        scheduler_bot_id="scheduler_bot_2",
+        trigger_interval_seconds=3600,
+        cron_expression="0 9 * * 1-5",
         status=TodoAutoImportRuleStatus.DISABLED,
     )
 
     assert updated.source_container_ids == ("P2",)
     assert updated.filter_text == "只导入缺陷"
     assert updated.bot_id == "bot_2"
+    assert updated.scheduler_bot_id == "scheduler_bot_2"
+    assert updated.trigger_interval_seconds == 3600
+    assert updated.cron_expression == "0 9 * * 1-5"
     assert updated.status is TodoAutoImportRuleStatus.DISABLED
     assert repo.list_active_rules(space_id=7) == ()
     with pytest.raises(TodoAutoImportRuleNotFoundError):

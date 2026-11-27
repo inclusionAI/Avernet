@@ -7,7 +7,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from agentclaw.community.core.task.todos.template_models import TodoCompletionGate
 
 
 class BotTeamStatus(StrEnum):
@@ -42,9 +41,9 @@ class BotTeamNode:
 
     code: str
     name: str
-    bot_id: str
+    bot_ids: tuple[str, ...]
     approval_required: bool
-    completion_gate: TodoCompletionGate
+    completion_gate: str
 
 
 @dataclass(frozen=True)
