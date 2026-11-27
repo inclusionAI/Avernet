@@ -187,10 +187,11 @@ describe('BotTable 表格结构', () => {
     render(<BotTable bots={[offlineBot]} onView={noop} />);
 
     expect(screen.getByText('已下线')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '打开客户端' })).not.toBeInTheDocument();
+    // 协议唤起改为原生锚点(Button asChild):入口角色是 link,不再走 JS 导航。
+    expect(screen.queryByRole('link', { name: '打开客户端' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '展开桌面 Bot 状态详情' }));
     expect(screen.getByText('设备离线')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开客户端' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '打开客户端' })).toBeInTheDocument();
   });
 
   test('机器人信息列渲染 40px DiceBear 头像（dmore 稿）、名称与 entityKey', () => {
