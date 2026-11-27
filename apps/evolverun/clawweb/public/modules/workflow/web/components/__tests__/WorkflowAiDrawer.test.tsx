@@ -240,11 +240,20 @@ describe('WorkflowAiDrawer', () => {
     view.rerender(<WorkflowAiDrawer {...p} spec={edited} />)
     expect(screen.getByRole('status')).toHaveTextContent('草稿已过期')
     expect(screen.getByRole('button', { name: '应用草稿到当前 Editor' })).toBeDisabled()
-    generate.mockResolvedValueOnce(makeDraft({ baseSignature: workflowSpecSignature(edited) }))
+    let resolve!: (draft: WorkflowAiDraft) => void
+    generate.mockReturnValueOnce(new Promise((done) => { resolve = done }))
     fireEvent.click(screen.getByRole('button', { name: '重新生成草稿' }))
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: '应用草稿到当前 Editor' })).toBeEnabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用草稿到当前 Editor' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成中…' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '生成中…' })).toBeDisabled()
+    expect(screen.getByText('正在生成草稿，可取消。')).toBeVisible()
+    expect(p.onApply).not.toHaveBeenCalled()
+    await act(async () => { resolve(makeDraft({ baseSignature: workflowSpecSignature(edited) })) })
+    await waitFor(() => expect(screen.getByRole('button', { name: '应用草稿到当前 Editor' })).toBeEnabled())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(generate).toHaveBeenLastCalledWith('modify', '调整复核提示词', edited, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
+    expect(p.onApply).not.toHaveBeenCalled()
   })
 
   it.each(['removal', 'metadata'] as const)('requires explicit confirmation for %s changes', async (kind) => {
