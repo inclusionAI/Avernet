@@ -18,7 +18,25 @@ export interface UseDefinitionsResult {
   refresh: () => void;
 }
 
-export function useDefinitions(tenant: string | undefined, keyword = ''): UseDefinitionsResult {
+export interface UseDefinitionsQuery {
+  /** Narrow by name; the gateway filters server-side. */
+  keyword?: string;
+  /** 1-based. */
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * A page of the stored definition library.
+ *
+ * Paged server-side like the run list: the library grows with use, and loading
+ * it whole would put an unbounded query behind a page that only ever shows a
+ * screenful.
+ */
+export function useDefinitions(
+  tenant: string | undefined,
+  { keyword = '', page = 1, pageSize = 10 }: UseDefinitionsQuery = {},
+): UseDefinitionsResult {
   const [definitions, setDefinitions] = useState<DefinitionDTO[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -40,7 +58,11 @@ export function useDefinitions(tenant: string | undefined, keyword = ''): UseDef
 
     const load = async () => {
       try {
-        const result = await listDefinitions(tenant, keyword ? { name: keyword } : {});
+        const result = await listDefinitions(tenant, {
+          page,
+          page_size: pageSize,
+          ...(keyword ? { name: keyword } : {}),
+        });
         if (cancelled) return;
         setDefinitions(result.items ?? []);
         setTotal(result.total ?? 0);
@@ -56,7 +78,7 @@ export function useDefinitions(tenant: string | undefined, keyword = ''): UseDef
     return () => {
       cancelled = true;
     };
-  }, [tenant, keyword, nonce]);
+  }, [tenant, keyword, page, pageSize, nonce]);
 
   return { definitions, total, loading, error, refresh };
 }

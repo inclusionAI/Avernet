@@ -12,6 +12,7 @@ import { useRunList } from '@/hooks/useRunList';
 import { useRunPolling } from '@/hooks/useRunPolling';
 import { createNewAgentRef, resolveRosterRefs, toSubmitDTO, type ComputeDraft, type DraftIssue } from '@/domain/agentswarm/draft';
 import { toIdentityOptions } from '@/domain/agentswarm/identityOptions';
+import { normalizeModelId } from '@/domain/agentswarm/models';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { explainSubmitRefusal } from '@/services/agentswarm/refusals';
 import { createDefinition, submitRun } from '@/services/agentswarm/service';
@@ -144,7 +145,7 @@ export function AgentComputePanel({
               role: entry.body.role,
               instructions: entry.body.instructions ?? '',
               kind: entry.body.kind,
-              model: entry.body.model?.trim() || null,
+              model: normalizeModelId(entry.body.model) ?? null,
               manifest_document: entry.body.config_manifest ?? '',
             });
             return saved.definition_id;

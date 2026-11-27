@@ -33,6 +33,9 @@ export interface ComputeConfigFormProps {
   draft: ComputeDraft;
   onChange: (draft: ComputeDraft) => void;
   identityOptions: IdentityOption[];
+  /** The execution Bot's model catalogue; absent falls back to the static list. */
+  models?: readonly string[];
+  modelsHint?: string;
   identityLoading?: boolean;
   identityError?: string | null;
   submitting?: boolean;
@@ -62,6 +65,8 @@ export function ComputeConfigForm({
   draft,
   onChange,
   identityOptions,
+  models,
+  modelsHint,
   identityLoading = false,
   identityError = null,
   submitting = false,
@@ -200,7 +205,7 @@ export function ComputeConfigForm({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">Agent 定义 · {draft.refs.length}</h3>
             <div className="flex items-center gap-2">
-              {/* PRD §3: one 添加 Agent menu offering 空白创建 / 我的定义库 / 空间
+              {/* PRD §3: one 添加 Agent menu offering 空白创建 / 我的 Agent 库 / 空间
                   Bot / 专家市场. The latter three open one shared picker; the two
                   catalogues are listed but disabled in this milestone rather
                   than omitted, so the shape stays visible. */}
@@ -229,7 +234,7 @@ export function ComputeConfigForm({
                       setPickerOpen(true);
                     }}
                   >
-                    我的定义库
+                    我的 Agent 库
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled
@@ -245,14 +250,14 @@ export function ComputeConfigForm({
               {onManageDefinitions ? (
                 <Button type="button" size="sm" variant="ghost" onClick={onManageDefinitions}>
                   <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                  管理我的定义库
+                  管理 Agent 库
                 </Button>
               ) : null}
             </div>
           </div>
 
           <p className="text-xs leading-5 text-muted-foreground">
-            Agent 定义构成可用池，实际启动数由编排决定。空白新建的 Agent 会在提交时先保存到「我的定义库」，再以定义引用提交。
+            Agent 定义构成可用池，实际启动数由编排决定。空白新建的 Agent 会在提交时先保存到「我的 Agent 库」，再以定义引用提交。
           </p>
 
           <AgentEditor
@@ -359,7 +364,12 @@ export function ComputeConfigForm({
                 ) : null}
               </div>
             ) : null}
-            <RunOptionsPanel options={draft.options} onChange={(options) => onChange({ ...draft, options })} />
+            <RunOptionsPanel
+              options={draft.options}
+              onChange={(options) => onChange({ ...draft, options })}
+              models={models}
+              modelsHint={modelsHint}
+            />
           </section>
 
           <section className="space-y-3 border-t border-border pt-5">

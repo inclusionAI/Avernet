@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { JsonBlock } from './JsonBlock';
 
 /**
  * Renders one agent's (or the run's) produced value.
@@ -64,9 +65,9 @@ export function ValueBlock({ value, empty, label }: ValueBlockProps) {
             <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
               查看原始 JSON
             </summary>
-            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-xs">
-              {raw}
-            </pre>
+            <div className="mt-1">
+              <JsonBlock value={raw} maxHeight="16rem" />
+            </div>
           </details>
         ) : null}
       </div>
@@ -85,9 +86,7 @@ export function ValueBlock({ value, empty, label }: ValueBlockProps) {
         {showRaw ? '收起结构' : `查看${label}结构`}
       </button>
       {showRaw ? (
-        <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-xs">
-          {raw}
-        </pre>
+        <JsonBlock value={raw} maxHeight="18rem" />
       ) : (
         <p className="m-0 text-sm text-muted-foreground">
           该{label}是结构化数据，展开查看字段。

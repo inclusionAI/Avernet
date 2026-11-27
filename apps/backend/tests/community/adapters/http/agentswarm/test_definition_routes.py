@@ -153,6 +153,13 @@ def test_name_conflict_is_409(client, stub, audit):
     r = client.post(_url("/add"), json={"name": "reviewer", "kind": "bot"})
     assert r.status_code == 409
     assert any(row["action"] == "definition_name_conflict" for row in audit.rows)
+    # A name conflict and a stale version are both 409; the caller can only
+    # tell them apart if the reason survives. This app has no envelope handler
+    # (only the agentswarm ones are registered here), so the detail arrives in
+    # FastAPI's default shape; the public surface folds it into `message`.
+    detail = r.json()["detail"]
+    assert "definition_name_conflict" in detail
+    assert "reviewer" in detail
 
 
 def test_invalid_manifest_is_422(client, stub):
@@ -251,6 +258,10 @@ def test_stale_revise_is_409(client, stub, audit):
     })
     assert r.status_code == 409
     assert any(row["action"] == "definition_row_conflict" for row in audit.rows)
+    # Distinguished from a name conflict by its own reason, not by status alone.
+    detail = r.json()["detail"]
+    assert "definition_version_conflict" in detail
+    assert "definition_name_conflict" not in detail
 
 
 def test_revise_of_absent_definition_is_404(client, stub):

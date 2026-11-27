@@ -15,6 +15,22 @@ import { load as parseYaml } from 'js-yaml';
 
 export { MANIFEST_TEMPLATE, MANIFEST_DOCS_URL } from './manifestTemplate';
 
+/**
+ * The identity filenames the engine accepts.
+ *
+ * The engine's own allowlist is authoritative and this mirrors it: a typo like
+ * `SOUL2.md` is refused with a 422 at submit, and catching it while the user is
+ * still editing is the difference between a corrected typo and a lost form.
+ */
+export const IDENTITY_FILE_TYPES = [
+  'AGENTS.md', 'BOOTSTRAP.md', 'CLAUDE.md', 'GREETING.md', 'HEARTBEAT.md',
+  'IDENTITY.md', 'KNOWLEDGE.md', 'MEMORY.md', 'OKR.md', 'OUTPUT.md',
+  'README.md', 'RULES.md', 'SAFETY.md', 'SOUL.md', 'TOOLS.md', 'USER.md',
+] as const;
+
+/** The identity document the persona lives in. */
+export const SOUL_FILE_TYPE = 'SOUL.md';
+
 /** The five content categories a five-category manifest carries. */
 export const MANIFEST_CATEGORIES = ['identity', 'mcp', 'resources', 'skills', 'cli_tools'] as const;
 
@@ -99,8 +115,16 @@ export function validateManifest(source: string): ManifestValidation {
       }
       if (typeof entry.type !== 'string' || !entry.type.trim()) {
         issues.push({ path: `manifest.identity[${index}].type`, message: '缺少 type' });
+      } else if (!(IDENTITY_FILE_TYPES as readonly string[]).includes(entry.type.trim())) {
+        issues.push({
+          path: `manifest.identity[${index}].type`,
+          message: `不支持的身份文件类型：${entry.type.trim()}（可选 ${IDENTITY_FILE_TYPES.join(' / ')}）`,
+        });
       }
-      if (typeof entry.content !== 'string' || !entry.content.trim()) {
+      // An empty body is legal: it is how a definition opens before anyone has
+      // written 指令, and the platform synthesizes exactly that shape. Only a
+      // missing (non-string) content is a mistake.
+      if (typeof entry.content !== 'string') {
         issues.push({ path: `manifest.identity[${index}].content`, message: '缺少 content' });
       }
     });

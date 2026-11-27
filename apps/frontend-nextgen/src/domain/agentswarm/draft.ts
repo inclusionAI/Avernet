@@ -8,6 +8,7 @@
 import type { AgentKind, AgentSpecDTO, RunOptionsDTO, SubmitRunDTO } from '@/services/agentswarm/types';
 import { normalizeManifest, summarizeIssues, validateManifest } from './manifest';
 import { normalizeOptions, validateOptions } from './options';
+import { normalizeModelId } from './models';
 
 export interface AgentDraft {
   /** Stable client-side key for list rendering; never sent. */
@@ -384,7 +385,7 @@ export async function applyToExistingDefinition(
     name: collision.name,
     role: ref.body.role,
     instructions: ref.body.instructions ?? '',
-    model: ref.body.model?.trim() || null,
+    model: normalizeModelId(ref.body.model) ?? null,
     manifest_document: ref.body.config_manifest ?? '',
   });
 }

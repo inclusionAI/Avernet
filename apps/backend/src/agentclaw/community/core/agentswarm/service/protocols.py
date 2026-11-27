@@ -225,6 +225,7 @@ class AgentAuthorizationState:
     bot_id: str | None
     bot_state: str
     authorization: BotAuthorizationDescriptor | None = None
+    objective: str | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +281,9 @@ class AgentDetailItem:
     agent_id: str
     name: str
     role: str
+    # task_spec.objective: the instruction this dispatch was given. A row is
+    # created per dispatch, so a re-dispatch of one catalog entry carries its
+    # own and can differ from the first.
     kind: str
     status: str
     parent_agent_id: str | None
@@ -297,6 +301,7 @@ class AgentDetailItem:
     attempt_ledger: tuple[AgentAttemptDetail, ...]
     messages: tuple[AgentMessageDetail, ...]
     authorization: BotAuthorizationDescriptor | None = None
+    objective: str | None = None
 
 
 @dataclass(frozen=True)

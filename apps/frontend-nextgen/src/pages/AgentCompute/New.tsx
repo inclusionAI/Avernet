@@ -12,6 +12,7 @@ import {
 } from '@/domain/agentswarm/draft';
 import { Button } from '@/components/ui/Button';
 import { defaultIdentityBotId, toIdentityOptions } from '@/domain/agentswarm/identityOptions';
+import { normalizeModelId } from '@/domain/agentswarm/models';
 import { explainSubmitRefusal } from '@/services/agentswarm/refusals';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
@@ -100,7 +101,7 @@ export default function AgentComputeNewPage() {
         role: entry.body.role,
         instructions: entry.body.instructions ?? '',
         kind: entry.body.kind,
-        model: entry.body.model?.trim() || null,
+        model: normalizeModelId(entry.body.model) ?? null,
         manifest_document: entry.body.config_manifest ?? '',
       });
       return saved.definition_id;

@@ -251,6 +251,113 @@ describe('Agent Compute 详情页（PRD v1.7 §7 整页布局）', () => {
     (svc.getRunDetail as jest.Mock).mockResolvedValue(detail());
   });
 
+  test('提交时的 Agent 配置在执行详情里可读', async () => {
+    // The catalog is what was submitted — name, role, kind, model and whether it
+    // came from the library. Without it a run cannot be audited once the
+    // definition behind it has been revised.
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agent_catalog: [
+        { name: 'w0', role: '统计', kind: 'bot', model: 'provider/Kimi-K2.6',
+          definition_id: 'def-1', definition_row_id: 7 },
+        { name: 'w1', role: '校对', kind: 'llm', model: null, definition_id: null },
+      ],
+    }));
+
+    render(<AgentComputeRunPage />);
+
+    expect(await screen.findByText('Agent 配置（2）')).toBeInTheDocument();
+    // Scoped to the submitted-config section: the spawned agents below repeat
+    // these names, and only the catalog says what was asked for.
+    const catalog = screen.getByLabelText('提交时的 Agent 配置');
+    expect(within(catalog).getByText('w0')).toBeInTheDocument();
+    expect(within(catalog).getByText('统计')).toBeInTheDocument();
+    expect(within(catalog).getByText('provider/Kimi-K2.6')).toBeInTheDocument();
+    // A submission from the library and one created blank are different origins,
+    // and the run has to say which it was.
+    expect(within(catalog).getByText('定义库')).toBeInTheDocument();
+    expect(within(catalog).getByText('空白创建')).toBeInTheDocument();
+  });
+
+  test('阶段产出同时给出指令与输出', async () => {
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agent_catalog: [{ name: 'w0', role: '统计', kind: 'llm' }],
+      agents: [{
+        agent_id: 'a1', name: 'w0_1', catalog_name: 'w0', role: '统计',
+        kind: 'llm', status: 'COMPLETED', depth: 0, spawn_round: 0,
+        idempotency_key: 'k1', attempts: 1,
+        objective: '统计各部门的月度工时', output: { text: '共 12 个部门' },
+      }],
+    }));
+
+    render(<AgentComputeRunPage />);
+
+    // What was asked and what came back, both readable from the detail pane.
+    expect(await screen.findByRole('button', { name: /^输入/ })).toBeInTheDocument();
+    const output = screen.getByRole('button', { name: /^输出/ });
+    fireEvent.click(output);
+    await waitFor(() => expect(document.body.textContent).toContain('共 12 个部门'));
+  });
+
+  test('已判定完成但结果为空的 Agent 会被明确标注', async () => {
+    // The gateway reports COMPLETED for an empty payload; without this the run
+    // reads as all-green while one stage produced nothing.
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agent_catalog: [{ name: 'w0', role: '统计', kind: 'llm' }],
+      agents: [{
+        agent_id: 'a1', name: 'w0_64fd0b1a337e', catalog_name: 'w0', role: '统计',
+        kind: 'llm', status: 'COMPLETED', depth: 0, spawn_round: 0,
+        idempotency_key: 'k1', attempts: 1, output: { text: '' },
+      }],
+    }));
+
+    render(<AgentComputeRunPage />);
+
+    expect(await screen.findByText('结果为空，未满足要求')).toBeInTheDocument();
+    expect(screen.getByText(/该 Agent 已判定完成，但产出为空/)).toBeInTheDocument();
+  });
+
+  test('同一配置被派发两次时按轮次分组', async () => {
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    const agent = (id: string, round: number, output: unknown) => ({
+      agent_id: id, name: `writer_${id}`, catalog_name: 'writer', role: '写手',
+      kind: 'llm', status: 'COMPLETED', depth: 0, spawn_round: round,
+      idempotency_key: `k-${id}`, attempts: 1, output,
+    });
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agent_catalog: [{ name: 'writer', role: '写手', kind: 'llm' }],
+      agents: [agent('a1', 0, { text: '' }), agent('a2', 1, { text: 'brave' })],
+    }));
+
+    render(<AgentComputeRunPage />);
+
+    // Two rows share one catalog name; the round is what tells them apart.
+    // Scoped to the list: the progress column names rounds too.
+    const list = await screen.findByLabelText('执行 Agent 列表');
+    expect(within(list).getByText('第 1 轮')).toBeInTheDocument();
+    expect(within(list).getByText('第 2 轮')).toBeInTheDocument();
+    // And the catalog card explains the re-dispatch it caused.
+    expect(screen.getByText(/已派发 2 次/)).toBeInTheDocument();
+    expect(screen.getByText(/其中 1 次结果为空/)).toBeInTheDocument();
+  });
+
+  test('一个 Agent 显示它来自哪条提交配置', async () => {
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agents: [{
+        agent_id: 'a1', name: 'w0_abcdef123456', catalog_name: 'w0', role: '统计',
+        kind: 'bot', status: 'COMPLETED', depth: 0, spawn_round: 0,
+        idempotency_key: 'k1', attempts: 1, output: 'hello',
+      }],
+    }));
+
+    render(<AgentComputeRunPage />);
+
+    expect(await screen.findByText('来自 w0')).toBeInTheDocument();
+  });
+
   test('切换执行详情与运行记录时会重新拉取详情', async () => {
     // Each tab shows a different projection of the same growing payload, so a
     // switch is a request for current data, not the page-open snapshot.
@@ -413,15 +520,49 @@ describe('Agent Compute 详情页（PRD v1.7 §7 整页布局）', () => {
     expect(row.textContent).not.toContain('第 2 次');
   });
 
-  test('运行记录：轮次开始排在该轮尝试之前', async () => {
+  test('运行记录：每次尝试都带上该 Agent 的产出', async () => {
+    // "COMPLETED" alone cannot explain a run — the empty result that forced a
+    // re-dispatch looked exactly like the one that worked.
     const svc = jest.requireMock('@/services/agentswarm/service');
-    // 尝试的时间戳早于轮次行几毫秒——真实写入顺序就是这样。
+    const attempt = (name: string, output: unknown, startedAt: number) => ({
+      agent_id: `a-${name}`, name, catalog_name: 'writer', role: '写手',
+      kind: 'llm', status: 'COMPLETED', depth: 0, spawn_round: 0,
+      idempotency_key: `k-${name}`, attempts: 1, output,
+      attempt_ledger: [{
+        claim_epoch: 1, slice_retry_index: 1, executor_kind: 'llm',
+        executor_id: `e-${name}`, executor_name: name,
+        binding_state: 'bound', result_status: 'COMPLETED', started_at: startedAt,
+      }],
+    });
+    (svc.getRunDetail as jest.Mock).mockResolvedValue(detail({
+      agent_catalog: [{ name: 'writer', role: '写手', kind: 'llm' }],
+      agents: [attempt('writer_a', { text: '' }, 1794365805609),
+               attempt('writer_b', { text: 'brave' }, 1794365810000)],
+    }));
+
+    render(<AgentComputeRunPage />);
+    await screen.findByText(/执行 2 · 完成 2/);
+    fireEvent.click(screen.getByRole('button', { name: '运行记录' }));
+
+    const log = await screen.findByLabelText('运行记录');
+    // Outputs start collapsed; opening one shows what the agent produced.
+    const outputToggles = within(log).getAllByRole('button', { name: /^输出/ });
+    expect(outputToggles).toHaveLength(2);
+    fireEvent.click(outputToggles[1]!);
+    await waitFor(() => expect(log.textContent).toContain('brave'));
+    // And the empty one says so rather than looking like a clean success.
+    expect(within(log).getByText('结果为空')).toBeInTheDocument();
+  });
+
+  test('运行记录：同一时刻轮次排在该轮尝试之前', async () => {
+    const svc = jest.requireMock('@/services/agentswarm/service');
+    // 同一毫秒：轮次行比首条尝试晚写，但时间线上它要先开这一轮。
     (svc.getRunDetail as jest.Mock).mockResolvedValue(
       detail({
         rounds: [
           { round_id: 'r1', stage_index: 0, orchestrator_steps: 3,
             slowest_attempt_steps: 2, cohort_agent_ids: ['a1'],
-            started_at: 1794365805700, ended_at: null },
+            started_at: 1794365805609, ended_at: null },
         ],
         agents: [
           {
@@ -443,7 +584,7 @@ describe('Agent Compute 详情页（PRD v1.7 §7 整页布局）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '运行记录' }));
     const items = await screen.findAllByRole('listitem');
-    // 轮次先出现，尽管尝试的时间戳更早。
+    // 同一毫秒按类型排：轮次开这一轮，尝试跟在后面。
     expect(items[0]?.textContent).toContain('第 1 轮编排开始');
   });
 

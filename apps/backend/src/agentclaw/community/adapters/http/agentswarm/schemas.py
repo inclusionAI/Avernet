@@ -290,6 +290,15 @@ class AgentDetailDTO(BaseModel):
         ),
     )
     role: str | None = None
+    objective: str | None = Field(
+        default=None,
+        description=(
+            "The instruction this dispatch was given (`task_spec.objective`). "
+            "Read from the agent row, which is created per dispatch: one catalog "
+            "entry dispatched twice yields two agents with their own objective, "
+            "and the same entry can be re-dispatched with a different one."
+        ),
+    )
     kind: str
     status: str
     parent_agent_id: str | None = None

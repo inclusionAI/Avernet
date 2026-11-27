@@ -11,7 +11,12 @@ import { MANIFEST_DOCS_URL } from '@/domain/agentswarm/manifest';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import { useState } from 'react';
-import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
+import {
+  isSynthesized,
+  readManifestInstructions,
+  synthesizeManifest,
+  syncManifestInstructions,
+} from '@/domain/agentswarm/synthManifest';
 
 /** The manifest editor opens at a readable height and can be dragged taller. */
 const EDITOR_DEFAULT_HEIGHT = 260;
@@ -38,7 +43,7 @@ function ManifestField({
   agent: AgentDraft;
   synthesized: boolean;
   error?: string;
-  /** A reference shows its definition's YAML; editing happens in 我的定义库. */
+  /** A reference shows its definition's YAML; editing happens in 我的 Agent 库. */
   readOnly?: boolean;
   onChange: (patch: Partial<AgentDraft>) => void;
 }) {
@@ -73,16 +78,11 @@ function ManifestField({
             size="sm"
             variant="outline"
             onClick={() =>
-              // 起点是该 Agent 当前的合成内容，而不是空模板：用户的「指令」已经
-              // 决定了 SOUL.md，用模板覆盖等于把他们写过的东西丢掉。模板语法放
-              // 在注释里，需要照抄时仍在眼前。
-              onChange({
-                config_manifest: [
-                  `# 自定义起始于当前生成的 SOUL.md。完整语法：${MANIFEST_DOCS_URL}`,
-                  `# 可自行补充 mcp / skills 等分类；留空则回到平台生成。`,
-                  synthesizeManifest(agent.instructions ?? ''),
-                ].join('\n'),
-              })
+              // Exactly the document the preview above shows — no comment header.
+              // Anything extra would make the editable YAML differ from what the
+              // platform actually generates, which is the thing this button is
+              // meant to reveal.
+              onChange({ config_manifest: synthesizeManifest(agent.instructions ?? '') })
             }
           >
             改为自定义 YAML
@@ -100,7 +100,7 @@ function ManifestField({
             {(agent.config_manifest ?? '').trim() || synthesizeManifest(agent.instructions ?? '')}
           </pre>
           <p className="text-xs leading-5 text-muted-foreground">
-            来自定义库，只读。要修改请到「我的定义库」编辑该定义，或改名为新名称另存一份。
+            来自定义库，只读。要修改请到「我的 Agent 库」编辑该定义，或改名为新名称另存一份。
           </p>
         </>
       ) : synthesized ? (
@@ -231,8 +231,8 @@ export function AgentEditor({
             time, so editing its body here would silently do nothing. */}
         <p className="m-0 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
           {readOnly
-            ? `来自定义库：本次运行引用该定义，修改定义请到下方「我的定义库」。这里只可改本次运行的名称。`
-            : `新建 Agent：提交时会先保存到「我的定义库」，再以定义引用提交。`}
+            ? `来自定义库：本次运行引用该定义，修改定义请到下方「我的 Agent 库」。这里只可改本次运行的名称。`
+            : `新建 Agent：提交时会先保存到「我的 Agent 库」，再以定义引用提交。`}
         </p>
         <Tabs value={tab} onValueChange={(next) => onTabChange(next as AgentTab)}>
           <TabsList aria-label="编辑 Agent 内容">
@@ -289,10 +289,18 @@ export function AgentEditor({
                 disabled={readOnly}
                 value={agent.instructions ?? ''}
                 placeholder="例如：梳理本季度主要竞品的功能更新，只输出结构化要点。"
-                onChange={(event) => onChange({ instructions: event.target.value })}
+                onChange={(event) => {
+                  // 指令 and the YAML's SOUL.md content are the same text, so the
+                  // manifest follows this edit — carrying mcp/skills untouched.
+                  const instructions = event.target.value;
+                  onChange({
+                    instructions,
+                    config_manifest: syncManifestInstructions(agent.config_manifest, instructions),
+                  });
+                }}
               />
               <p className="text-xs leading-5 text-muted-foreground">
-                具体行为要求。未填写 YAML 时，这段文字会成为该 Agent 的 SOUL.md 内容。
+                具体行为要求，等同 YAML 中 SOUL.md 的 content；两处改任一处都会同步。
               </p>
             </div>
           </TabsContent>
@@ -322,7 +330,17 @@ export function AgentEditor({
               synthesized={synthesized}
               error={manifestError}
               readOnly={readOnly}
-              onChange={onChange}
+              onChange={(patch) => {
+                // Editing the YAML's SOUL.md writes the same text back to 指令, so
+                // the two fields never disagree about the persona.
+                const nextManifest = patch.config_manifest;
+                if (nextManifest === undefined) {
+                  onChange(patch);
+                  return;
+                }
+                const mirrored = readManifestInstructions(nextManifest);
+                onChange(mirrored === null ? patch : { ...patch, instructions: mirrored });
+              }}
             />
           </TabsContent>
         </Tabs>

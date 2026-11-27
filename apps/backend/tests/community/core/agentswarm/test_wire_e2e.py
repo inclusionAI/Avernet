@@ -286,10 +286,11 @@ class TestOverTheWire:
         assert status == 404
         # Under /openapi/v1 the app-level handler wraps routing and
         # handler-raised HTTPExceptions in the standard ErrorEnvelope
-        # ({code, message, data, request_id}); the raised detail survives
-        # only in the log. The public contract is the reason phrase.
+        # ({code, message, data, request_id}). The raised detail is carried
+        # through: the reason phrase alone could not tell two 409s apart, so it
+        # cannot tell these apart either.
         assert body["code"] == 404000
-        assert body["message"] == "Not Found"
+        assert body["message"] == "run not found"
 
     def test_tenant_header_does_not_override_principal(self, wire):
         # P0-3 hardening: the tenant comes from the principal (tenant-wire);

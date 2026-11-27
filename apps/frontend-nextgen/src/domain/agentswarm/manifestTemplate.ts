@@ -17,8 +17,12 @@
 export const MANIFEST_DOCS_URL =
   'https://github.com/inclusionAI/Avernet/blob/dev/apps/backend/docs/bot-config-manifest/manifest-schema.zh-CN.md';
 
-export const MANIFEST_TEMPLATE = `# Full grammar: ${MANIFEST_DOCS_URL}
-schema_version: 1
+/**
+ * No docs URL in the header: the editor renders 配置清单规范 as a link right
+ * beside the text area, and repeating the same URL inside the document makes
+ * every saved manifest carry a comment nobody reads twice.
+ */
+export const MANIFEST_TEMPLATE = `schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
@@ -29,3 +33,4 @@ manifest:
 
   # Optional categories, uncomment and fill in (see the doc above): mcp / skills
 `;
+

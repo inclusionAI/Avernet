@@ -123,7 +123,7 @@ export default function AgentComputeListPage() {
             actions={
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => history.push(`${BASE}/definitions`)}>
-                  我的定义库
+                  我的 Agent 库
                 </Button>
                 <Button onClick={() => history.push(`${BASE}/new`)}>
                   <Plus className="mr-2 size-4" aria-hidden />

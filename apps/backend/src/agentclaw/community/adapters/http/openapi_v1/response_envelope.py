@@ -27,11 +27,21 @@ def unmapped_error_response(
     request: Request,
     *,
     headers: Mapping[str, str] | None = None,
+    detail: str | None = None,
 ) -> JSONResponse:
+    """The envelope for a failure with no mapped error type.
+
+    ``detail`` — the reason the handler raised with — is used when present. A
+    bare reason phrase cannot distinguish two 409s (a version that moved on vs
+    a name already taken), and the caller has no other channel to learn which
+    one it hit.
+    """
     try:
         message = HTTPStatus(http_status).phrase
     except ValueError:
         message = "Error"
+    if detail and detail.strip():
+        message = detail.strip()
     return error_response_for(http_status, message, request, headers=headers)
 
 

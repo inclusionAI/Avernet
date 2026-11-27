@@ -663,6 +663,7 @@ def _to_detail_dto(detail) -> RunDetailDTO:
                     else None
                 ),
                 role=a.role,
+                objective=getattr(a, "objective", None),
                 kind=a.kind,
                 status=a.status,
                 parent_agent_id=a.parent_agent_id,
@@ -824,7 +825,11 @@ async def create_definition(
     except DefinitionNameConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_NAME_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_name_conflict: a definition named "
+                   f"{exc.name!r} already exists",
+        ) from exc
     except DefinitionManifestInvalid as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_MANIFEST_REJECTED)
@@ -925,11 +930,20 @@ async def update_definition(
     except DefinitionRowConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_ROW_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Two different refusals share 409, so each says which it is: a name the
+        # caller already uses, or a version that moved on under them.
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_version_conflict: {exc}",
+        ) from exc
     except DefinitionNameConflict as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_NAME_CONFLICT)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=f"definition_name_conflict: a definition named "
+                   f"{exc.name!r} already exists",
+        ) from exc
     except DefinitionManifestInvalid as exc:
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.DEFINITION_MANIFEST_REJECTED)
