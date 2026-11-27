@@ -14,6 +14,9 @@ export interface SenderBotRef {
 /** BCS 系统消息的发送方 uuid（非真实 Bot，无副屏配置）。 */
 export const BCS_SYSTEM_MESSAGE_BOT_UUID = 'bcs-system-message';
 
+/** BCS 状态机的虚拟事件发送方，其副屏使用 BCS manifest，而非 Bot 配置。 */
+const BCS_STATE_MACHINE_BOT_UUID = 'bcs_state_machine';
+
 /** 发送方复合键（与 libraryCdnInjector 的 botCdnMaps 分桶键同构）。 */
 export function senderBotKey(bot: SenderBotRef): string {
   return `${bot.botId}:${bot.ownerId ?? ''}`;
@@ -24,7 +27,7 @@ function parseBotUuid(botUuid: string): SenderBotRef | null {
   const sepIndex = botUuid.indexOf(':');
   const botId = sepIndex >= 0 ? botUuid.slice(0, sepIndex) : botUuid;
   const ownerId = sepIndex >= 0 ? botUuid.slice(sepIndex + 1) : undefined;
-  if (!botId || botId === BCS_SYSTEM_MESSAGE_BOT_UUID) return null;
+  if (!botId || botId === BCS_SYSTEM_MESSAGE_BOT_UUID || botId === BCS_STATE_MACHINE_BOT_UUID) return null;
   if (botId.startsWith('human_')) return null; // 人类 actor，非真实 Bot
   return { botId, ...(ownerId ? { ownerId } : {}) };
 }
