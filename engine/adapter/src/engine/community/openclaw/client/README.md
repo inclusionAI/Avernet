@@ -57,9 +57,20 @@ Limits:
 - Another Adapter process, cron/channel/BCS writer, or Adapter restart bypasses
   the local queue. Native queued empty finals have no reliable next-run identity.
   They are reported as `DISPATCH_UNCONFIRMED`, never guessed from session/time.
-- An unconfirmed dispatch blocks new sends for that session in this process.
-  Inspect the original execution before operator recovery; restarting an Adapter
-  clears only local state and does not cancel Gateway work. Do not blindly retry.
+- An unconfirmed dispatch retains its run identity and blocks new sends. A later
+  request rechecks that exact run via a bounded, read-only zero wait under the
+  session lock (failed probes are rate-limited). A valid terminal result releases
+  the slot for the new request only: no old generation or final is replayed.
+  Successful results also require evidence of the original execution; native
+  queued empty finals cannot unlock the slot. Unresolved children/announces,
+  unavailable/expired results and failed probes remain blocked for inspection.
+  Operator recovery must first verify the original execution; restarting an
+  Adapter clears only local state and does not cancel Gateway work.
+- After a correlated dispatch times out, its worker also probes for up to five
+  more minutes, without delaying the timeout response or replaying output. This
+  preserves late completion proof before Gateway's cache expires, even when the
+  user returns much later. Token-client retirement waits for this bounded worker.
+  Unresolved children/announces are not reconciled from root completion alone.
 - Cached ACKs are not proof the original task ended. For queued requests already
   acknowledged locally, a cached upstream response becomes `CHAT_REQUEST_CACHED`
   rather than a second ACK or a fabricated successful answer.

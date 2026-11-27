@@ -24,6 +24,22 @@ def supports_dispatch_wait(client: OpenClawGatewayClient) -> bool:
                 and "agent.wait" in hello.features.methods)
 
 
+def completion_status(response: ResponseFrame, run: str) -> str | None:
+    """Validate a zero-wait result; timeout without an end is not completion."""
+    payload = response.payload or {}
+    if not response.ok or payload.get("runId") != run:
+        raise RuntimeError("OpenClaw dispatch completion query failed")
+    status = payload.get("status")
+    if status == "timeout" and not payload.get("endedAt"):
+        return None
+    if status not in ("ok", "error", "timeout"):
+        raise RuntimeError("OpenClaw dispatch completion is unavailable")
+    ended_at = payload.get("endedAt")
+    if type(ended_at) not in (int, float) or not math.isfinite(ended_at) or ended_at <= 0:
+        raise RuntimeError("OpenClaw completion has no valid end timestamp")
+    return status
+
+
 class ChatDispatch:
     def __init__(self, client: OpenClawGatewayClient, session: str, run: str, message: str):
         self.client = client
@@ -35,6 +51,7 @@ class ChatDispatch:
         self.confirmed = False
         self.cached_confirmed = False
         self.started = False
+        self.unresolved_children = False
         self.terminal_seen = asyncio.Event()
         self.finished = asyncio.Event()
         self.terminal: EventFrame | None = None
@@ -97,17 +114,9 @@ class ChatDispatch:
                         # A busy/reconnecting Gateway can delay this read-only
                         # probe. Keep the slot, bounded by the dispatch deadline.
                         continue
-                    payload = response.payload or {}
-                    if not response.ok or payload.get("runId") != self.run:
-                        raise RuntimeError("OpenClaw dispatch completion query failed")
-                    status = payload.get("status")
-                    if status == "timeout" and not payload.get("endedAt"):
+                    status = completion_status(response, self.run)
+                    if status is None:
                         continue
-                    if status not in ("ok", "error", "timeout"):
-                        raise RuntimeError("OpenClaw dispatch completion is unavailable")
-                    ended_at = payload.get("endedAt")
-                    if (type(ended_at) not in (int, float) or not math.isfinite(ended_at) or ended_at <= 0):
-                        raise RuntimeError("OpenClaw completion has no valid end timestamp")
                     # Empty queued dispatches also enter chat dedupe as 'ok'.
                     # Never attach an arbitrary subsequent run on the same session.
                     command_reply = self.message.lstrip().startswith("/") and self.terminal is not None
