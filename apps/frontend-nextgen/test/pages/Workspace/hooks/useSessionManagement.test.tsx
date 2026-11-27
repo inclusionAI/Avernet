@@ -53,3 +53,30 @@ it('keeps the current session selected after removing a member', async () => {
   expect(ok).toBe(true);
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('s1');
 });
+
+it('leaving clears the departed selection without applying an unreadable session detail', async () => {
+  ss.leaveSession.mockResolvedValue({ ok: true, data: null });
+  useWorkspaceStore.getState().selectSession('s1');
+  const applySessionUpdate = jest.fn();
+  const { result } = renderHook(() => useSessionManagement(session, applySessionUpdate));
+
+  const ok = await act(() => result.current.leaveSession('bot-self'));
+
+  expect(ok).toBe(true);
+  expect(ss.leaveSession).toHaveBeenCalledWith('s1', 'bot-self');
+  expect(applySessionUpdate).not.toHaveBeenCalled();
+  expect(useWorkspaceStore.getState().selectedSessionId).toBeNull();
+});
+
+it('a failed leave keeps the current selection', async () => {
+  ss.leaveSession.mockResolvedValue({ ok: false, error: { friendlyMessage: 'fail' } });
+  useWorkspaceStore.getState().selectSession('s1');
+  const applySessionUpdate = jest.fn();
+  const { result } = renderHook(() => useSessionManagement(session, applySessionUpdate));
+
+  const ok = await act(() => result.current.leaveSession('bot-self'));
+
+  expect(ok).toBe(false);
+  expect(applySessionUpdate).not.toHaveBeenCalled();
+  expect(useWorkspaceStore.getState().selectedSessionId).toBe('s1');
+});
