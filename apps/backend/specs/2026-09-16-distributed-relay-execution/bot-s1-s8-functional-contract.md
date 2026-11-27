@@ -585,10 +585,6 @@ class TaskContext:
     # 严格早于本棒的、已被 Backend 接纳的前序节点事实；排除本棒及后继。
     all_done_output: list[DoneOutput]
 
-    # 从 all_done_output[].output.reusable_facts 派生的轻量事实投影，
-    # 仅供后继棒复用，仍是 read-only projection，不是第二份服务端账本。
-    reusable_facts: list[dict[str, Any]] = field(default_factory=list)
-
     # 本接力链路已派发过的 Bot ID 权威快照；S5D 用它排除历史执行者。
     used_executor_ids: list[str]
 
@@ -597,7 +593,7 @@ class TaskContext:
     accepted_plan_report: TaskReportResult | None = None
 ```
 
-`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`reusable_facts` 只从已接纳前序产物的 `output_patch.reusable_facts` 中抽取 compact business facts，并在服务端补充 `source_node_id`；它不新增存储、不新增 report event，也不保存本地执行轨迹或证据文件路径。`attempt` 由 Backend 从当前节点 `run_info.extend_props["harness_retries"]` 投影；Bot 不得自行计数或硬编码，artifact 上报项中的 `attempt` 必须逐项取该值。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
+`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`attempt` 由 Backend 从当前节点 `run_info.extend_props["harness_retries"]` 投影；Bot 不得自行计数或硬编码，artifact 上报项中的 `attempt` 必须逐项取该值。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
 
 ### 4.2 BotCapability
 
@@ -1465,15 +1461,7 @@ S4a 的两个关键业务字段定义：
 ```python
 # Bot 对 actual_goal 的完整业务交付；result 是稳定的主内容承载字段。
 output_patch: dict[str, Any] = {
-    "result": "完整业务产出",
-    "reusable_facts": [
-        {
-            "subject": "业务对象或状态主体",
-            "claim_type": "query_result/permission_state/operation_receipt/object_state",
-            "value": {},
-            "created_at": 1710000000,
-        }
-    ],
+    "result": "完整业务产出"
 }
 
 # Bot 对 actual_goal.acceptances 的逐项验收结论。
