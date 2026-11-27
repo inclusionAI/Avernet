@@ -39,13 +39,13 @@ Owner waiting and effect waiting have separate deadlines. Owner expiry releases 
 
 ### Maintenance coordination
 
-The host schedules recovery maintenance every 60 seconds. The public assembly
+The host schedules recovery maintenance every 120 seconds. The public assembly
 uses the [Shared database lease service](../../../shared/README.md) and independent
 `clawweb_distributed_locks` table. Only the holder for the control-plane environment,
 scene `session_recovery_maintenance`, tenant `__global__`, resource `scan`, enters
 the original scan. Unclaimed contenders never query `ce_tasks`. The lease lasts
 120 seconds and renews every 20 seconds. Database time governs ownership and the
-minimum 60-second acquisition interval measured from the scan start; quick release
+minimum 120-second acquisition interval measured from the scan start; quick release
 does not let a staggered replica immediately repeat the scan.
 
 A lost lease stops subsequent pages and maintenance actions. Renewal and release
