@@ -7,6 +7,7 @@ import pytest
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    current_actor_context,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -18,7 +19,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.product_
     StatusEnum,
 )
 from agentclaw.community.core.task.todos.product_creation_models import (
-    build_collet_request_id,
     build_product_collet_content,
     resolve_todo_runtime_kind,
     TodoProductColletStatus,
@@ -27,7 +27,6 @@ from agentclaw.community.core.task.todos.product_creation_models import (
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
-from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.core.task.todos.stage_models import (
     TodoStageRecord,
     TodoStageStatus,
@@ -114,19 +113,6 @@ def test_runtime_kind_resolver_is_the_complete_truth_table(
     )
 
 
-def test_collet_request_id_is_stable_per_todo_environment_and_tenant() -> None:
-    expected = "todo:collet:tenant-a:pre:todo_1:v1"
-
-    assert (
-        build_collet_request_id("tenant-a", "pre", "todo_1")
-        == build_collet_request_id("tenant-a", "pre", "todo_1")
-        == expected
-    )
-    assert build_collet_request_id("tenant-b", "pre", "todo_1") != expected
-    assert build_collet_request_id("tenant-a", "prod", "todo_1") != expected
-    assert build_collet_request_id("tenant-a", "pre", "todo_2") != expected
-
-
 def test_product_collet_content_is_stable_and_contains_product_facts() -> None:
     source = TodoSourceInput(
         source_type="dima",
@@ -185,16 +171,12 @@ class RecordingProductProfiles:
         self,
         profile_id: int,
         content: str,
-        *,
-        context: ActorContext,
-        request_id: str,
     ) -> Collet:
         self.calls.append(
             {
                 "profile_id": profile_id,
                 "content": content,
-                "context": context,
-                "request_id": request_id,
+                "context": current_actor_context(),
             }
         )
         if self.failure is not None:
@@ -295,9 +277,7 @@ def _service_for_pending_todo(profiles: RecordingProductProfiles, repository: ob
 
 
 @pytest.mark.asyncio
-async def test_authenticated_actor_context_and_protocol_result_are_used_by_ensure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_authenticated_actor_context_and_protocol_result_are_used_by_ensure() -> None:
     from agentclaw.community.core.task.todos.bot_team_models import (
         BotTeamRecord,
         BotTeamRevisionRecord,
@@ -307,8 +287,6 @@ async def test_authenticated_actor_context_and_protocol_result_are_used_by_ensur
     from agentclaw.community.core.task.todos.services.todo_product_creation_service import (
         TodoProductCreationService,
     )
-    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
-    from agentclaw.community.utils.env_utils import get_current_env
 
     profiles = RecordingProductProfiles()
     bot_team = BotTeamRecord(
@@ -384,17 +362,15 @@ async def test_authenticated_actor_context_and_protocol_result_are_used_by_ensur
         repository=repository,
     )
 
-    with avernet_tenant_scope("tenant-a"):
-        result = await service.ensure_product_collet(
-            todo_id="todo_1", actor_id="creator_1"
-        )
+    result = await service.ensure_product_collet(
+        todo_id="todo_1", actor_id="creator_1"
+    )
 
     assert result.status is TodoProductColletStatus.READY
     assert result.todo.product_collet_id == 22
     assert len(profiles.calls) == 1
     call = profiles.calls[0]
     assert call["profile_id"] == 11
-    assert call["request_id"] == f"todo:collet:tenant-a:{get_current_env()}:todo_1:v1"
     context = call["context"]
     assert isinstance(context, ActorContext)
     assert context.actor == PrincipalRef("human", "creator_1")
@@ -402,27 +378,30 @@ async def test_authenticated_actor_context_and_protocol_result_are_used_by_ensur
 
 
 @pytest.mark.asyncio
-async def test_product_collet_failure_is_retryable_and_reuses_request_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_product_collet_failure_is_retryable_and_retries_protocol_call() -> None:
     profiles = RecordingProductProfiles(failure=RuntimeError("protocol unavailable"))
     repository = _pending_runtime_repository()
     service = _service_for_pending_todo(profiles, repository)
 
-    with avernet_tenant_scope("tenant-a"):
-        first = await service.ensure_product_collet(
-            todo_id="todo_1", actor_id="creator_1"
-        )
-        second = await service.ensure_product_collet(
-            todo_id="todo_1", actor_id="creator_1"
-        )
+    first = await service.ensure_product_collet(
+        todo_id="todo_1", actor_id="creator_1"
+    )
+    second = await service.ensure_product_collet(
+        todo_id="todo_1", actor_id="creator_1"
+    )
 
     assert first.status is TodoProductColletStatus.RETRYABLE_FAILURE
     assert first.error_code == "product_runtime_unavailable"
     assert first.todo.product_collet_id is None
     assert second.status is TodoProductColletStatus.RETRYABLE_FAILURE
     assert len(profiles.calls) == 2
-    assert profiles.calls[0]["request_id"] == profiles.calls[1]["request_id"]
+    assert all(
+        call["context"] == ActorContext(
+            PrincipalRef("human", "creator_1"),
+            "todo_product",
+        )
+        for call in profiles.calls
+    )
     assert not repository.calls
 
 

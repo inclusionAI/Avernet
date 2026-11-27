@@ -87,13 +87,6 @@ def resolve_todo_runtime_kind(
     return TodoRuntimeKind.PRODUCT_RUNTIME_PENDING
 
 
-def build_collet_request_id(tenant: str, env: str, todo_id: str) -> str:
-    """Build the stable idempotency key for one Todo's first Collet."""
-
-    if not tenant or not env or not todo_id:
-        raise ValidationError("tenant, env, and todo_id are required")
-    return f"todo:collet:{tenant}:{env}:{todo_id}:v1"
-
 
 def build_product_collet_content(
     *,

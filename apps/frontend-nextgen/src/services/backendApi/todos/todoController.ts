@@ -271,7 +271,7 @@ export function listTodoSpaces() {
 export function listTodoSpaceMembers(spaceId: number | string, page = 1) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BackendUnknownRecord>>>(TODO_ENDPOINTS.spaceMembers(spaceId), {
     method: 'GET',
-    params: { page_no: page, page_size: 100 },
+    params: userScopedParams({ page_no: page, page_size: 100 }),
     operation: 'list-todo-space-members',
     retryOnTransient: true,
   });

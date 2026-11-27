@@ -12,6 +12,7 @@ from agentclaw.community.core.repository.protocols.task.todos import (
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    actor_context_scope,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -42,7 +43,6 @@ from agentclaw.community.core.task.todos.product_creation_models import (
     TodoExecutorKind,
     TodoExecutorSelection,
     TodoOwnerInput,
-    build_collet_request_id,
     build_product_collet_content,
     resolve_todo_runtime_kind,
     TodoRuntimeKind,
@@ -63,8 +63,6 @@ from agentclaw.community.core.task.todos.stage_models import (
 from agentclaw.community.core.task.todos.template_creation_protocol import (
     TodoTemplateCreationServiceProtocol,
 )
-from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-from agentclaw.community.utils.env_utils import get_current_env
 
 _MAX_BOT_TEAM_ID_LENGTH = 64
 _MAX_BOT_TEAM_REVISION_ID_LENGTH = 64
@@ -372,21 +370,17 @@ class TodoProductCreationService(TodoProductCreationServiceProtocol):
             stages=stages,
             product_profile_id=revision.product_profile_id,
         )
-        request_id = build_collet_request_id(
-            get_current_avernet_tenant(),
-            get_current_env(),
-            normalized_todo_id,
-        )
         try:
-            collet = await self._product_profiles.create_product_collet(
-                revision.product_profile_id,
-                content,
-                context=ActorContext(
+            with actor_context_scope(
+                ActorContext(
                     actor=PrincipalRef("human", normalized_actor_id),
                     source="todo_product",
-                ),
-                request_id=request_id,
-            )
+                )
+            ):
+                collet = await self._product_profiles.create_product_collet(
+                    revision.product_profile_id,
+                    content,
+                )
         except Exception:
             return EnsureProductColletResult(
                 status=TodoProductColletStatus.RETRYABLE_FAILURE,

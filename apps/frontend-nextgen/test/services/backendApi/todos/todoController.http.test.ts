@@ -1,4 +1,4 @@
-import { listTodos } from '@/services/backendApi/todos/todoController';
+import { listTodos, listTodoSpaceMembers } from '@/services/backendApi/todos/todoController';
 
 const originalFetch = globalThis.fetch;
 const configuredUser = Object.getOwnPropertyDescriptor(globalThis, 'TEAMCLAW_OPENAPI_USER_ID');
@@ -35,7 +35,7 @@ it('全量查询经过真实 userScopedParams 与 HTTP 序列化时不携带 sta
 
   expect(jest.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
   const requestUrl = new URL(jest.mocked(globalThis.fetch).mock.calls[0][0] as string, 'http://localhost');
-  expect(requestUrl.pathname).toBe('/openapi/v1/collaboration/tasks/todos');
+  expect(requestUrl.pathname).toBe('/api/v1/collaboration/tasks/todos');
   expect(requestUrl.searchParams.has('status')).toBe(false);
   expect(requestUrl.searchParams.get('keyword')).toBe('编写');
   expect(requestUrl.searchParams.get('bot_id')).toBe('bot-owned:u-1');
@@ -43,4 +43,14 @@ it('全量查询经过真实 userScopedParams 与 HTTP 序列化时不携带 sta
   expect(requestUrl.searchParams.get('user_id')).toBe('149608');
   expect(requestUrl.searchParams.get('page')).toBe('1');
   expect(requestUrl.searchParams.get('page_size')).toBe('10');
+});
+
+it('空间成员查询携带当前 user_id', async () => {
+  await listTodoSpaceMembers(107);
+
+  const requestUrl = new URL(jest.mocked(globalThis.fetch).mock.calls[0][0] as string, 'http://localhost');
+  expect(requestUrl.pathname).toBe('/api/v1/collaboration/tasks/spaces/107/members');
+  expect(requestUrl.searchParams.get('user_id')).toBe('149608');
+  expect(requestUrl.searchParams.get('page_no')).toBe('1');
+  expect(requestUrl.searchParams.get('page_size')).toBe('100');
 });

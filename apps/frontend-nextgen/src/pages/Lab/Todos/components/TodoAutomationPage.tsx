@@ -4,7 +4,7 @@ import { Spin } from '@/components/ui/Spin';
 import { Switch } from '@/components/ui/Switch';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { notifySuccess } from '@/components/ui/notify';
-import type { TodoAutoImportRule, TodoBotOption, TodoSourceProject } from '@/domain/todos/models';
+import type { TodoAutoImportRule, TodoBotOption, TodoExecutorOption, TodoSourceProject } from '@/domain/todos/models';
 import { loadTodoSourceProjects } from '@/services/todos/todoService';
 import { safeReportError } from '@/utils/errorToast';
 import { ArrowLeft, Pencil, Plus } from 'lucide-react';
@@ -14,7 +14,7 @@ import { useTodoAutoImportRules } from './useTodoAutoImportRules';
 
 interface TodoAutomationPageProps {
   spaceId?: number;
-  bots: TodoBotOption[];
+  executorOptions: TodoExecutorOption[];
   schedulerBots: TodoBotOption[];
   onBack: () => void;
 }
@@ -32,7 +32,7 @@ function projectNames(rule: TodoAutoImportRule, projects: TodoSourceProject[]): 
   return resolvedNames.length ? resolvedNames.join('、') : rule.sourceContainerIds.join('、');
 }
 
-export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: TodoAutomationPageProps) {
+export function TodoAutomationPage({ spaceId, executorOptions, schedulerBots, onBack }: TodoAutomationPageProps) {
   const rules = useTodoAutoImportRules({ active: true, spaceId });
   const [projects, setProjects] = useState<TodoSourceProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -74,11 +74,11 @@ export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: Tod
       },
       {
         id: 'bot',
-        header: '待办执行 Bot',
+        header: '待办执行小队',
         width: '16%',
         cell: (rule) => (
           <span className="block truncate text-xs text-muted-foreground">
-            {bots.find((bot) => bot.botId === rule.botId)?.botName || rule.botId}
+            {executorOptions.find((team) => team.id === rule.botId)?.name || rule.botId}
           </span>
         ),
       },
@@ -132,7 +132,7 @@ export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: Tod
         ),
       },
     ],
-    [bots, projects, rules.setRuleEnabled, rules.updatingRuleId, schedulerBots],
+    [executorOptions, projects, rules.setRuleEnabled, rules.updatingRuleId, schedulerBots],
   );
 
   return (
@@ -147,7 +147,7 @@ export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: Tod
       <div className="flex items-center justify-end">
         <Button
           leftIcon={<Plus className="size-3.5" aria-hidden />}
-          disabled={!spaceId || bots.length === 0 || schedulerBots.length === 0}
+          disabled={!spaceId || executorOptions.length === 0 || schedulerBots.length === 0}
           onClick={() => setEditing('create')}
         >
           创建自动化
@@ -184,7 +184,7 @@ export function TodoAutomationPage({ spaceId, bots, schedulerBots, onBack }: Tod
         rule={editing === 'create' ? undefined : editing ?? undefined}
         projects={projects}
         projectsLoading={projectsLoading}
-        bots={bots}
+        executorOptions={executorOptions}
         schedulerBots={schedulerBots}
         saving={rules.saving || Boolean(editing !== 'create' && rules.updatingRuleId)}
         onOpenChange={(open) => {

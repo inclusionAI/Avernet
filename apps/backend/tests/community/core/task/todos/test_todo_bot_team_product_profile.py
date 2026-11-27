@@ -10,6 +10,7 @@ import pytest
 from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    current_actor_context,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -37,7 +38,6 @@ from agentclaw.community.core.task.todos.bot_team_models import (
 from agentclaw.community.core.task.todos.services.todo_bot_team_service import (
     TodoBotTeamService,
     build_bot_team_product_profile_spec,
-    build_profile_request_id,
 )
 from agentclaw.community.core.task.todos.template_management_models import (
     TodoTemplateDetail,
@@ -107,15 +107,6 @@ def test_product_profile_spec_is_deterministic_and_uses_only_original_bot_nodes(
     assert "__approval" not in first.stages
 
 
-def test_profile_request_id_is_scoped_and_deterministic() -> None:
-    assert build_profile_request_id("tenant-a", "pre", "todo_tplv_1") == (
-        "todo:profile:tenant-a:pre:todo_tplv_1:v1"
-    )
-    assert build_profile_request_id("tenant-a", "pre", "todo_tplv_1") != (
-        build_profile_request_id("tenant-b", "pre", "todo_tplv_1")
-    )
-
-
 class _CompositionFactory:
     def build(self) -> MethodCompositionTemplate:
         return _COMPOSITION
@@ -126,18 +117,17 @@ class _Profiles:
         self.error = error
         self.calls: list[dict[str, Any]] = []
 
-    async def create_product_profile(self, name, composition, stages, **kwargs):
+    async def create_product_profile(self, name, stages):
         self.calls.append(
             {
                 "name": name,
-                "composition": composition,
                 "stages": stages,
-                **kwargs,
+                "context": current_actor_context(),
             }
         )
         if self.error is not None:
             raise self.error
-        return ProductProfile(101, name, composition, stages)
+        return ProductProfile(101, name, _COMPOSITION, stages)
 
 
 class _Templates:
@@ -242,11 +232,14 @@ async def test_create_publishes_profile_before_revision(monkeypatch) -> None:
         definition=_definition(),
     )
 
-    assert profiles.calls[0]["context"] == ActorContext(
+    assert profiles.calls == [{
+        "name": "Coding delivery",
+        "stages": build_bot_team_product_profile_spec(_definition(), _COMPOSITION).stages,
+        "context": ActorContext(
         PrincipalRef("human", "admin-1"),
         "todo_product",
-    )
-    assert profiles.calls[0]["request_id"].endswith(":pre:todo_tplv_1:v1")
+        ),
+    }]
     assert [call["operation"] for call in templates.calls] == [
         "create_template",
         "publish_product_version",

@@ -107,9 +107,8 @@ export default function LabTodosPage() {
   }, [currentSpaceId, currentUserId, currentUserName, spaceInitialized]);
 
   const executorOptions = useMemo<TodoExecutorOption[]>(
-    () => [
-      ...bots.map((bot) => ({ type: 'bot' as const, id: bot.botId, name: bot.botName })),
-      ...botTeams.flatMap((team) =>
+    () =>
+      botTeams.flatMap((team) =>
         team.publishedRevisionId
           ? [
               {
@@ -122,8 +121,7 @@ export default function LabTodosPage() {
             ]
           : [],
       ),
-    ],
-    [botTeams, bots],
+    [botTeams],
   );
   const schedulerBots = useMemo(
     () => creatorOwnedTodoBots(bots, currentUserId),
@@ -167,7 +165,7 @@ export default function LabTodosPage() {
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-6 py-6">
           <TodoAutomationPage
             spaceId={currentSpaceId}
-            bots={bots}
+            executorOptions={executorOptions}
             schedulerBots={schedulerBots}
             onBack={() => setView('list')}
           />
