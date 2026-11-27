@@ -47,11 +47,11 @@ export function AntCodeProjectOption({ project, disabled = false, onSelect }: An
       disabled={disabled || isRestricted}
       className={cn(
         'h-auto min-h-0 w-full flex-col items-stretch justify-start gap-0 rounded-none border-0 border-b border-divider bg-transparent px-3 py-2 text-left font-normal shadow-none transition-colors last:border-b-0',
-        disabled || isRestricted ? 'cursor-not-allowed bg-slate-50/80 opacity-70' : 'cursor-pointer hover:bg-slate-50',
+        disabled || isRestricted ? 'cursor-not-allowed bg-muted/80 opacity-70' : 'cursor-pointer hover:bg-muted',
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
-        <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-slate-700">{project.name}</div>
+        <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-foreground">{project.name}</div>
         {isRestricted ? (
           <Badge
             tone="neutral"
@@ -61,8 +61,8 @@ export function AntCodeProjectOption({ project, disabled = false, onSelect }: An
           </Badge>
         ) : null}
       </div>
-      {project.description ? <div className="mt-0.5 truncate text-xs text-slate-400">{project.description}</div> : null}
-      <div className="mt-0.5 truncate font-mono text-xs text-slate-400">{project.web_url}</div>
+      {project.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{project.description}</div> : null}
+      <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{project.web_url}</div>
     </Button>
   );
 }
@@ -232,12 +232,14 @@ export function AntCodeProjectSelect({
           placeholder={placeholder}
           disabled={disabled}
           className={cn(
-            'w-full bg-background px-3 py-1.5 text-sm border rounded-lg',
+            'w-full bg-background px-3 py-1.5 text-sm text-foreground border rounded-lg',
             'focus:outline-none focus:ring-1 focus:border-transparent',
-            'placeholder:text-slate-300',
-            'disabled:bg-slate-50 disabled:text-slate-400',
+            'placeholder:text-muted-foreground/50',
+            'disabled:bg-muted/60 disabled:text-muted-foreground',
             'pr-20', // 为右侧图标留出空间
-            error ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-slate-300',
+            error
+              ? 'border-destructive/40 focus:ring-destructive/30'
+              : 'border-input focus:ring-muted-foreground/15',
           )}
         />
         {/* 右侧操作按钮区域 */}
@@ -248,28 +250,28 @@ export function AntCodeProjectSelect({
               variant="ghost"
               size="icon"
               onClick={handleClear}
-              className="p-0.5 text-slate-400 hover:text-red-500 rounded transition-colors"
+              className="p-0.5 text-muted-foreground hover:text-destructive rounded transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </Button>
           )}
-          {!value && <Search className="w-3.5 h-3.5 text-slate-400" />}
+          {!value && <Search className="w-3.5 h-3.5 text-muted-foreground" />}
         </div>
       </div>
 
       {/* 下拉搜索结果 - loading 状态 */}
       {isOpen && isLoading && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-center">
-          <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+        <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg p-3 text-center">
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>搜索中...</span>
           </div>
         </div>
       )}
 
-      {/* 下拉搜索结果 - 有数据 */}
+      {/* 下拉搜索结果 - 有数据(figma 稿 node 2027:25877 代码库搜索展开态) */}
       {isOpen && !isLoading && results.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+        <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {results.map((project, index) => (
             <AntCodeProjectOption key={index} project={project} disabled={disabled} onSelect={handleSelect} />
           ))}
@@ -278,7 +280,7 @@ export function AntCodeProjectSelect({
 
       {/* 无结果提示 */}
       {isOpen && query.trim() && !isLoading && results.length === 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-center text-sm text-slate-400">
+        <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg p-3 text-center text-sm text-muted-foreground">
           未找到匹配的项目
         </div>
       )}
