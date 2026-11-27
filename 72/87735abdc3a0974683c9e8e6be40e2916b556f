@@ -1,0 +1,87 @@
+packages/a2a-chat-client/src/card.ts
+  s_c3ece772cfb1b0::t_aeee07a744c3b8 8,76-79,81
+engine/adapter/src/engine/community/api/transport/a2a/resolve.py
+  s_c3ece772cfb1b0::t_ce032dafd604bd 1-29,32-128,131-177
+  s_c3ece772cfb1b0::t_97b3788d3ec35e 30-31
+  s_c3ece772cfb1b0::t_6cd956c960645a 129-130
+apps/frontend-nextgen/test/services/workspace/botA2aFetch.test.ts
+  s_c3ece772cfb1b0::t_603573223c79a8 4,25-40
+engine/adapter/src/engine/community/api/transport/a2a/card.py
+  s_c3ece772cfb1b0::t_61fb221783cfae 15,33-34,40-41
+packages/a2a-chat-client/test/card.test.ts
+  s_c3ece772cfb1b0::t_f960a026e0f95a 5-14,139
+packages/a2a-chat-client/README.md
+  s_c3ece772cfb1b0::t_9e508f81ce5218 33-34,48
+packages/a2a-chat-client/src/A2AProvider.ts
+  s_c3ece772cfb1b0::t_9e508f81ce5218 905,910-919
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_exec_resolve.py
+  s_c3ece772cfb1b0::t_f960a026e0f95a 1-163
+  s_c3ece772cfb1b0::t_fe39f6f75b4156 164-186
+engine/adapter/src/engine/community/openclaw/client/chat_serialization.py
+  s_c3ece772cfb1b0::t_be38998ffdffcc 15,92,119-120
+  s_c3ece772cfb1b0::t_b588bb83afc9f8 99
+apps/frontend-nextgen/README.md
+  s_c3ece772cfb1b0::t_b40489940871cb 25-30
+engine/adapter/src/engine/community/api/transport/a2a/router.py
+  s_c3ece772cfb1b0::t_ce032dafd604bd 126-127,783,786-787
+  s_c3ece772cfb1b0::t_fb18e8a097cc87 40-44
+engine/adapter/src/engine/community/plugin_api/openclaw/chat.py
+  s_c3ece772cfb1b0::t_05404bf0d1c1ba 64-72
+  s_c3ece772cfb1b0::t_be38998ffdffcc 82
+engine/adapter/src/engine/community/openclaw/client/exec_approval_dispatch.py
+  s_c3ece772cfb1b0::t_dcc45e94207ea5 1-30,32-87,90-116,119-133,136
+  s_c3ece772cfb1b0::t_7763d928283f0f 31,88-89,117-118
+  s_c3ece772cfb1b0::t_fe39f6f75b4156 134-135
+engine/adapter/src/engine/community/api/tests/test_a2a_transport.py
+  s_c3ece772cfb1b0::t_9e9888085c7cc8 768,770,781,785,792
+engine/adapter/src/engine/community/api/transport/a2a/engine_bridge.py
+  s_c3ece772cfb1b0::t_05404bf0d1c1ba 177-180
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_c3ece772cfb1b0::t_603573223c79a8 665-668
+engine/adapter/src/engine/community/core/adapters/openclaw/exec_resolve.py
+  s_c3ece772cfb1b0::t_05404bf0d1c1ba 1-69,71,73-98
+  s_c3ece772cfb1b0::t_fe39f6f75b4156 70,72
+engine/adapter/src/engine/community/openclaw/client/chat_stream.py
+  s_c3ece772cfb1b0::t_e437c7eed96c64 308-313
+  s_c3ece772cfb1b0::t_b588bb83afc9f8 80,546,552-564
+  s_c3ece772cfb1b0::t_dcc45e94207ea5 565-567
+engine/adapter/src/engine/community/openclaw/client/tests/test_exec_approval_dispatch.py
+  s_c3ece772cfb1b0::t_fe39f6f75b4156 205-210
+  s_c3ece772cfb1b0::t_a3b98f607518ba 166-204,211-225
+  s_c3ece772cfb1b0::t_6a5d934c8a1871 1-165
+packages/a2a-chat-client/test/provider.test.ts
+  s_c3ece772cfb1b0::t_9e508f81ce5218 721-726,747-753,756-779,852-854
+engine/adapter/src/engine/community/core/chat/exec_approval.py
+  s_c3ece772cfb1b0::t_aeee07a744c3b8 1-26
+engine/adapter/src/engine/community/plugins/openclaw/_chat.py
+  s_c3ece772cfb1b0::t_05404bf0d1c1ba 93-103
+  s_c3ece772cfb1b0::t_be38998ffdffcc 113,142-143
+engine/adapter/src/engine/community/core/adapters/openclaw/chat.py
+  s_c3ece772cfb1b0::t_05404bf0d1c1ba 23,39-47,49,51-57,60-62,64-69
+  s_c3ece772cfb1b0::t_fe39f6f75b4156 48,58-59,63
+  s_c3ece772cfb1b0::t_be38998ffdffcc 50,103,160-161
+  s_c3ece772cfb1b0::t_97b3788d3ec35e 26,34
+apps/frontend-nextgen/src/services/workspace/botA2aFetch.ts
+  s_c3ece772cfb1b0::t_603573223c79a8 1-2,76-78,80
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_c3ece772cfb1b0::t_be38998ffdffcc 163-164,171
+engine/adapter/README.md
+  s_c3ece772cfb1b0::t_aeee07a744c3b8 58-73
+  s_c3ece772cfb1b0::t_7763d928283f0f 74-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7287735abdc3a0974683c9e8e6be40e2916b556f",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
