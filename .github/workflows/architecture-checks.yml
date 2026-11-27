@@ -42,7 +42,6 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.94.0 --profile minimal
-          rustup toolchain install nightly-2025-11-30 --profile minimal
           rustup default 1.94.0
           rustc --version
           cargo --version

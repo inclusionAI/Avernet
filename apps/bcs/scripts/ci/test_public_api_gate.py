@@ -22,10 +22,16 @@ class PublicApiGateTests(unittest.TestCase):
                             + cleanup + '\ncleanup', "bash", directory], check=True)
             self.assertFalse(checkout.exists())
 
-    def test_ci_installs_pinned_nightly(self):
+    def test_ci_self_installs_pinned_nightly(self):
+        # The repo toolchain invariant (test_bcs_rust_toolchain) forbids any
+        # toolchain install but the pinned stable in workflow text, so the
+        # gate self-installs its pinned nightly when running under CI.
         workflow = (ROOT / ".github/workflows/architecture-checks.yml").read_text()
-        self.assertIn("rustup toolchain install nightly-2025-11-30", workflow)
+        self.assertNotIn("nightly", workflow)
         self.assertIn("cargo-public-api --version 0.52.0", workflow)
+        script = SCRIPT.read_text()
+        self.assertIn('rustup toolchain install "$NIGHTLY_TOOLCHAIN" --profile minimal', script)
+        self.assertIn('rustup component add rust-src --toolchain "$NIGHTLY_TOOLCHAIN"', script)
 
     def test_ci_prerequisites_are_mandatory(self):
         self.assertIn('PREREQUISITE_EXIT=1', SCRIPT.read_text())

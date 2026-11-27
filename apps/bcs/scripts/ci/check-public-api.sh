@@ -57,8 +57,21 @@ if [[ -z "$pubapi_bin" ]]; then
 fi
 
 if ! rustup toolchain list 2>/dev/null | grep -q "$NIGHTLY_TOOLCHAIN"; then
-  echo "SKIP [API-1]: 未安装 pinned nightly toolchain $NIGHTLY_TOOLCHAIN（rustdoc JSON 需要）"
-  exit "$PREREQUISITE_EXIT"
+  if [[ "${CI:-false}" == "true" ]]; then
+    # CI 自举：工作流只装 pinned stable（test_bcs_rust_toolchain 的不变量），
+    # rustdoc JSON 的 pinned nightly 由本门禁按需安装，缺失即 FAIL，绝不 SKIP。
+    rustup toolchain install "$NIGHTLY_TOOLCHAIN" --profile minimal || {
+      echo "FAIL [API-1]: pinned nightly $NIGHTLY_TOOLCHAIN 安装失败"
+      exit 1
+    }
+    rustup component add rust-src --toolchain "$NIGHTLY_TOOLCHAIN" || {
+      echo "FAIL [API-1]: rust-src 组件安装失败（$NIGHTLY_TOOLCHAIN）"
+      exit 1
+    }
+  else
+    echo "SKIP [API-1]: 未安装 pinned nightly toolchain $NIGHTLY_TOOLCHAIN（rustdoc JSON 需要）"
+    exit "$PREREQUISITE_EXIT"
+  fi
 fi
 
 fail=0
