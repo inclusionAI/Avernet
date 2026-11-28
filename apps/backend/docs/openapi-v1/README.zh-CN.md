@@ -579,7 +579,7 @@ Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的�
 契约**，而且发布出去的文档里两者都在。不要在没有先决定「这个地址上它该是哪个含义」之前
 就去「统一」它们。
 
-`tests/…/openapi_v1/test_explicit_user_id.py` 针对生成的文档断言了以上全部 —— 带它的
+`tests/…/openapi_v1/test_explicit_user_id_schema.py` 针对生成的文档断言了以上全部 —— 带它的
 56 个、不带它的 4 个、`user_id` 从不作为 body 字段或路径段出现、以及 `bot_id` 的位置
 没有变化 —— 所以破坏该规则的路由会在那里失败，而不是等到 review。
 
@@ -1125,7 +1125,7 @@ Agent 状态。它们不是产品面，而是其它端点的数字所参照的�
 
 **不按用户维度收敛。** 两者都不带 `?user_id=` —— 它们不读也不写任何数据，没有可供该参数
 指称的范围。参见上文"为终端用户命名"；HTTP 那个已与另外四个同理豁免的目录类读操作一起
-记录在 `test_explicit_user_id.py` 中，并且不声明 `403`。
+记录在 `test_explicit_user_id_schema.py` 中，并且不声明 `403`。
 
 **socket 的契约**（在此写全，因为 WebSocket 没有 OpenAPI 表示，**不会**出现在任何生成
 产物里 —— 下面这份就是契约全文，而不是某份机器可读文件的摘要）：

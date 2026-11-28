@@ -176,6 +176,7 @@ DEPLOY_PROFILE=test uv run --no-sync pytest -q \
   tests/community/architecture \
   tests/community/framework/test_coverage_gate.py \
   tests/community/adapters/http/openapi_v1/test_explicit_user_id.py \
+  tests/community/adapters/http/openapi_v1/test_explicit_user_id_schema.py \
   tests/community/adapters/http/openapi_v1/test_schema_docs.py \
   tests/community/core/bot_config_surface/test_no_handler_only_checks.py
 ```

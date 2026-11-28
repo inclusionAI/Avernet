@@ -90,7 +90,7 @@ def test_hello_needs_no_user_id(client):
     """Not user-scoped, so the parameter every other operation requires is absent.
 
     Asserted as a *success without it* rather than as a schema property: the
-    document side is covered by ``test_explicit_user_id.py``, and what matters
+    document side is covered by ``test_explicit_user_id_schema.py``, and what matters
     to a driver is that the call it makes is complete.
     """
     assert client.get(_HELLO, headers=_authorized()).status_code == 200

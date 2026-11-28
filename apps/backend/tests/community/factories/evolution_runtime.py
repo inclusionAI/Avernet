@@ -147,5 +147,3 @@ BINDING = Binding(
     budget=Budget(max_usd=5.0, max_wall_clock_s=600),
     params={},
 )
-
-

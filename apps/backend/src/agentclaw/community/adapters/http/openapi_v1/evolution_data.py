@@ -66,11 +66,8 @@ from .bots.schemas_genome import (
 from .contracts import BotIdPath, PageParams
 from .engine_runtime.enums import RuntimeStage
 from .engine_runtime.gating import resolve_operable_bot
-from .engine_runtime.sessions.router import (
-    SessionIdPath,
-    list_operator_messages,
-    list_operator_sessions,
-)
+from .engine_runtime.sessions.operator_reads import list_operator_messages, list_operator_sessions
+from .engine_runtime.sessions.router import SessionIdPath
 from .responses import envelope, mapped_error_response, unmapped_error_response
 from .schemas_evolution_models import CompletionRequest, CompletionResult
 

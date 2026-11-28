@@ -228,7 +228,7 @@ not real Bot quality or a deployed Worker.
 
 ## Explicit human RSI promotion
 
-[ADR 0027](../../../../../../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+[ADR 0028](../../../../../../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)
 adds `promote_manual` for an exact strategy-run candidate, not an evaluation pass.
 Backend validates the immutable authorization and candidate provenance, current
 ADMIN operator, live drift and frozen parent, then uses the existing DirectApplier.

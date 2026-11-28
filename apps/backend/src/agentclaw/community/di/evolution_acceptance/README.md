@@ -213,4 +213,3 @@ apps/evolution/.venv/bin/python apps/evolution/scripts/evolution_events.py \
 
 当前 Bot RSI UI 走 Backend 薄入口和独立 Evolution 服务；本页 CLI 是另一条显式验收路径，
 不代表真实页面已验收。completed/pending 仍不代表评分通过或已晋升。
-

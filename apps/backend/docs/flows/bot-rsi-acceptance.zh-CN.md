@@ -217,6 +217,6 @@ BASE_URL：   http://<你的-simulator-主机>:<端口>
 实际文件与未授权文件对照、drift、独立复测结果。不要记录凭据或私有会话原文到公共仓库。
 
 维护依据：[控制入口与新 Bot checklist](bot-evolution-control.md#fresh-bot-local-skill-checklist)、
-[人工授权边界](../../../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)、
+[人工授权边界](../../../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)、
 [Mutation Scope](../../../evolution/src/avernet_evolution/core/evolution_run/README.md#frozen-mutation-scope)。
 本文经源码与样例配置核对；新 Bot 的本轮真实验收需执行后另外记录，文档存在不等于部署通过。

@@ -31,5 +31,3 @@ async def test_platform_units_and_destroy_failure():
     with pytest.raises(RuntimeError, match="confirm destruction"):
         await adapter.destroy("s1")
     runtime.destroy_sandbox.assert_called_once()
-
-

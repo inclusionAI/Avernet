@@ -9,7 +9,7 @@ Canonical Python 包为 `avernet_evolution`，不依赖 Backend 的 Python 包�
 scope, protected final strategy output and explicit human promotion authorization
 are implemented. Authorization records `basis=human`; a separate Backend Apply
 settles delivery without changing the original evaluation verdict. See the
-[manual authorization decision](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+[manual authorization decision](../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)
 and [fresh-Bot checklist](../backend/docs/flows/bot-evolution-control.md#fresh-bot-local-skill-checklist).
 This is source/test status, not confirmation that all running images are current
 or that sandbox benchmarks pass. Real public/business benchmark evaluation is
@@ -501,7 +501,7 @@ acceptance must be recorded separately from these isolated tests.
 
 ## 人工晋升授权与显式 Apply（非评测通过）
 
-依据 [ADR 0027](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)，
+依据 [ADR 0028](../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)，
 人工测试/干预可代替 pending / inconclusive 的本次评测授权，但不能覆盖 reject、
 已知新增失败、已记录/当前 floor 失败、incident、冻结/kill、现场漂移或过期 parent。
 没有 scanner 时如实记录 `not_run`。原 verdict / gate / risk-review 不改写。

@@ -16,4 +16,4 @@ See [knowledge standard](../agents/knowledge-standard.md).
 
 ## Promotion intervention
 
-- [Human promotion authorization is not evaluation](0027-human-promotion-authorization-is-not-evaluation.md) amends ADR 0020 only for audited human testing/intervention.
+- [Human promotion authorization is not evaluation](0028-human-promotion-authorization-is-not-evaluation.md) amends ADR 0020 only for audited human testing/intervention.

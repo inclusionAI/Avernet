@@ -44,6 +44,6 @@
 
 ## Amendment (2026-11-26)
 
-[ADR 0027](0027-human-promotion-authorization-is-not-evaluation.md) adds an explicit human testing/intervention authorization
+[ADR 0028](0028-human-promotion-authorization-is-not-evaluation.md) adds an explicit human testing/intervention authorization
 without changing the verification verdict. Normal automated promotion remains
 evaluation-gated; platform-only delivery and safety/provenance constraints remain.

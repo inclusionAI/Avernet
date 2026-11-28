@@ -575,7 +575,7 @@ the authorization key and body for same-request recovery.
 Pending/applying, applied, applied_partial and apply_failed are distinct; partial
 is not full acceptance. This intervention does not implement sandbox benchmark
 quality evaluation. Record-only risk-review approval remains separate.
-See [ADR 0027](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+See [ADR 0028](../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)
 and `test/components/rsi/RsiManualPromotion.test.tsx`.
 
 

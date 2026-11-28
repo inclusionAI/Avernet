@@ -209,7 +209,7 @@ Backend、前端一起部署；旧策略版本和已有 Binding 不自动迁移�
 
 ## Explicit human authorization and separate Apply
 
-[ADR 0027](../../../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+[ADR 0028](../../../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)
 adds an intervention path independent of the record-only risk-review approval above.
 Current ADMIN requests `POST /candidates/{candidate_id}:authorize-promotion` with
 `Idempotency-Key`, exact revision/parent and a reason. Evolution atomically saves

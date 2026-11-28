@@ -787,7 +787,7 @@ this is*, and pointing it at someone else is a 403. **Same spelling, opposite
 contract**, and the published document carries both. Do not "unify" them without
 deciding which meaning the address should have.
 
-`tests/…/openapi_v1/test_explicit_user_id.py` asserts all of the above against
+`tests/…/openapi_v1/test_explicit_user_id_schema.py` asserts all of the above against
 the generated document — the 56 that take it, the 4 that do not, that `user_id`
 is never a body field or a path segment, and that `bot_id`'s placement is
 unchanged — so a route that breaks the rule fails there rather than in review.
@@ -2049,7 +2049,7 @@ would describe a path no caller can take, which is why they are not exempt.
 
 **Not user-scoped.** Neither takes `?user_id=` — they read and write nothing, so
 there is no scope for it to name. See "Naming the end user" above; the HTTP one
-is recorded in `test_explicit_user_id.py` alongside the four catalogue reads
+is recorded in `test_explicit_user_id_schema.py` alongside the four catalogue reads
 that are exempt for the same reason, and it documents no `403`.
 
 **The socket's contract**, written out here because a WebSocket has no OpenAPI

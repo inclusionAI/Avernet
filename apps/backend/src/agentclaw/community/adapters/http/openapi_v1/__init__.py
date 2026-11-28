@@ -132,7 +132,7 @@ them without deciding which meaning the address should have.
 Because of those exemptions the dependency is declared **per handler**, not per
 group: two of the four sit inside groups whose other routes do take it (1 of 13
 in ``bots``, 3 of 6 in ``mcp``), so a group-level dependency would put the
-parameter on them. ``test_explicit_user_id.py`` is what makes a new route
+parameter on them. ``test_explicit_user_id_schema.py`` is what makes a new route
 impossible to forget — the same trade ``test_path_convention.py`` makes for the
 addressing rule above.
 

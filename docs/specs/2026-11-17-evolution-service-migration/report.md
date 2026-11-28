@@ -676,7 +676,7 @@ Backend 四个旧 core 目录共44个模块别名、220行。别名指向 canoni
 
 ### 人工链路及本轮收口
 
-遵循 [ADR 0027](../../adr/0027-human-promotion-authorization-is-not-evaluation.md)：
+遵循 [ADR 0028](../../adr/0028-human-promotion-authorization-is-not-evaluation.md)：
 人工判断只形成不可变的 `basis=human` 授权，不把 `pending` / `inconclusive` 变成
 `accept`，也不修改原有门禁和评审记录。授权与 Apply 是两次明确操作，Worker 没有
 交付能力；原授权人须以当前 ADMIN 权限执行 Apply。
