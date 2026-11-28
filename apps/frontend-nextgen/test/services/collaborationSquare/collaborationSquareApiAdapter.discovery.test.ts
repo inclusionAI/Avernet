@@ -221,6 +221,8 @@ describe('CollaborationSquareApiAdapter listBotPage（BCS v1 公开候选）', (
       undefined,
     );
     expect(page.items.map((bot) => bot.relationshipStatus)).toEqual(['friend', 'applying']);
+    // AC-2：回填必须带上后端返回的 pending 申请单号，未申请的目标不得残留旧单号。
+    expect(page.items.map((bot) => bot.pendingFriendRequestId)).toEqual([undefined, 'request-1']);
   });
 
   it('BCS 候选按 owner_user_id 而非 created_by 匹配登录用户，标记自有 Bot', async () => {

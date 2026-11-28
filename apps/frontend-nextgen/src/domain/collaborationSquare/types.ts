@@ -290,6 +290,12 @@ export interface HumanBotActionContext {
 
 export interface FriendRequestResult {
   status: BotRelationshipStatus;
+  /**
+   * 申请中（status=applying）时后端新建的 pending 申请单号。
+   * 「重新申请」自救入口用它刷新本地 pendingFriendRequestId，保证下一次重试取消的是
+   * 本次新建的申请单；非申请中状态不返回。
+   */
+  pendingRequestId?: string;
 }
 
 export interface OpenBotConversationResult {

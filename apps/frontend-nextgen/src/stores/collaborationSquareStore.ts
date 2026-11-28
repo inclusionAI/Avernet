@@ -8,7 +8,7 @@ import type {
   PublicTask,
   TaskStatusFilter,
 } from '@/domain/collaborationSquare/types';
-import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
+import { applyBotRelationshipUpdate } from '@/domain/collaborationSquare/botRelationship';
 import { create } from 'zustand';
 
 export interface CollaborationSquareState {
@@ -49,7 +49,7 @@ export interface CollaborationSquareState {
   setSelectedBotId: (id: string | null) => void;
   setSelectedGroupId: (id: string | null) => void;
   setBusy: (key: string, busy: boolean) => void;
-  updateBotRelationship: (targetId: string, status: PublicBot['relationshipStatus']) => void;
+  updateBotRelationship: (targetId: string, status: PublicBot['relationshipStatus'], pendingRequestId?: string) => void;
   removeBot: (id: string) => void;
   removeGroup: (id: string) => void;
   setTasks: (tasks: PublicTask[]) => void;
@@ -115,9 +115,9 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
     set((state) => ({
       busyKeys: busy ? [...new Set([...state.busyKeys, key])] : state.busyKeys.filter((item) => item !== key),
     })),
-  updateBotRelationship: (targetId, relationshipStatus) =>
+  updateBotRelationship: (targetId, relationshipStatus, pendingRequestId) =>
     set((state) => ({
-      bots: state.bots.map((bot) => (getPublicBotTargetId(bot) === targetId ? { ...bot, relationshipStatus } : bot)),
+      bots: state.bots.map((bot) => applyBotRelationshipUpdate(bot, targetId, relationshipStatus, pendingRequestId)),
     })),
   removeBot: (id) =>
     set((state) => ({

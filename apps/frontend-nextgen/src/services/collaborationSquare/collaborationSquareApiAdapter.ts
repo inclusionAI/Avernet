@@ -317,7 +317,16 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
       if (response.code !== 20100)
         throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的业务码');
       const status = response.data?.status?.trim().toLowerCase();
-      if (status === 'pending') return { status: 'applying' };
+      // 申请响应中的 request_ids[0] 是本次新建 pending 申请单号；透传给 store 刷新本地
+      // pendingFriendRequestId，否则「重新申请」第二次起仍持旧单号，取消旧单后被后端 dedup 吸收。
+      const pendingRequestId = response.data?.request_ids?.[0]?.trim();
+      if (status === 'pending') {
+        // pending 必带新建申请单号：缺失即协议异常，不能把「无单号」当成功，
+        // 否则本地无法取消最新申请，后续重试会被后端 dedup 吸收。
+        if (!pendingRequestId)
+          throw new CollaborationSquareError('protocol_error', '好友申请接口未返回申请单号');
+        return { status: 'applying', pendingRequestId };
+      }
       if (status === 'approved') return { status: 'friend' };
       if (status === 'public_no_edge') return { status: 'none' };
       throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的状态');

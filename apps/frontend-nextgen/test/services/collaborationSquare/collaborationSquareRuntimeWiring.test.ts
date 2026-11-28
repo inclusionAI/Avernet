@@ -172,7 +172,7 @@ describe('collaboration square BOT runtime wiring（BCS v1）', () => {
         actorId: 'human_900003',
         userId: '900003',
       }),
-    ).resolves.toEqual({ status: 'applying' });
+    ).resolves.toEqual({ status: 'applying', pendingRequestId: 'request-1' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/openapi/v1/collaboration/friend-connections/requests');
