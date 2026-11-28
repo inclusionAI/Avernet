@@ -75,9 +75,14 @@ async def run_chat(
     Returns:
         RunResponse: Conversation response
     """
-    try:
-        metadata = request.metadata or {}
+    metadata = request.metadata or {}
+    if "bot_options" in metadata and not isinstance(metadata["bot_options"], dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": OpenAPICode.INVALID_PARAM, "message": "Invalid parameter"},
+        )
 
+    try:
         logger.info(
             f"run_chat: bot_id={api_key_record.app_id}, "
             f"api_key_prefix={api_key_record.api_key_prefix}"

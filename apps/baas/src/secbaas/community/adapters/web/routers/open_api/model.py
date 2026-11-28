@@ -19,7 +19,9 @@ class RunRequest(BaseModel):
             "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
-            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
+            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent. "
+            "bot_options (object, optional): Routing options. Omit this field or provide an object; "
+            "non-object values, including null, are rejected."
         ),
     )
 
