@@ -21,12 +21,12 @@ describe('Task Escort Workspace domain contracts', () => {
   it('ignores obsolete demo flags and strips them while preserving unrelated route parameters', () => {
     expect(readWorkspaceMode()).toBe('live');
     expect(readWorkspaceMode('')).toBe('live');
-    expect(readRoute()).toEqual({ page: 'dashboard', period: '7d' });
+    expect(readRoute()).toEqual({ page: 'runs', period: '7d' });
     expect(readWorkspaceMode('?demo=true')).toBe('live');
     for (const search of ['?demo=1', '?demo=0', '?demo=1&demo=1', '?demo=1&mode=demo']) {
       expect(readWorkspaceMode(search)).toBe('live');
     }
-    expect(readRoute('?view=not-real&period=bad')).toEqual({ page: 'dashboard', period: '7d' });
+    expect(readRoute('?view=not-real&period=bad')).toEqual({ page: 'runs', period: '7d' });
     expect(readRoute('?view=runs&period=today')).toEqual({ page: 'runs', period: 'today' });
     const search = routeSearch('?demo=1&keep=value', { page: 'issues', period: '30d' });
     expect(new URLSearchParams(search).get('keep')).toBe('value');

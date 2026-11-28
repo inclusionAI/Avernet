@@ -2,10 +2,10 @@ import { workspacePages } from '@/domain/taskEscortWorkspace';
 import { readTaskEscortRoute, taskEscortSearch } from '@/services/taskEscortWorkspace/navigation';
 
 describe('任务护航 URL 契约', () => {
-  it('默认真实模式及七天大盘，未知页签与时间范围安全回退', () => {
-    expect(readTaskEscortRoute('')).toEqual({ page: 'dashboard', period: '7d', mode: 'live' });
+  it('默认真实模式及七天运行概览，未知页签与时间范围安全回退', () => {
+    expect(readTaskEscortRoute('')).toEqual({ page: 'runs', period: '7d', mode: 'live' });
     expect(readTaskEscortRoute('?view=versions&period=forever&demo=true')).toEqual({
-      page: 'dashboard',
+      page: 'runs',
       period: '7d',
       mode: 'live',
     });
@@ -17,7 +17,7 @@ describe('任务护航 URL 契约', () => {
       mode: 'live',
     });
     expect(readTaskEscortRoute('?demo=0').mode).toBe('live');
-    expect(readTaskEscortRoute('?view=efficiency').page).toBe('dashboard');
+    expect(readTaskEscortRoute('?view=efficiency').page).toBe('runs');
   });
   it.each(['live', 'demo'] as const)('视图切换保留宿主 query 并无条件移除旧 demo，兼容 mode=%s 入参', (mode) => {
     const next = taskEscortSearch('?host=desktop&demo=1&demo=0&view=dashboard', { page: 'runs', period: '30d', mode });

@@ -135,7 +135,11 @@ export function Runs({ demo }: ViewProps) {
             <div role="status">
               <Empty
                 title="没有匹配的运行记录"
-                description="调整状态、工作流或搜索条件后重试。"
+                description={
+                  demo.query || demo.runFilter !== 'all' || demo.workflowId !== 'all'
+                    ? '调整状态、工作流或搜索条件后重试。'
+                    : '运行记录由执行引擎执行工作流后产生；执行一次工作流后即可在此查看。'
+                }
                 icon={<SearchX className="size-5" />}
                 action={
                   <Button variant="outline" size="sm" onClick={clear}>

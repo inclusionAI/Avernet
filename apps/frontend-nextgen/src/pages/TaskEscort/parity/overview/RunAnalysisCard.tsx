@@ -22,10 +22,10 @@ export function RunAnalysisCard({ status, onEvidence }: { status: string | null;
       <section aria-label="聚合分析" className="rounded-lg border border-border bg-muted/20 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-xs font-medium">聚合分析（独立状态）</h4>
-          <Badge tone="neutral">不可用</Badge>
+          <Badge tone="neutral">能力建设中</Badge>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          未接入已验证的聚合分析协议；不从单次运行状态推断跨运行结论、分析完成或修复成功。
+          能力建设中：未接入已验证的聚合分析协议；不从单次运行状态推断跨运行结论、分析完成或修复成功。
         </p>
         <Button disabled variant="outline" size="sm" className="mt-3">
           查看聚合结论与来源

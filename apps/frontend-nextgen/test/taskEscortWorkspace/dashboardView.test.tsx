@@ -101,7 +101,7 @@ it('explicit forbidden replaces all dashboard data and never suggests demo fallb
   data.forbidden = true;
   hook.mockReturnValue(data as any);
   render(<Dashboard demo={demo} scope={{ key: 'u:s', ready: true }} />);
-  expect(screen.getByText('只有管理员可以查看全局数据大盘')).toBeTruthy();
+  expect(screen.getByText('数据大盘仅管理员可见')).toBeTruthy();
   expect(screen.queryByText('1,234')).toBeNull();
   expect(screen.queryByText(/演示/)).toBeNull();
 });

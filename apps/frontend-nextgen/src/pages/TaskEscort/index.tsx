@@ -1,8 +1,12 @@
 import { Button, Empty } from '@/components/ui';
 import { Segmented } from '@/components/ui/Segmented';
 import { useTaskEscortWorkspaceContext } from '@/hooks/taskEscortParity/useTaskEscortWorkspaceContext';
+import { useTaskEscortDashboardAccess } from '@/hooks/taskEscortWorkspace/useTaskEscortDashboardAccess';
 import { useTaskEscortWorkspaceScope } from '@/hooks/taskEscortWorkspace/useTaskEscortWorkspaceScope';
 import { useTaskEscortWorkspace } from '@/hooks/useTaskEscortWorkspace';
+import { clearWorkspaceDeepLinks } from '@/services/taskEscortParity/workspaceNavigation';
+import { history } from '@umijs/max';
+import { useEffect, useRef } from 'react';
 import { Dashboard } from './Dashboard';
 import { GuardSidebar } from './Navigation';
 import { WorkspaceHeader } from './WorkspaceHeader';
@@ -15,7 +19,22 @@ export default function TaskEscortPage() {
   const legacyWorkspace = useTaskEscortWorkspace(scope.key, { ...scope, loadWorkspace: false });
   const { context, page, workflows, selectWorkflow, showIntroduction, setProductNavigation } =
     useTaskEscortWorkspaceContext(scope);
+  const dashboardAccess = useTaskEscortDashboardAccess(scope);
+  const showDashboard = dashboardAccess !== 'denied';
   const editorWorkspace = page === 'editor' && !showIntroduction;
+  // 换空间后旧空间的 workflowId / runId 等深链必须失效，否则会串用上一个空间的数据或报“无权访问”。
+  const previousScopeKey = useRef(scope.key);
+  useEffect(() => {
+    if (previousScopeKey.current === scope.key) return;
+    previousScopeKey.current = scope.key;
+    const current = history.location;
+    const cleaned = clearWorkspaceDeepLinks(current.search);
+    if (cleaned !== current.search) history.replace(`${current.pathname}${cleaned}${current.hash}`);
+  }, [scope.key]);
+  // 普通身份即使显式深链到数据大盘，也直接回到运行概览，不展示无权死胡同。
+  useEffect(() => {
+    if (page === 'dashboard' && dashboardAccess === 'denied' && !showIntroduction) context.navigate('runs');
+  }, [page, dashboardAccess, showIntroduction, context.navigate]);
   // Keep the real legacy controller intact for the independently owned dashboard.
   const dashboardController = {
     ...legacyWorkspace,
@@ -27,7 +46,12 @@ export default function TaskEscortPage() {
       className={`task-escort-workspace task-escort-workspace-root${editorWorkspace ? ' task-escort-editor' : ''}`}
     >
       <div className="guard-layout">
-        <GuardSidebar page={page} navigate={context.navigate} showIntroduction={showIntroduction} />
+        <GuardSidebar
+          page={page}
+          navigate={context.navigate}
+          showIntroduction={showIntroduction}
+          showDashboard={showDashboard}
+        />
         <section
           aria-label="任务护航内容"
           tabIndex={-1}

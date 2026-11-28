@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { overviewStatusLabels } from '@/domain/taskEscortParity/overview';
 import type { OverviewReadState } from '@/domain/taskEscortParity/overviewTypes';
 
-export const writeUnavailable = '写入协议与权限确认尚未接入；此页面仅支持真实只读查看。';
+export const writeUnavailable = '能力建设中：写入协议与权限确认尚未接入，本页仅支持真实只读查看。';
 export function ReadFeedback({
   state,
   label,
@@ -119,7 +119,8 @@ export function OverviewTabs<T extends string>({
 export function UnavailableActions({ runId, compact = false }: { runId: string; compact?: boolean }) {
   return (
     <TooltipProvider>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-[10px] font-medium text-muted-foreground">能力建设中</span>
         {['分析', '重跑', '自动修复', '审批', '删除'].map((label) => (
           <Tooltip key={label}>
             <TooltipTrigger asChild>

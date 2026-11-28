@@ -58,16 +58,16 @@ const CreateWorkflowFromYamlModal: React.FC<CreateWorkflowFromYamlModalProps> = 
     <Modal open={open} onOpenChange={(nextOpen) => !loading && onOpenChange(nextOpen)}>
       <ModalContent size="md">
         <ModalHeader>
-          <ModalTitle>从 YAML 创建工作流</ModalTitle>
+          <ModalTitle>从工作流配置文本创建工作流</ModalTitle>
         </ModalHeader>
         <div className="space-y-4">
           <label className="block text-xs font-medium">
-            粘贴 YAML
+            粘贴工作流配置文本（YAML）
             <Textarea
               className="mt-1 min-h-48 font-mono"
               value={yaml}
               variant={yamlError ? 'error' : 'default'}
-              placeholder="在此粘贴 WorkflowSpec YAML…"
+              placeholder="在此粘贴工作流配置文本（YAML）…"
               onChange={(event) => setYaml(event.target.value)}
             />
             {yamlError && <span className="mt-1 block text-[11px] text-destructive">{yamlError}</span>}

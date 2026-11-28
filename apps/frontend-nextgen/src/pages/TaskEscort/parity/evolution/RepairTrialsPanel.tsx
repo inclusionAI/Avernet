@@ -45,6 +45,7 @@ export function RepairTrialsPanel({ context, taskId }: { context: TaskEscortPari
             >
               下一批试运行
             </Button>
+            <span className="self-center text-xs text-muted-foreground">启动试运行：能力建设中</span>
             <Button size="sm" disabled>
               启动试运行
             </Button>

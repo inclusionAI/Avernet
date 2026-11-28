@@ -38,6 +38,9 @@ jest.mock('@umijs/max', () => {
 jest.mock('@/hooks/taskEscortWorkspace/useTaskEscortWorkspaceScope', () => ({
   useTaskEscortWorkspaceScope: () => ({ key: 'real-user:real-space', userId: 'real-user', ready: true }),
 }));
+jest.mock('@/hooks/taskEscortWorkspace/useTaskEscortDashboardAccess', () => ({
+  useTaskEscortDashboardAccess: () => 'allowed',
+}));
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
 jest.mock('@/services/taskEscort/taskEscortService', () => ({
   taskEscortService: { listWorkflows: jest.fn(), listFlowRuns: jest.fn(), getFlowRun: jest.fn() },

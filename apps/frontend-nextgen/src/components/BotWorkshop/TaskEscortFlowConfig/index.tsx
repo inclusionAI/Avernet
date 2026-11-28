@@ -3,12 +3,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
+import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import { useTaskEscortFlowConfig } from '@/hooks/useTaskEscortFlowConfig';
 import { dump as yamlDump } from 'js-yaml';
 import { Plus, RefreshCw, Save } from 'lucide-react';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import CreateWorkflowFromYamlModal from './CreateWorkflowFromYamlModal';
 import { NodeEditorPanel } from './node-editor/NodeEditorPanel';
@@ -18,6 +19,8 @@ interface FlowConfigProps {
   botOwnerId?: string;
   botId?: string;
   enabled: boolean;
+  /** 供父级页签在离开「流程配置」前提示未保存修改。 */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type ViewMode = 'dag' | 'yaml';
@@ -37,7 +40,7 @@ function toText(value: unknown, fallback = ''): string {
   return fallback;
 }
 
-const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, enabled }) => {
+const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, enabled, onDirtyChange }) => {
   const {
     workflows,
     selectedWorkflowId,
@@ -47,6 +50,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
     isCreatingWorkflow,
     isSaving,
     error,
+    dirty,
     selectWorkflow,
     refreshList,
     createWorkflowFromYaml,
@@ -57,6 +61,18 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
   const [viewMode, setViewMode] = useState<ViewMode>('dag');
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+
+  const requestWorkflow = (workflowId: string) => {
+    if (workflowId === selectedWorkflowId) return;
+    if (dirty) {
+      setPendingSwitch(workflowId);
+      return;
+    }
+    selectWorkflow(workflowId);
+  };
 
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
@@ -84,7 +100,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
       {/* Toolbar */}
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <Select value={selectedWorkflowId || undefined} onValueChange={(v) => selectWorkflow(v)}>
+          <Select value={selectedWorkflowId || undefined} onValueChange={requestWorkflow}>
             <SelectTrigger className="h-8 text-xs">
               {selectedWorkflowId ? (
                 <span className="truncate">{selectedWorkflow?.title || selectedWorkflowId}</span>
@@ -105,7 +121,12 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
             </SelectContent>
           </Select>
         </div>
-        <Button variant="secondary" size="icon" aria-label="从 YAML 创建工作流" onClick={() => setCreateOpen(true)}>
+        <Button
+          variant="secondary"
+          size="icon"
+          aria-label="从工作流配置文本创建工作流"
+          onClick={() => setCreateOpen(true)}
+        >
           <Plus aria-hidden className="h-4 w-4" />
         </Button>
         <Button
@@ -143,7 +164,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
               DAG
             </Button>
             <Button variant={viewMode === 'yaml' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('yaml')}>
-              YAML
+              配置文本
             </Button>
           </Card>
 
@@ -184,7 +205,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
           {viewMode === 'yaml' && (
             <Card className="overflow-hidden shadow-none">
               <div className="border-b border-divider bg-[var(--color-panel-muted)] px-3 py-1.5 text-xs font-medium">
-                WorkflowSpec YAML
+                工作流配置文本（YAML）
               </div>
               <pre className="max-h-[400px] overflow-auto bg-[var(--color-panel-muted)] p-3 text-[11px] leading-relaxed">
                 <code className="font-mono">{yamlText || '# 无内容'}</code>
@@ -203,6 +224,32 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
         onOpenChange={setCreateOpen}
         onCreate={createWorkflowFromYaml}
       />
+
+      <Modal open={!!pendingSwitch} onOpenChange={(open) => !open && setPendingSwitch(null)}>
+        <ModalContent size="sm">
+          <ModalHeader>
+            <ModalTitle>有未保存的修改</ModalTitle>
+          </ModalHeader>
+          <p className="text-sm text-[var(--color-muted)]">
+            切换工作流会丢弃当前未保存的节点修改。是否继续？
+          </p>
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setPendingSwitch(null)}>
+              继续编辑
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const next = pendingSwitch;
+                setPendingSwitch(null);
+                if (next) selectWorkflow(next);
+              }}
+            >
+              放弃修改并切换
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   );
 };

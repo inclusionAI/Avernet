@@ -1,4 +1,5 @@
 import {
+  clearWorkspaceDeepLinks,
   readWorkspacePage,
   workspaceNavigationSearch,
   workspaceProductNavigationSearch,
@@ -6,12 +7,12 @@ import {
 } from '@/services/taskEscortParity/workspaceNavigation';
 
 it.each([
-  ['', 'dashboard'],
+  ['', 'runs'],
   ['?view=workbench', 'issues'],
   ['?view=runs&tab=editor', 'runs'],
-  ['?view=missing', 'dashboard'],
-  ['?view=constructor', 'dashboard'],
-  ['?tab=toString', 'dashboard'],
+  ['?view=missing', 'runs'],
+  ['?view=constructor', 'runs'],
+  ['?tab=toString', 'runs'],
   ['?tab=overview', 'runs'],
   ['?tab=dashboard', 'dashboard'],
   ['?tab=editor', 'editor'],
@@ -23,6 +24,15 @@ it.each([
   ['?tab=remedies', 'experiences'],
 ])('maps formal and reference deep links %s → %s', (search, page) => {
   expect(readWorkspacePage(search)).toBe(page);
+});
+
+it('clears cross-space deep links while preserving view, period and host data', () => {
+  expect(
+    clearWorkspaceDeepLinks(
+      '?view=runs&period=30d&host=yes&workflowId=wf-a&runId=r&analysisId=a&issueSignature=i&repairTaskId=p&nodeId=n',
+    ),
+  ).toBe('?view=runs&period=30d&host=yes');
+  expect(clearWorkspaceDeepLinks('?view=runs&host=yes')).toBe('?view=runs&host=yes');
 });
 
 it('writes canonical plus reference aliases, strips demo and preserves arbitrary host/deep-link query', () => {

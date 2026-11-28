@@ -48,7 +48,10 @@ export function getWorkspaceSupport(_mode: TaskEscortWorkspaceMode): TaskEscortW
         page,
         page === 'dashboard' || page === 'runs'
           ? { available: true }
-          : { available: false, reason: '此页面的真实能力暂未接入，首阶段仅提供工作流与运行样本的只读查看' },
+          : {
+              available: false,
+              reason: '能力建设中：此页面的真实能力暂未接入，首阶段仅提供工作流与运行记录的只读查看',
+            },
       ]),
     ) as TaskEscortWorkspaceSupport,
   );
@@ -76,7 +79,8 @@ export function readRoute(search = ''): WorkspaceRoute {
   const params = new URLSearchParams(search);
   const page = params.get('view') as PageId;
   const period = params.get('period') as Period;
-  return { page: workspacePages.includes(page) ? page : 'dashboard', period: periods.includes(period) ? period : '7d' };
+  // 运行概览是对所有身份都可达的首屏；数据大盘仅管理员可见，不能作为无参数默认落点。
+  return { page: workspacePages.includes(page) ? page : 'runs', period: periods.includes(period) ? period : '7d' };
 }
 export function routeSearch(search: string, route: WorkspaceRoute): string {
   const params = new URLSearchParams(search);

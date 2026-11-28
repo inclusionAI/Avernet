@@ -166,7 +166,7 @@ it('handles a genuine forbidden error at the protocol boundary with no partial d
     return payload(url.replace(base, '')) as any;
   });
   render(<Dashboard demo={demo} scope={{ key: 'identity:space', ready: true }} />);
-  expect(await screen.findByText('只有管理员可以查看全局数据大盘')).toBeTruthy();
+  expect(await screen.findByText('数据大盘仅管理员可见')).toBeTruthy();
   expect(screen.queryByText('1,234')).toBeNull();
   expect(screen.queryByRole('table', { name: '工作流列表' })).toBeNull();
 });

@@ -9,6 +9,7 @@ jest.mock('@/services/taskEscort', () => ({
     createWorkflowFromYaml: jest.fn(),
     getWorkflow: jest.fn(),
     listWorkflows: jest.fn(),
+    saveWorkflowSpec: jest.fn(),
   },
   WorkflowImportValidationError: class WorkflowImportValidationError extends Error {},
 }));
@@ -20,6 +21,7 @@ describe('useTaskEscortFlowConfig', () => {
     mockedService.listWorkflows.mockReset();
     mockedService.getWorkflow.mockReset();
     mockedService.createWorkflowFromYaml.mockReset();
+    mockedService.saveWorkflowSpec.mockReset();
     mockedService.listWorkflows.mockResolvedValue([]);
   });
 
@@ -48,5 +50,26 @@ describe('useTaskEscortFlowConfig', () => {
     expect(result.current.selectedWorkflowId).toBe('risk-processor');
     expect(result.current.spec).toEqual(created);
     expect(result.current.workflows).toHaveLength(1);
+  });
+
+  test('tracks unsaved spec changes and clears dirty after a successful save', async () => {
+    const workflow = { id: 'risk-processor', version: '1', title: '风险处理器', nodes: [] };
+    mockedService.getWorkflow.mockResolvedValue(workflow);
+    mockedService.saveWorkflowSpec.mockResolvedValue(undefined as never);
+
+    const { result } = renderHook(() =>
+      useTaskEscortFlowConfig({ botOwnerId: 'space-1', botId: 'bot-1', enabled: true }),
+    );
+    await act(async () => result.current.selectWorkflow('risk-processor'));
+    await waitFor(() => expect(result.current.spec).toEqual(workflow));
+    expect(result.current.dirty).toBe(false);
+
+    act(() => result.current.updateSpec({ ...workflow, title: '风险处理器 v2' }));
+    expect(result.current.dirty).toBe(true);
+
+    await act(async () => {
+      await result.current.saveSpec();
+    });
+    expect(result.current.dirty).toBe(false);
   });
 });

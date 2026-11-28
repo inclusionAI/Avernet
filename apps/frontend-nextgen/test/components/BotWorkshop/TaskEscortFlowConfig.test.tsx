@@ -28,6 +28,7 @@ test('opens the YAML creation dialog and submits the form', async () => {
     isCreatingWorkflow: false,
     isSaving: false,
     error: null,
+    dirty: false,
     selectWorkflow: jest.fn(),
     refreshList: jest.fn().mockResolvedValue(undefined),
     createWorkflowFromYaml,
@@ -37,10 +38,12 @@ test('opens the YAML creation dialog and submits the form', async () => {
 
   render(<TaskEscortFlowConfig botOwnerId="space-1" botId="bot-1" enabled />);
 
-  fireEvent.click(screen.getByRole('button', { name: '从 YAML 创建工作流' }));
-  expect(screen.getByRole('dialog', { name: '从 YAML 创建工作流' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '从工作流配置文本创建工作流' }));
+  expect(screen.getByRole('dialog', { name: '从工作流配置文本创建工作流' })).toBeInTheDocument();
 
-  fireEvent.change(screen.getByLabelText('粘贴 YAML'), { target: { value: 'id: risk-processor' } });
+  fireEvent.change(screen.getByLabelText('粘贴工作流配置文本（YAML）'), {
+    target: { value: 'id: risk-processor' },
+  });
   fireEvent.change(screen.getByLabelText('命令（可选）'), { target: { value: 'risk_processor' } });
   fireEvent.change(screen.getByLabelText('备注（可选）'), { target: { value: '稳定版' } });
   fireEvent.click(screen.getByRole('button', { name: '创建' }));
