@@ -423,3 +423,119 @@ async def test_exists_raises_on_401():
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     with pytest.raises(httpx.HTTPStatusError):
         await fs.exists("/foo")
+
+
+# ── list_dir timeout retry ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_dir_retry_on_timeout_then_succeed():
+    """第一次超时,第二次成功 → 返回正确结果,transport 被调用两次。"""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    success_resp = _ok_response(
+        json_body={"data": {"files": [{"name": "a.txt"}, {"name": "b.txt"}]}}
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [
+        httpx.ReadTimeout("timed out"),
+        success_resp,
+    ]
+
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    result = await fs.list_dir("/workspace", recursive=False)
+    assert result == [{"name": "a.txt"}, {"name": "b.txt"}]
+    assert transport.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_dir_retry_on_timeout_then_fail():
+    """两次都超时 → raise TimeoutException,日志包含尝试次数。"""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    transport = _make_transport()
+    transport.post.side_effect = [
+        httpx.ReadTimeout("first timeout"),
+        httpx.ReadTimeout("second timeout"),
+    ]
+
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    with pytest.raises(httpx.TimeoutException):
+        await fs.list_dir("/workspace")
+
+    assert transport.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_dir_no_retry_on_http_error():
+    """HTTPStatusError 不被重试,立即 raise。"""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    err_resp = httpx.Response(
+        status_code=500,
+        content=b"server error",
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    transport = _make_transport(response=err_resp)
+
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await fs.list_dir("/dir")
+
+    # 只调了一次,没有重试
+    assert transport.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_list_dir_retry_on_pool_timeout():
+    """PoolTimeout 也应被重试 (httpx.TimeoutException 的子类)。"""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    success_resp = _ok_response(
+        json_body={"data": {"files": [{"name": "x"}]}}
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [
+        httpx.PoolTimeout("pool exhausted"),
+        success_resp,
+    ]
+
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    result = await fs.list_dir("/dir")
+    assert result == [{"name": "x"}]
+    assert transport.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_dir_retry_on_connect_timeout():
+    """ConnectTimeout 也应被重试。"""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    success_resp = _ok_response(
+        json_body={"data": {"files": [{"name": "y"}]}}
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [
+        httpx.ConnectTimeout("connect timed out"),
+        success_resp,
+    ]
+
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    result = await fs.list_dir("/dir")
+    assert result == [{"name": "y"}]
+    assert transport.post.call_count == 2
