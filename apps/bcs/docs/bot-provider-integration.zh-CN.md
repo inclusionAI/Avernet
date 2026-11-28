@@ -143,6 +143,27 @@ A2A 重复 Provider/ref 返回 409，不重发旧凭据或覆盖 Card。已有 B
 
 发布顺序为新增绑定表可空列 → 升级全部 BCS 实例 → 接入方启用独立地址。SQLite 启动自动执行迁移 028，MySQL 部署先执行迁移 027。回滚旧 BCS 前应停用相关流量或提供兼容路由，因为旧实现忽略 Bot 覆盖地址。下行报文版本和 token 不变。
 
+## 查询 Provider 的 Bot
+
+使用 `Authorization: Bearer <provider_admin_token>` 调用 `GET /providers/{provider_id}/bots`。
+响应的 `items` 数组列出该 Provider 已启用的 Gateway 绑定。每项的 `created_by` 是 Bot 注册记录中的创建者标识。
+如果注册记录缺失，或历史记录没有创建者，该绑定仍会返回，`created_by` 为 `null`。
+
+使用同一 Provider Admin Token 查询自己注册的单个 Bot，两种标识任选一个：
+
+```http
+GET /providers/{provider_id}/bot-detail?bot_uuid={bot_uuid}
+GET /providers/{provider_id}/bot-detail?provider_bot_ref={provider_bot_ref}
+```
+
+Gateway 和 Plugin 注册均可查询。响应直接返回 `bot_uuid`、`provider_id`、`provider_bot_ref`、`name`、`summary`、`created_by`、`visibility`、`domains`、`skills` 和 `scopes`。
+标识缺失、为空或同时传入时返回 400。凭据无效返回 401，凭据与路径上的 Provider 不匹配或 Provider 已停用返回 403。查不到、已删除或属于其他 Provider 的 Bot 均返回 404。
+
+管理组织的 Provider 可以使用同一凭据调用
+`GET /providers/{provider_id}/organization-candidate-bots/{bot_uuid}?organization_code={organization_code}`。
+该接口要求组织已启用，且 Bot 在该 Provider 的候选范围内。响应的 `bot` 对象包含 `name`、`summary`、`created_by` 等字段，`is_member` 表示该 Bot 是否已加入组织。
+查询已有成员的角色和 Bot 资料，可调用 `GET /organizations/{organization_code}/members/{bot_uuid}`。
+
 ## Provider webhook 需要支持什么
 
 Provider 注册时可提供默认 `webhook_url`，Gateway Bot 注册时可提供自己的 `webhook_url`。BCS 优先向 Bot 地址发送 `POST`，未配置时使用 Provider 默认地址，通过 body 里的 `method` 区分动作。

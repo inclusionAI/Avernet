@@ -7,7 +7,7 @@ pub use crate::port::repo::bot_control_plane::{BotCallerConfiguration, CallerCon
 use crate::types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery,
-    ControllableCandidateQuery, ControlledBotCandidate, ServiceResult,
+    ControllableCandidateQuery, ControlledBotCandidate, ProviderBotDetail, ProviderBotLookup, ServiceResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,13 @@ pub struct BotControlPlaneCandidate {
 
 #[async_trait]
 pub trait BotControlPlaneCoreService: Send + Sync {
+    /// Look up an active Bot registered to the specified Provider.
+    async fn find_provider_bot(
+        &self, _provider_id: &str, _lookup: &ProviderBotLookup, _env: &str,
+    ) -> ServiceResult<Option<ProviderBotDetail>> {
+        Err(crate::ServiceError::InternalError("Provider Bot lookup is not configured".into()))
+    }
+
     async fn get_record(
         &self,
         bot_id: &str,

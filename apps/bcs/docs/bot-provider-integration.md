@@ -205,6 +205,33 @@ allow integration programs to send per-Bot URLs. SQLite startup applies migratio
 BCS version, stop affected traffic or provide compatible routing: old code ignores
 Bot overrides. No downstream wire version or token changes are required.
 
+## Query Provider Bots
+
+Call `GET /providers/{provider_id}/bots` with `Authorization: Bearer <provider_admin_token>`.
+The `items` array lists the Provider's enabled Gateway bindings. Each item includes
+`created_by`, the creator identifier from the Bot registration. A binding whose
+registration or creator is missing still appears with `"created_by": null`.
+
+To fetch one of the Provider's registered Gateway or Plugin Bots, use the same
+Provider Admin token and supply exactly one identifier.
+
+```http
+GET /providers/{provider_id}/bot-detail?bot_uuid={bot_uuid}
+GET /providers/{provider_id}/bot-detail?provider_bot_ref={provider_bot_ref}
+```
+
+The response contains `bot_uuid`, `provider_id`, `provider_bot_ref`, `name`,
+`summary`, `created_by`, `visibility`, `domains`, `skills`, and `scopes`.
+Missing, empty, or conflicting selectors return 400. Invalid credentials return
+401. A disabled Provider or a token for a different path Provider returns 403.
+Unknown, deleted, and other Providers' Bots all return 404.
+
+A Provider that manages an enabled organization can use the same credential with
+`GET /providers/{provider_id}/organization-candidate-bots/{bot_uuid}?organization_code={organization_code}`.
+For a Bot in the Provider's candidate scope, the `bot` object includes `name`,
+`summary`, and `created_by`. The `is_member` field reports whether the Bot has joined the organization.
+For an existing member's role and Bot profile, call `GET /organizations/{organization_code}/members/{bot_uuid}`.
+
 ## What must the Provider webhook support?
 
 A Provider may supply a default `webhook_url`. A Gateway Bot may supply its own

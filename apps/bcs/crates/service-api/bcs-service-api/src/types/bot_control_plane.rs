@@ -16,6 +16,26 @@ pub struct BotControlPlaneDescriptor {
     pub scopes: Vec<String>,
 }
 
+#[derive(Debug)]
+pub enum ProviderBotLookup {
+    BotUuid(String),
+    ProviderBotRef(String),
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ProviderBotDetail {
+    pub provider_id: String,
+    pub bot_uuid: String,
+    pub provider_bot_ref: String,
+    pub name: String,
+    pub summary: String,
+    pub created_by: Option<String>,
+    pub visibility: String,
+    pub domains: Vec<String>,
+    pub skills: Vec<Skill>,
+    pub scopes: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotControlPlaneRecord {
     pub bot_id: String,
