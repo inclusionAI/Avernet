@@ -27,6 +27,28 @@ const summaries = {
 
 type ApiLogMethod = "READ" | "WRITE" | "PUT" | "DELETE";
 
+export const RUN_COMPLETION_LOG_PATH = "/runs/:flowId/completion";
+export const NODE_RECONCILE_LOG_PATH = "/node-executions/:flowId/reconcile-stale-running";
+
+// Match the unsampled path: the distinguishing suffix may follow a long ID.
+function closeoutPath(method: ApiLogMethod, path: string): string | undefined {
+  if (method !== "PUT") return;
+  if (/^(?:\/api\/internal)?\/runs\/[^/?]+\/completion\/?(?:\?|$)/i.test(path)) return RUN_COMPLETION_LOG_PATH;
+  if (/^(?:\/api\/internal)?\/node-executions\/[^/?]+\/reconcile-stale-running\/?(?:\?|$)/i.test(path)) return NODE_RECONCILE_LOG_PATH;
+}
+
+function closeoutDetails(details: Record<string, unknown>): Record<string, unknown> {
+  // A numeric HTTP status is the entire allowlist. Do not enumerate or invoke getters.
+  const status: unknown = Object.getOwnPropertyDescriptor(details, "httpStatus")?.value
+    ?? Object.getOwnPropertyDescriptor(details, "status")?.value;
+  return typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {};
+}
+
+// The host's diagnostic handoff has a stack slot. Use a literal observation,
+// not a captured stack or anything derived from the exception/response.
+const closeoutFailure = Object.freeze({ message: "Workflow closeout failed",
+  stack: "Workflow closeout failure observed (exception withheld)", stackSource: "observation" as const });
+
 // Explicit workflow/runtime families only; unrelated reads retain the shared policy.
 const taskGuardInternalPaths = [
   "/runs", "/flow-control", "/langfuse-ingestion", "/approval-cards", "/task-guard",
@@ -39,10 +61,14 @@ const taskGuardInternalPaths = [
 ];
 const taskGuardInternalEndpoints = ["/validate-bot", "/reads/run-requests", "/run-requests/failures"];
 function isTaskGuardPath(path: string): boolean {
-  const pathname = path.split("?")[0];
-  const internalPath = pathname.startsWith("/api/internal/") ? pathname.slice("/api/internal".length) : pathname;
-  return taskGuardInternalPaths.some(prefix => internalPath === prefix || internalPath.startsWith(prefix + "/"))
-    || taskGuardInternalEndpoints.some(endpoint => internalPath === endpoint || internalPath === endpoint + "/");
+  const offset = path.startsWith("/api/internal/") ? "/api/internal".length : 0;
+  const atEnd = (end: number) => end === path.length || path[end] === "?";
+  return taskGuardInternalPaths.some(prefix => path.startsWith(prefix, offset)
+    && (atEnd(offset + prefix.length) || path[offset + prefix.length] === "/"))
+    || taskGuardInternalEndpoints.some(endpoint => {
+      const end = offset + endpoint.length;
+      return path.startsWith(endpoint, offset) && (atEnd(end) || (path[end] === "/" && atEnd(end + 1)));
+    });
 }
 
 /**
@@ -52,16 +78,18 @@ function isTaskGuardPath(path: string): boolean {
 export function apiLog(method: ApiLogMethod, path: string, details: Record<string, unknown>, exception?: unknown, response?: ApiDiagnosticResponse): void {
   try {
     const now = new Date();
-    const safePath = redactLogText(path, 1024);
-    const safeDetails = boundedLogValue(details, { maxChars: 8192 }) as Record<string, unknown>;
+    const closeout = closeoutPath(method, path);
+    const safePath = closeout ?? redactLogText(path, 1024);
+    const safeDetails = closeout ? closeoutDetails(details) : boundedLogValue(details, { maxChars: 8192 }) as Record<string, unknown>;
     const status = safeDetails.httpStatus ?? safeDetails.status;
-    const taskGuard = isTaskGuardPath(safePath);
+    // A fail-closed redaction can hide the whole path, not its severity policy.
+    const taskGuard = isTaskGuardPath(path) || (path !== safePath && isTaskGuardPath(safePath));
     const level = taskGuard && typeof status === "number" && status >= 400 && status < 500
       ? "WARN" : httpLogLevel(status);
-    const originalDiagnostic = !taskGuard ? undefined : exception !== undefined ? apiErrorDiagnostic(exception)
+    const originalDiagnostic = closeout || !taskGuard ? undefined : exception !== undefined ? apiErrorDiagnostic(exception)
       : level === "ERROR" ? apiErrorDiagnostic(typeof safeDetails.error === "string" ? safeDetails.error : `${method} ${safePath} ${typeof status === "number" ? status : "failure"}`)
       : undefined;
-    const diagnostic = originalDiagnostic ? {
+    const diagnostic = closeout && level === "ERROR" ? closeoutFailure : originalDiagnostic ? {
       message: redactLogText(originalDiagnostic.message, 2048),
       stack: redactLogText(originalDiagnostic.stack, 8192),
       stackSource: originalDiagnostic.stackSource,
@@ -107,6 +135,8 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
  * Log a request body (truncated for large payloads).
  */
 export function apiLogBody(method: ApiLogMethod, path: string, body: unknown, extra: Record<string, unknown> = {}): void {
+  const closeout = closeoutPath(method, path);
+  if (closeout) return apiLog(method, closeout, extra);
   const preview = boundedLogValue(body, { maxChars: 2000 });
   const safeExtra = boundedLogValue(extra, { maxChars: 4096 }) as Record<string, unknown>;
   apiLog(method, path, { bodyPreview: typeof preview === "string" ? preview : JSON.stringify(preview), ...safeExtra });

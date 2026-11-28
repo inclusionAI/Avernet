@@ -18,11 +18,11 @@ import type {
 
 /** Terminal flow_runs statuses — once in these states, result_json must not
  *  be overwritten by node-level writes (see the flow_runs.result_json race fix). */
-const TERMINAL_FLOW_STATUSES = new Set(["succeeded", "failed", "cancelled", "completed"]);
+const TERMINAL_FLOW_STATUSES = new Set(["succeeded", "failed", "cancelled", "canceled", "completed"]);
 
 /** Check whether a flow_runs status is terminal. */
 export function isTerminalFlowStatus(status: string): boolean {
-  return TERMINAL_FLOW_STATUSES.has(status);
+  return TERMINAL_FLOW_STATUSES.has(status.trim().toLowerCase());
 }
 
 // ── Flow Run ──
@@ -33,6 +33,9 @@ export type FlowRunRow = {
   workflow_id: string;
   workflow_title: string | null;
   status: string;
+  /** Historical rows may omit this field; omission means epoch 0 only. */
+  retry_epoch?: number;
+  state_json?: string | null;
   params_json: string | null;
   input_json: string | null;
   result_json: string | null;
@@ -79,6 +82,8 @@ export type FlowRunInsert = {
 };
 
 export type FlowRunCompletion = {
+  /** Expected attempt from the caller snapshot. Omitted means epoch 0 only. */
+  retryEpoch?: number;
   status: string;
   resultJson?: string | null;
   inputJson?: string | null;
@@ -92,6 +97,8 @@ export type FlowRunCompletion = {
 
 /** Structured fields written to result_json when a flow is reaped as failed by the timeout watchdog. */
 export type FlowRunReapFields = {
+  /** Expected attempt from the scanned row. Omitted means epoch 0 only. */
+  retryEpoch?: number;
   /** Structured JSON written to result_json. */
   reason: string;
   currentPhase: string;
@@ -112,16 +119,19 @@ export type FindFlowRunsOptions = {
 export interface IFlowRunRepository {
   insert(run: FlowRunInsert): Promise<boolean>;
   incrementNodeCount(flowId: string, field: "succeeded_count" | "failed_count"): Promise<boolean>;
+  /** Same-epoch nonterminal CAS: false means no transition; write failures reject. */
   updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean>;
-  /** Atomically mark a flow failed ONLY when it is not already in a terminal
-   *  status (`UPDATE ... WHERE flow_id = ? AND status NOT IN (terminal)`).
+  /** Atomically mark a flow failed ONLY when status is running and retry_epoch
+   *  matches the scanned expected attempt (omitted epoch means 0 only).
    *  Used by the flow-timeout watchdog: multiple engine processes share one
    *  DB, and exactly one of them wins this CAS (affectedRows > 0) — only the
    *  winner logs the reap, sends notifications, and enriches the row.
    *  Returns true when this caller claimed the transition. */
   markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean>;
-  updateStatus(flowId: string, status: string): Promise<boolean>;
-  updateCurrentPhase(flowId: string, currentPhase: string): Promise<boolean>;
+  /** The only terminal reopening path: caller supplies captured epoch + 1. */
+  resumeForRetry(flowId: string, retryEpoch: number, stateJson?: string): Promise<'resumed' | 'not_found' | 'conflict'>;
+  updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean>;
+  updateCurrentPhase(flowId: string, currentPhase: string, retryEpoch?: number): Promise<boolean>;
   updateNodeCount(flowId: string, nodeCount: number): Promise<boolean>;
   /** Reset started_at when a flow is resumed/retried from a non-running state,
    *  so the timeout watchdog computes ranFrom from the retry time rather than
@@ -131,8 +141,8 @@ export interface IFlowRunRepository {
   updateResultJson(flowId: string, nodeId: string, result: Record<string, unknown>): Promise<boolean>;
   findByFlowId(flowId: string): Promise<FlowRunRow | null>;
   findRuns(options: FindFlowRunsOptions): Promise<FlowRunRow[]>;
-  /** Find flows still in "running" status whose started_at is older than the cutoff (epoch seconds). */
-  findStaleRunning(cutoffEpochSecs: number, limit?: number): Promise<FlowRunRow[]>;
+  /** Find a bounded page of running flows older than the cutoff (epoch seconds); offset defaults to zero. */
+  findStaleRunning(cutoffEpochSecs: number, limit?: number, offset?: number): Promise<FlowRunRow[]>;
   /** Find running flows matching the given bot ID and engine, ordered by started_at ascending. */
   findRunningByOrigin(botId: string, engine: string, limit?: number): Promise<Pick<FlowRunRow, "flow_id" | "status" | "started_at">[]>;
 }
@@ -227,8 +237,10 @@ export interface INodeExecutionRepository {
   findByFlowId(flowId: string, options?: FindNodeExecutionsOptions): Promise<NodeExecutionRow[]>;
   findByFlowAndNode(flowId: string, nodeId: string, limit?: number): Promise<NodeExecutionRow[]>;
   findLatestByFlowId(flowId: string): Promise<NodeExecutionRow[]>;
-  /** Reconcile stale "running" node_executions when a flow reaches terminal state. */
-  reconcileStaleRunning(flowId: string, flowStatus: string): Promise<number>;
+  /** Atomically reconcile only with a matching terminal parent status and epoch.
+   *  Omitted retryEpoch means 0; the third argument remains custom error text.
+   *  Persistence failures reject rather than reporting zero reconciled rows. */
+  reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string, retryEpoch?: number): Promise<number>;
 }
 
 // ── Flow Event ──

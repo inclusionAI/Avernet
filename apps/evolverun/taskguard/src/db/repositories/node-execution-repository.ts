@@ -7,6 +7,7 @@
  */
 import type { IDatabase, Row } from "../types.js";
 import { nowForDb } from "../types.js";
+import { expectedRetryEpoch } from "./retry-epoch.js";
 import type { INodeExecutionRepository } from "./types.js";
 
 // ── Types ──
@@ -329,7 +330,7 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] NodeExecutionRepository.updateCompletion failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 
@@ -395,7 +396,7 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] NodeExecutionRepository.updateCompletionByFlowNode failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 
@@ -513,11 +514,14 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
 
   /**
    * Reconcile stale "running" node_executions when a flow reaches a terminal state.
-   * Any node still in "running" status after the flow has completed should be
-   * marked as "failed" with an appropriate error message (e.g. orphaned due to
-   * crash, timeout, or race condition). Returns the number of reconciled rows.
+   * The atomic parent guard must match both terminal status and expected epoch.
+   * Failed parents reconcile nodes to failed; success/cancellation uses skipped.
+   * Returns the number of reconciled rows; persistence failures reject.
    */
-  async reconcileStaleRunning(flowId: string, flowStatus: string): Promise<number> {
+  async reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string, retryEpoch?: number): Promise<number> {
+    const expectedEpoch = expectedRetryEpoch(retryEpoch);
+    const normalizedFlowStatus = flowStatus === "completed" ? "succeeded" : flowStatus;
+    if (!["succeeded", "failed", "cancelled"].includes(normalizedFlowStatus)) return 0;
     try {
       const now = nowForDb(this.db.dbType);
       const completedAt = Math.floor(Date.now() / 1000);
@@ -527,7 +531,6 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
       //   don't inflate failed_count.
       // - If the flow failed, mark them as "failed" since they didn't complete.
       // - "completed" is the legacy TaskFlow value, mapped to "succeeded" here.
-      const normalizedFlowStatus = flowStatus === "completed" ? "succeeded" : flowStatus;
       if (flowStatus === "completed") {
         console.warn(`[db] NodeExecutionRepository.reconcileStaleRunning: flowStatus is legacy "completed", treating as "succeeded" for flowId=${flowId}`);
       }
@@ -545,9 +548,14 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
         targetStatus = "failed";
         errorText = "Node still running when workflow failed — reconciled to failed";
       }
+      const parentStatuses = normalizedFlowStatus === "succeeded" ? ["succeeded", "completed"] : [normalizedFlowStatus];
       const result = await this.db.exec(
-        `UPDATE node_executions SET status = ?, error_text = ?, completed_at = ?, gmt_modified = ? WHERE flow_id = ? AND status = 'running'`,
-        [targetStatus, errorText, completedAt, now, flowId],
+        `UPDATE node_executions SET status = ?, error_text = ?, completed_at = ?, gmt_modified = ?
+         WHERE flow_id = ? AND status = 'running'
+         AND EXISTS (SELECT 1 FROM flow_runs parent
+           WHERE parent.flow_id = node_executions.flow_id AND parent.retry_epoch = ?
+           AND parent.status IN (${parentStatuses.map(() => "?").join(", ")}))`,
+        [targetStatus, truncateError(customErrorText ?? errorText), completedAt, now, flowId, expectedEpoch, ...parentStatuses],
       );
       const changes = result.affectedRows ?? 0;
       if (changes > 0) {
@@ -557,7 +565,7 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] NodeExecutionRepository.reconcileStaleRunning failed: ${msg}`);
-      return 0;
+      throw error;
     }
   }
 }

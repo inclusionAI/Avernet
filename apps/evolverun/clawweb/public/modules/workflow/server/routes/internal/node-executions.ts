@@ -1,9 +1,10 @@
+import { NodeReconcileConflict } from '../../repositories/node-reconcile.js';
 /**
  * Internal API routes for node_executions — write and read operations for ClawMind.
  */
 import { Router, type Request, type Response } from "express";
 import { NodeExecutionRepository } from "@avernet/workflow/server/repositories/node-execution-repository";
-import { apiLog } from "@avernet/workflow/server/routes/internal-logger";
+import { apiLog, NODE_RECONCILE_LOG_PATH } from "@avernet/workflow/server/routes/internal-logger";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 
 export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRepository | null): Router {
@@ -302,25 +303,32 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
   /** PUT /:flowId/reconcile-stale-running — reconcile stale "running" nodes when flow reaches terminal state */
   router.put("/:flowId/reconcile-stale-running", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    const { flow_status } = req.body as { flow_status?: string };
-    apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, flow_status });
+    const { flow_status, retry_epoch, custom_error_text } = req.body as { flow_status?: string; retry_epoch?: number; custom_error_text?: string };
     if (!nodeExecRepo) {
-      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
+      apiLog("PUT", NODE_RECONCILE_LOG_PATH, { status: 503 }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      if (!flow_status) {
-        apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 400, error: "Missing flow_status" });
-        res.status(400).json({ success: false, error: "Bad Request", message: "Missing required field: flow_status" });
+      if (!['succeeded', 'failed', 'cancelled', 'canceled'].includes(flow_status)
+        || (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0))
+        || (custom_error_text !== undefined && typeof custom_error_text !== "string")) {
+        apiLog("PUT", NODE_RECONCILE_LOG_PATH, { status: 400 });
+        res.status(400).json({ success: false, error: "Bad Request", message: "flow_status must be terminal, retry_epoch must be a nonnegative safe integer, and custom_error_text must be a string when supplied" });
         return;
       }
-      const reconciled = await nodeExecRepo.reconcileStaleRunning(flowId, flow_status);
-      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 200, reconciled });
+      const reconciled = await nodeExecRepo.reconcileStaleRunning(flowId, flow_status, custom_error_text, retry_epoch);
+      if (!Number.isSafeInteger(reconciled) || reconciled < 0) throw new Error("Invalid node reconciliation count");
+      apiLog("PUT", NODE_RECONCILE_LOG_PATH, { status: 200 });
       res.json({ success: true, data: { flowId, reconciled } });
     } catch (error) {
+      if (error instanceof NodeReconcileConflict) {
+        apiLog("PUT", NODE_RECONCILE_LOG_PATH, { status: 409 });
+        res.status(409).json({ success: false, error: 'Conflict', message: error.message });
+        return;
+      }
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 500, error: msg }, error, res);
+      apiLog("PUT", NODE_RECONCILE_LOG_PATH, { status: 500 }, undefined, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

@@ -34,9 +34,11 @@ for that protocol limitation. **Migration to a signed method/path with replay
 protection is a hard blocker for production rollout**, along with trusted
 transport and host authentication and authorization. This change must not be
 represented as safe for production merely because its body is nested. In
-particular, the shared signature can be replayed against the existing
-`PUT /api/internal/runs/:flowId/retry-failed` route, which does not consume the
-body; nesting the register fields cannot prevent that replay.
+particular, nesting register fields does not bind a shared signature to a method
+or path. The historical body-independent `PUT /api/internal/runs/:flowId/retry-failed`
+mutation is now deprecated and fails closed (existing run: 409, no run/node writes),
+but disabling that endpoint alone does not establish method/path binding, replay
+protection or writer ownership for the remaining internal API.
 
 ## Register
 

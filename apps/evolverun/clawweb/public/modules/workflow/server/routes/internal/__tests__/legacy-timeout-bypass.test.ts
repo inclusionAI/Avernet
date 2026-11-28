@@ -45,20 +45,20 @@ const wrappedTimeout = JSON.stringify({ status: 'failed', phase: 'P1', durationM
   failedNodes: [], message: JSON.stringify(timeout), nodeSummary: 'node:running' });
 
 describe('deployed watchdog status-before-completion bypass', () => {
-  it('rejects the no-reason preliminary fail and the wrapped old-budget completion, without observing either', async () => {
+  it('rejects the preliminary status write; records the wrapped executor decision exactly once', async () => {
     const f = await fixture(); const before = f.row();
     expect(await f.put('status', { status: 'failed' })).toBe(409);
     expect(f.row()).toEqual(before);
-    expect(await f.put('completion', { status: 'failed', result_json: wrappedTimeout,
-      total_duration_ms: 7395000, succeeded_count: 0, failed_count: 0 })).toBe(409);
-    expect(f.row()).toEqual(before);
-    expect(f.onTerminal).not.toHaveBeenCalled();
+    expect(await f.put('completion', { status: 'failed', retry_epoch: 2, result_json: wrappedTimeout,
+      total_duration_ms: 7395000, succeeded_count: 0, failed_count: 0 })).toBe(200);
+    expect(f.row()).toMatchObject({ status: 'failed', result_json: wrappedTimeout });
+    expect(f.onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId: 'run', status: 'failed' });
   });
 
   it('still settles ordinary business failure through completion after rejecting the best-effort status mirror', async () => {
     const f = await fixture();
     expect(await f.put('status', { status: 'failed' })).toBe(409);
-    const completion = { status: 'failed', result_json: JSON.stringify({ status: 'failed', phase: 'P1',
+    const completion = { status: 'failed', retry_epoch: 2, result_json: JSON.stringify({ status: 'failed', phase: 'P1',
       message: 'executor unavailable', failedNodes: [{ nodeId: 'node', error: 'executor unavailable' }] }),
       completed_at: Math.floor(Date.now() / 1000), total_duration_ms: 30000, succeeded_count: 0, failed_count: 1 };
     expect(await f.put('completion', completion)).toBe(200);
@@ -74,29 +74,27 @@ describe('deployed watchdog status-before-completion bypass', () => {
     expect(await f.put('status', { status: 'failed' })).toBe(409);
     expect(await f.put('completion', { status: 'failed', result_json: 'ordinary error',
       succeeded_count: 0, failed_count: 1 })).toBe(409);
-    expect(await f.put('completion', { status: 'failed', result_json: wrappedTimeout,
+    expect(await f.put('completion', { status: 'failed', retry_epoch: 2, result_json: wrappedTimeout,
       succeeded_count: 0, failed_count: 1 })).toBe(409);
     expect(f.row()).toEqual(before);
     expect(f.onTerminal).not.toHaveBeenCalled();
   });
 });
 
-// The dedicated watchdog endpoint must not treat its name, phase, or evidence
-// shape as authority for the timeout budget either.
-it.each([1440, 0, null, -1, '120', false, {}])('HTTP watchdog fails closed for saved budget %j despite a usable legacy snapshot', async budget => {
+// Persist the executor decision; stored workflow policy is not an HTTP eligibility rule.
+it.each([1440, 0, null, -1, '120', false, {}])('HTTP watchdog settles without interpreting saved policy %j', async budget => {
   const f = await fixture();
   f.raw.prepare('UPDATE flow_runs SET state_json = ?').run(JSON.stringify({
     effectiveFlowTimeoutMinutes: budget, workflowSnapshot: { flowTimeoutMinutes: 120, timeoutMinutes: 120 },
   }));
-  const before = f.row();
-  const status = await f.put('fail-if-running', { reason: JSON.stringify(timeout), current_phase: 'timeout',
+  const status = await f.put('fail-if-running', { reason: JSON.stringify(timeout), retry_epoch: 2, current_phase: 'timeout',
     total_duration_ms: 7395000, completed_at: Math.floor(Date.now() / 1000) + 100000 });
   expect(status).toBe(200);
-  expect(f.row()).toEqual(before);
-  expect(f.onTerminal).not.toHaveBeenCalled();
+  expect(f.row()).toMatchObject({ status: 'failed', result_json: JSON.stringify(timeout), retry_epoch: 2 });
+  expect(f.onTerminal).toHaveBeenCalledTimes(1);
 });
 
-it.each(['FAILED', 'Failed', 'failed ', ' failed'])('rejects noncanonical failure status %j instead of bypassing timeout policy', async status => {
+it.each(['FAILED', 'Failed', 'failed ', ' failed'])('rejects noncanonical failure status %j rather than normalizing a status write', async status => {
   const f = await fixture('succeeded'); const before = f.row();
   expect(await f.put('status', { status })).toBeGreaterThanOrEqual(400);
   expect(f.row()).toEqual(before);
@@ -105,12 +103,11 @@ it.each(['FAILED', 'Failed', 'failed ', ' failed'])('rejects noncanonical failur
   expect(f.onTerminal).not.toHaveBeenCalled();
 });
 
-it.each([undefined, 2])('observes the first settlement of an already-failed but uncompleted row once (epoch %s)', async retry_epoch => {
-  const f = await fixture('failed');
+it.each([undefined, 2])('rejects an already-failed uncompleted row without notification (epoch %s)', async retry_epoch => {
+  const f = await fixture('failed'); const before = f.row();
   const completion = { status: 'failed', result_json: 'ordinary business failure', completed_at: Math.floor(Date.now() / 1000),
     retry_epoch, succeeded_count: 0, failed_count: 1 };
-  expect(await f.put('completion', completion)).toBe(200);
-  expect(f.onTerminal).toHaveBeenCalledTimes(1);
-  expect([200, 409]).toContain(await f.put('completion', completion));
-  expect(f.onTerminal).toHaveBeenCalledTimes(1);
+  expect(await f.put('completion', completion)).toBe(409);
+  expect(f.row()).toEqual(before);
+  expect(f.onTerminal).not.toHaveBeenCalled();
 });

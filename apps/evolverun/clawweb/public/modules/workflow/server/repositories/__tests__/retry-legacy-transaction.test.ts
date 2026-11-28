@@ -4,7 +4,7 @@ import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../flow-run-repository.js';
 import { NodeExecutionRepository } from '../node-execution-repository.js';
 
-it('rolls back legacy node resets if the run cannot transition', async () => {
+it('rejects legacy retry before any run or node write', async () => {
   const raw = new Database(':memory:');
   raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER NOT NULL DEFAULT 0, failed_count INTEGER, completed_at INTEGER, gmt_modified INTEGER);
@@ -17,7 +17,7 @@ it('rolls back legacy node resets if the run cannot transition', async () => {
   try {
     const runs = new FlowRunRepository(db);
     const nodes = new NodeExecutionRepository(db);
-    await expect(runs.resetFailedForRetry('flow', tx => nodes.resetFailedByFlowId('flow', tx))).rejects.toThrow('run update failed');
+    expect(await runs.resetFailedForRetry('flow', tx => nodes.resetFailedByFlowId('flow', tx))).toEqual({ status: 'conflict' });
     expect(raw.prepare('SELECT status FROM flow_runs').get()).toEqual({ status: 'failed' });
     expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'failed' });
   } finally { await db.close(); }

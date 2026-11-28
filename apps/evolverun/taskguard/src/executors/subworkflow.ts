@@ -1,3 +1,5 @@
+import { freezeFlowTimeoutMinutes } from "../recovery/flow-timeout.js";
+import { loadConfig } from "../config/index.js";
 import type {
   WorkflowNode,
   ExecutorResult,
@@ -246,6 +248,8 @@ export function buildChildFlowState(
   };
 
   const initialState: FlowState = {
+    effectiveFlowTimeoutMinutes: freezeFlowTimeoutMinutes(childWorkflow, loadConfig().app.execution.flowTimeoutMinutes),
+    retryEpoch: 0,
     workflowId: childWorkflow.id,
     workflowVersion: childWorkflow.version,
     params: childParams,

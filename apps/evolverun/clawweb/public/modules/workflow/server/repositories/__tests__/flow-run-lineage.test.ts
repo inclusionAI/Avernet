@@ -59,23 +59,26 @@ describe('creation-only engine lineage', () => {
   it.each([{}, { parentFlowId: 'parent', rootFlowId: 'root' }])('never rewrites lineage in lifecycle, retry or recovery operations (%j)', async lineage => {
     const f = await fixture(); expect(await f.repo.insert({ ...base, ...lineage })).toBe(true);
     const expected = normalizeFlowRunLineage(lineage);
-    const check = async (result: unknown) => { expect(result).toBeTruthy(); expect(await f.repo.findFullByFlowId('run')).toMatchObject(expected); };
+    const check = async (result: unknown, accepted = true) => { if (accepted) expect(result).toBeTruthy(); else expect(result).toBe(false); expect(await f.repo.findFullByFlowId('run')).toMatchObject(expected); };
     await check(await f.repo.incrementNodeCount('run', 'failed_count'));
     await check(await f.repo.updateCurrentPhase('run', 'P2'));
     await check(await f.repo.updateNodeCount('run', 8));
-    await check(await f.repo.updateResultJson('run', 'node', { parent_flow_id: 'forged', root_flow_id: 'forged' }));
+    await check(await f.repo.updateResultJson('run', 'node', { parent_flow_id: 'forged', root_flow_id: 'forged' }), false);
     await check(await f.repo.updateStateJson('run', JSON.stringify({ effectiveFlowTimeoutMinutes: 1, workflowId: 'wf', subworkflowMeta: { parentFlowId: 'forged' }, rootFlowId: 'forged' })));
     await check(await f.repo.updateSessionInfo('run', { originSessionKey: 'new-session', originSessionId: 'new-id' }));
     await check(await f.repo.updateAnalysisStatus('run', 'completed'));
     await check(await f.repo.updateCompletion('run', { status: 'failed', completedAt: 9, inputJson: '{"parent_flow_id":"forged"}', succeededCount: 1, failedCount: 1 }));
-    await check(await f.repo.resetFailedForRetry('run', async () => 0));
-    await check(await f.repo.resetStartedAt('run', 10));
+    expect(await f.repo.resetFailedForRetry('run', async () => 0)).toEqual({ status: 'conflict' });
+    expect(await f.repo.findFullByFlowId('run')).toMatchObject(expected);
+    await check(await f.repo.resetStartedAt('run', 10), false);
     expect(await f.repo.updateStatus('run', 'failed')).toBe(false);
-    await check(await f.repo.updateCompletion('run', { status: 'failed', completedAt: 11, succeededCount: 1, failedCount: 1 }));
+    // Deprecated start mutation did not clear the accepted timestamp; exact settlement remains a read-only duplicate.
+    expect(await f.repo.updateCompletion('run', { status: 'failed', completedAt: 11, succeededCount: 1, failedCount: 1 })).toBe(true);
+    expect(await f.repo.findFullByFlowId('run')).toMatchObject(expected);
     await check(await f.repo.resumeForRetry('run', 1));
-    await check(await f.repo.markFailedIfRunning('run', { reason: JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 }), currentPhase: 'failed', completedAt: 11 }));
-    await check(await f.repo.updateStatus('run', 'running'));
-    await check(await f.repo.abort('run'));
+    await check(await f.repo.markFailedIfRunning('run', { reason: JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 }), currentPhase: 'failed', completedAt: 11, retryEpoch: 1 }));
+    await check(await f.repo.resumeForRetry('run', 2));
+    await check(await f.repo.abort('run', undefined, 2));
   });
   it.each([false, true])('does not expose lineage in actual public list/detail (guarded: %s) or scoped summaries', async guarded => {
     const f = await fixture(guarded);
