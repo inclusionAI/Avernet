@@ -1,6 +1,6 @@
 # 五表存储改造：开发进度与验证记录
 
-日期：2026-11-27。状态：**部分实现，完整方案尚未交付**。
+日期：2026-11-27。状态：**第一阶段切换完成，完整执行协议尚未交付**。
 
 以下初始实现与验证为历史记录，其中七个物理外键已被文末“移除物理外键”修订替代；不得将原外键测试结果作为当前数据库引用保护的证据。
 
@@ -176,3 +176,43 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
 ```
 
 结果：**63 passed，18 warnings**。DDL 与方案逐条一致、SQL 中无 `ix_cc_` 新索引名、Stage 无两个业务唯一键、Markdown 链接/格式和 `git diff --check` 通过。未执行目标数据库 DDL/迁移，未 commit/push。
+
+
+## 后续调整：第一阶段服务/DI 切换（2026-11-28）
+
+按“长期方案，不再补建旧 `ac_product_*` 表”的要求，本阶段完成：
+
+- `ProductProfileRuntimeModule` 不再绑定 `SqlProductRuntimeRepository`。`ProductProfileRepository` 和 `RolloutRepository` 均由新增 `ProductBusinessRepositoryAdapter` 提供，底层为 `SqlProductBusinessRepository`。
+- Profile 创建通过五表正式存储，不再执行 publication/use allowlist/deny-all 检查；仍依赖已有认证 actor scope 和结构化配置编译，不要求执行/证据/MultiRollout 能力。
+- Collet 创建在能力校验通过后写五表：Collet、首个 Rollout、静态 StageRollout、Event 和 current 指针。Profile 必须为 `ONLINE`，默认创建仍为 `DRAFT`。
+- 服务查询 `get_collet`/`locate` 从五表业务历史重建，不读取旧表；未实现的 runtime mutation contract 不伪造，也不再回落到旧表。
+
+明确限制：五表当前没有 runtime revision、attempt、lease、dispatch、route、receipt、outbox、slot 或 MultiRollout control facts。适配器对 `save`、late delivery、intent claim/finish 等修改路径显式拒绝；`replay` 不伪造回执。因此 interactive、进度上报、runtime worker 和完整 MultiRollout 控制流尚未切到五表。这解决的是 Profile/Collet 创建链路的生产报错，不是完整执行协议交付。
+
+新增服务适配测试：
+
+```bash
+cd apps/backend
+DEPLOY_PROFILE=test uv run --no-sync pytest \
+  tests/community/repository/task/context_collab/product_relational/test_service_adapter.py -q
+```
+
+结果：**3 passed**。覆盖 DI 使用五表适配、Profile 创建不要求 execution/MultiRollout 能力、能力未安装时 Collet 不落库，以及 ONLINE Profile 在 capability 准入通过后原子写 Collet/Rollout/Stage/Event。
+
+组合回归：
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/repository/task/context_collab/product_relational -q
+```
+
+结果：**246 passed**（完整 ProductProfileService + 五表存储套房）。HTTP 与架构：
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/adapters/http/task/test_context_collab_products.py \
+  tests/community/architecture
+```
+
+结果：**501 passed**。以上为 SQLite 单测、HTTP 协议替身和架构门禁结果；未执行目标 MySQL/OceanBase 迁移、生产部署、真实 Bot/provider 或 runtime worker 验证。

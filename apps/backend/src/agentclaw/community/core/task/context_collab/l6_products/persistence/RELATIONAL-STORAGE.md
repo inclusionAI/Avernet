@@ -1,10 +1,13 @@
 # Relational business storage — implementation boundary
 
-Owner: Backend context_collab L6. This is the **storage foundation**, not a
-completed execution cutover. The [change specification](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md)
-records the remaining runtime/progress/feedback contracts. The existing
-[ProductProfileService](../product_profile_service/README.md) and DI still use
-snapshot v2; do not bind its `RolloutRepository` to the business repository.
+Owner: Backend context_collab L6. The ProductProfileService creation/read seam is
+now wired through [ProductBusinessRepositoryAdapter](product_business_repository_adapter.py)
+to these five business tables. This is phase one, not a completed execution
+cutover: profile/Collet creation and business reads use `ac_context_collab_*`, while
+runtime advances still fail closed until the [change specification](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md)
+resolves the progress/feedback/control contracts. The adapter may project a
+`RuntimeSnapshot` for current reads, but it does not fabricate attempts, leases,
+routes, receipts or MultiRollout controller facts, and refuses to save such state.
 
 ## Implemented responsibilities
 
@@ -21,13 +24,21 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
   it is not run automatically. Every column introduced or created by that DDL has
   a meaningful MySQL `COMMENT`. SQLite tests explicitly create `BUSINESS_TABLES`
   only, with SQLite foreign-key checking enabled and no declared foreign keys.
-  This is not evidence that global app
-  `Base.metadata.create_all` or DI has retired the old runtime tables.
+  This is not evidence that a target deployment has applied the migration or
+  retired historical `ac_product_*` tables. Current product service DI binds this
+  business repository adapter, not the legacy `SqlProductRuntimeRepository`.
 - [SqlProductBusinessRepository](product_relational_repository.py) provides
   independent Profile creation/read, atomic Collet + initial rollout + static
   stages + creation audit, and authorized consistent business-history reads.
+- [ProductBusinessRepositoryAdapter](product_business_repository_adapter.py) is
+  the new `ProductProfileRepository`/`RolloutRepository` binding. Profile and
+  Collet creation use the business repository; `get_collet`/`locate` reconstruct
+  only facts represented by the five tables. `replay`, `save`, delivery, late
+  delivery and intent methods are not silently backed by legacy `ac_product_*`
+  storage: the unsupported mutation paths raise explicit validation errors.
   No worker, receipt, dispatch, acceptance, feedback or cancellation writer is
-  installed by this foundation. Database failures propagate and roll back.
+  installed by this phase. Database failures propagate and roll back.
+
 - [ProductProfileRecord](../profile_record.py) carries stored description,
   lifecycle and audit metadata separately from the four-field execution
   definition. Legacy snapshot reads do not invent this metadata.
@@ -123,11 +134,14 @@ control/route facts merely because the business graph has been inserted.
    specified deterministic identity only. The existing Event unique index
    includes context; tests demonstrate that the same ID can exist in two
    contexts. No accepted-feedback writer is exposed.
-4. Normal DI/metadata retirement of old `ac_product_*`, HTTP response/progress
-   cutover, administrative state management, historical data migration, target
-   MySQL/OceanBase locking/DDL and live provider integration.
+4. Full runtime cutover, including HTTP response/progress semantics,
+   administrative state management, historical data migration, target
+   MySQL/OceanBase locking/DDL and live provider integration. Phase-one service
+   DI writes and reads the five business tables, but that does not replace the
+   missing runtime contract.
 
 The [business-history contract](../../l5_methods/product_business_storage.py)
 intentionally has **no** RuntimeSnapshot/revision/attempt/route/control defaults.
 There is no process-local recovery cache or substitute control/receipt table.
-The remaining decisions must be adopted with consumers and tests before cutover.
+The remaining decisions must be adopted with consumers and tests before the full
+runtime cutover.

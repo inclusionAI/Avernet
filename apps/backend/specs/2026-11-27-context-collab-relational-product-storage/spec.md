@@ -2,12 +2,12 @@
 
 ## 1. 状态、范围与本次修订
 
-- 状态：**In progress / 已实现存储基础；执行链路切换、迁移和部署尚未完成**。
+- 状态：**In progress / 第一阶段切换完成**。Profile/Collet 创建和业务读取已通过 DI 适配到五张 `ac_context_collab_*` 表；完整执行状态推进、交互反馈、worker/progress、历史迁移和部署仍未完成。
 - 本次开发进度与实际验证见 [delivery.md](delivery.md)；第 4 节运行合同门槛仍未闭合，不以已完成部分代替全方案验收。
 - 日期：2026-11-27；代码基线：`d10cb044b603068a137619ff923bcce5b7ae8a63`。
 - Owner：Backend `context_collab`。L6 持有产品配置和仓储适配，L5 持有执行与 MultiRollout 决策，L4 继续持有独立 Task 和原接受事件合同。
 - 本文依据用户的五项业务表要求、“以 `ac_context_collab_*` 作为正式存储”、随后明确的“去掉五张配套表”，以及 Profile 审计/生命周期状态、Collet 字段简化和 StageRollout 七项字段移除及验收/错误列类型调整、Event 复用既有 event_id 而不新增 interactive_key 的要求。未读取到的外部文档不作为已核实依据。
-- 前期仅更新方案和导航；用户本轮已授权开发与测试。现已增加 Python 存储基础和 SQL 文件，但未切换正式 DI/执行链路，未执行目标库 DDL、数据删除、迁移或部署。下文保留方案阶段的设计依据及尚待实施清单，实际状态以 delivery.md 为准。
+- 前期仅更新方案和导航；用户已授权开发与测试。现已实现存储基础、SQL 文件和第一阶段服务/DI 适配：正式创建/读取链路不再访问旧 `ac_product_*` 表。运行态推进、feedback/save、worker、目标库迁移和部署仍未完成。下文保留方案依据及待实施清单，实际状态以 delivery.md 为准。
 
 ### 1.1 最终范围：只建设五张业务表
 
