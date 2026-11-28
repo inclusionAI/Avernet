@@ -15,7 +15,9 @@ import { createWorkflowsRouter } from "../workflows.js";
 const baas = vi.hoisted(() => ({ sendIntervention: vi.fn() }));
 vi.mock("@avernet/clawevolve/server/services/baas-intervention", () => baas);
 // Isolate direct route diagnostics from the separately tested console/file logger.
-vi.mock("../internal-logger.js", () => ({ apiLog: vi.fn(), apiLogBody: vi.fn() }));
+vi.mock("../internal-logger.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../internal-logger.js")>(), apiLog: vi.fn(), apiLogBody: vi.fn(),
+}));
 
 const servers: Server[] = [];
 const id = "id-%s-%d-%j-%%";
@@ -108,7 +110,7 @@ describe("route console format strings treat request-derived values as data", ()
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("preserves an asynchronous terminal observer's original stack and successful completion", async () => {
+  it("reports observer failure without its input, exception or stack after successful completion", async () => {
     const error = originalFailure();
     const updateCompletionOutcome = vi.fn().mockResolvedValue("updated");
     const onTerminal = vi.fn().mockRejectedValue(error);
@@ -120,12 +122,25 @@ describe("route console format strings treat request-derived values as data", ()
       status: "failed", totalDurationMs: null, totalTokenUsage: null,
       completedAt: expect.any(Number), retryEpoch: undefined,
     });
-    await vi.waitFor(() => expect(console.warn).toHaveBeenCalledWith(
-      "[internal-runs] terminal observer failed for %s: %s", id, error.message, error.stack));
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalledExactlyOnceWith("[internal-runs] terminal observer failed"));
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId: id, status: "failed" });
-    expectDiagnostic("warn", "[internal-runs] terminal observer failed for %s: %s", [id, error.message], error,
-      `[internal-runs] terminal observer failed for ${id}: ${error.message}`);
     expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("retains bounded, redacted observer diagnostics for fail-if-running", async () => {
+    const flowId = `${id}?sig=fixture-signature`;
+    const error = originalFailure(`${message} token=test-token`);
+    const expectedRedactedMessage = `${message} token=[REDACTED]`;
+    const onTerminal = vi.fn().mockRejectedValue(error);
+    const base = await listen(createInternalRunsRouter({ markFailedIfRunning: async () => true } as never, null, undefined, { onTerminal }));
+    const response = await send(`${base}/${encodeURIComponent(flowId)}/fail-if-running`, "PUT", { reason: "fixture" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { claimed: true } });
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+      "[internal-runs] terminal observer failed for %s: %s", `${id}?sig=[REDACTED]`, expectedRedactedMessage,
+      `Error: ${expectedRedactedMessage}\r\n    at originalFailure (%s-%d-%j-%%.ts:7:3)\r\n`,
+    ));
+    expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId, status: "failed" });
   });
 
   it.each(["intervene", "rerun", "chat"] as const)("preserves successful BaaS %s despite diagnostic failures", async action => {
@@ -160,7 +175,7 @@ describe("route console format strings treat request-derived values as data", ()
   it("keeps abort cleanup and audit warnings literal, preserving the successful abort", async () => {
     const cleanupError = originalFailure(`cleanup ${message}`);
     const eventError = originalFailure(`event ${message}`);
-    const flowRepo = { findByFlowId: vi.fn().mockResolvedValue({ workflow_id: "workflow-1", status: "running" }),
+    const flowRepo = { findForAbort: vi.fn().mockResolvedValue({ workflow_id: "workflow-1", status: "running", completed_at: null, retry_epoch: 0 }),
       abort: vi.fn().mockResolvedValue(true) };
     const nodes = { reconcileStaleRunning: vi.fn().mockResolvedValue(2) };
     const events = { insert: vi.fn().mockRejectedValue(eventError) };
@@ -169,7 +184,7 @@ describe("route console format strings treat request-derived values as data", ()
     const response = await send(`${base}/${encodeURIComponent(id)}/abort`, "POST", { reason: message });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, flowId: id, status: "cancelled", reconciledNodes: 2 });
-    expect(flowRepo.abort).toHaveBeenCalledExactlyOnceWith(id, message);
+    expect(flowRepo.abort).toHaveBeenCalledExactlyOnceWith(id, message, 0);
     expect(events.insert).toHaveBeenCalledOnce();
     expectDiagnostic("warn", "[runs] failed to release flow-control for aborted flow %s:", [id], cleanupError,
       `[runs] failed to release flow-control for aborted flow ${id}:`);

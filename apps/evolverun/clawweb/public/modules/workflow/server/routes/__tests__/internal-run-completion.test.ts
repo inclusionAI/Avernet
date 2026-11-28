@@ -10,7 +10,9 @@ import { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import { createInternalRunsRouter } from "../internal/runs.js";
 
 // Keep test requests out of the host's on-disk API logs; use the real router and database.
-vi.mock("../internal-logger.js", () => ({ apiLog: vi.fn(), apiLogBody: vi.fn() }));
+vi.mock("../internal-logger.js", () => ({
+  apiLog: vi.fn(), apiLogBody: vi.fn(), RUN_COMPLETION_LOG_PATH: "/runs/:flowId/completion",
+}));
 
 const finalMetadata = {
   status: "succeeded",
@@ -129,7 +131,7 @@ describe("PUT /api/internal/runs/:flowId/completion with SQLite", () => {
     expect(await new FlowRunRepository(db).findFullByFlowId("flow")).toEqual(stored);
   });
 
-  it.each([null, 0, 2])("preserves phase for a legacy completion that omits it (stored epoch %j)", async (epoch) => {
+  it.each([null, 0])("preserves phase for an epoch-zero completion that omits it (stored epoch %j)", async (epoch) => {
     raw.prepare("UPDATE flow_runs SET retry_epoch = ? WHERE flow_id = 'flow'").run(epoch);
     const response = await complete(finalMetadata);
     expect(response.status).toBe(200);
@@ -169,7 +171,7 @@ describe("PUT /api/internal/runs/:flowId/completion with SQLite", () => {
     expect(snapshot()).toEqual(before);
   });
 
-  it.each([0, 1, 3])("returns 409 for conflicting epoch %i without changing phase or status", async (epoch) => {
+  it.each([undefined, 0, 1, 3])("returns 409 for omitted/conflicting epoch %j without changing phase or status", async (epoch) => {
     raw.exec("UPDATE flow_runs SET retry_epoch = 2 WHERE flow_id = 'flow'");
     const before = snapshot();
     const response = await complete({ ...finalMetadata, current_phase: "P7", retry_epoch: epoch });
@@ -182,8 +184,9 @@ describe("PUT /api/internal/runs/:flowId/completion with SQLite", () => {
     ["succeeded", 0, 200], ["succeeded", 2, 200],
     ["cancelled", 0, 200], ["cancelled", 2, 200],
     ["canceled", 0, 200], ["canceled", 2, 200],
-    ["failed", 2, 200],
-  ] as const)("retains the matching-epoch terminal guard for %s at epoch %i", async (status, epoch, completedAt) => {
+    ["failed", 0, 200], ["failed", 2, 200],
+    ["completed", 0, null],
+  ] as const)("rejects a phase-changing terminal completion for %s at epoch %i", async (status, epoch, completedAt) => {
     raw.prepare("UPDATE flow_runs SET status = ?, retry_epoch = ?, completed_at = ? WHERE flow_id = 'flow'")
       .run(status, epoch, completedAt);
     const before = snapshot();
@@ -201,12 +204,16 @@ describe("PUT /api/internal/runs/:flowId/completion with SQLite", () => {
     expect(await readRun()).toMatchObject({ ...finalMetadata, current_phase: "P5", retry_epoch: stored });
   });
 
-  it("still accepts matching-epoch failure details before the failure is completed", async () => {
-    raw.exec("UPDATE flow_runs SET status = 'failed', retry_epoch = 2 WHERE flow_id = 'flow'");
-    const response = await complete({ ...finalMetadata, status: "failed", current_phase: "P5", retry_epoch: 2 });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, data: true });
-    expect(await readRun()).toMatchObject({ ...finalMetadata, status: "failed", current_phase: "P5", retry_epoch: 2 });
+  it.each([undefined, 0, 2])("does not backfill a preexisting failed row with no completion timestamp (epoch %j)", async epoch => {
+    raw.prepare("UPDATE flow_runs SET status = 'failed', retry_epoch = ? WHERE flow_id = 'flow'").run(epoch ?? 0);
+    const before = snapshot();
+    const write = vi.spyOn(db, "exec");
+    const response = await complete({ ...finalMetadata, status: "failed", current_phase: "P5", retry_epoch: epoch });
+    expect(response.status).toBe(409);
+    await tick();
+    expect(write).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(before);
+    expect(onTerminal).not.toHaveBeenCalled();
   });
 
   it("preserves omitted JSON fields and reconciles counts without inferring phase from JSON", async () => {
@@ -220,14 +227,32 @@ describe("PUT /api/internal/runs/:flowId/completion with SQLite", () => {
     });
   });
 
-  it("keeps retry_epoch validation ahead of writes", async () => {
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "2", null, false])("rejects malformed retry_epoch %j before writes", async epoch => {
     const before = snapshot();
     const write = vi.spyOn(db, "exec");
-    const response = await complete({ ...finalMetadata, current_phase: "P7", retry_epoch: -1 });
+    const response = await complete({ ...finalMetadata, current_phase: "P7", retry_epoch: epoch });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ success: false, error: "Bad Request" });
     expect(write).not.toHaveBeenCalled();
     expect(snapshot()).toEqual(before);
+  });
+
+  it.each([undefined, null, "P7"])("rejects an epochless positive-attempt phase intent %j without writing", async phase => {
+    raw.exec("UPDATE flow_runs SET retry_epoch = 2 WHERE flow_id = 'flow'");
+    const before = snapshot();
+    const write = vi.spyOn(db, "exec");
+    expect((await complete({ ...finalMetadata, current_phase: phase })).status).toBe(409);
+    expect(write).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(before);
+  });
+
+  it.each([undefined, 0, 2])("allows only epoch zero when the schema truly lacks retry_epoch (sent %j)", async epoch => {
+    raw.exec("ALTER TABLE flow_runs DROP COLUMN retry_epoch");
+    const before = snapshot();
+    const response = await complete({ ...finalMetadata, current_phase: "P7", retry_epoch: epoch });
+    expect(response.status).toBe(epoch === 2 ? 409 : 200);
+    if (epoch === 2) expect(snapshot()).toEqual(before);
+    else expect(await readRun()).toMatchObject({ ...finalMetadata, current_phase: "P7" });
   });
 
   it("returns 404 for a missing run without changing other runs", async () => {
@@ -259,6 +284,26 @@ describe("FlowRunRepository.updateCompletion phase persistence", () => {
     expect(await repo.findFullByFlowId("flow")).toMatchObject({ status: "succeeded", current_phase: null });
   });
 
+  it.each([undefined, 0, 1, 3])("rejects direct positive-attempt phase writes with omitted/wrong epoch %j", async retryEpoch => {
+    raw.exec("UPDATE flow_runs SET retry_epoch = 2 WHERE flow_id = 'flow'");
+    const before = snapshot();
+    expect(await repo.updateCompletionOutcome("flow", { ...completion, currentPhase: "P7", retryEpoch })).toBe("rejected");
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("returns a direct duplicate without UPDATE and rejects a different phase", async () => {
+    const intent = { ...completion, currentPhase: "P7", retryEpoch: 0 };
+    expect(await repo.updateCompletionOutcome("flow", intent)).toBe("updated");
+    const settled = snapshot();
+    rejectCompletionWrites();
+    const write = vi.spyOn(db, "exec");
+    expect(await repo.updateCompletionOutcome("flow", intent)).toBe("duplicate");
+    expect(await repo.updateCompletion("flow", { ...intent, currentPhase: undefined })).toBe(true);
+    expect(await repo.updateCompletionOutcome("flow", { ...intent, currentPhase: null })).toBe("rejected");
+    expect(write).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(settled);
+  });
+
   it("propagates real SQLite persistence errors to direct callers", async () => {
     const before = snapshot();
     rejectCompletionWrites();
@@ -273,30 +318,33 @@ const timeoutResult = JSON.stringify({
   status: "failed", message: JSON.stringify({ reason: "flow_timeout", timeoutSecs: 60, ranForSecs: 61 }),
 });
 
-function seedTimeout(budget: unknown = 1) {
+function seedTimeout() {
   vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
-  raw.prepare("UPDATE flow_runs SET started_at = ?, state_json = ?, retry_epoch = 2 WHERE flow_id = 'flow'")
-    .run(1_800_000_000 - 61, JSON.stringify({ effectiveFlowTimeoutMinutes: budget,
-      workflowSnapshot: { flowTimeoutMinutes: 1 } }));
+  raw.prepare("UPDATE flow_runs SET started_at = ?, retry_epoch = 2 WHERE flow_id = 'flow'")
+    .run(1_800_000_000 - 61);
 }
 
 const timeoutCompletion = { ...finalMetadata, status: "failed", result_json: timeoutResult,
   total_duration_ms: 61_000, retry_epoch: 2 };
 
 describe("completion phase respects current settlement guards", () => {
-  it.each([undefined, 0, 2])("settles plain failure once and handles its phase supplement at epoch %j", async epoch => {
-    raw.prepare("UPDATE flow_runs SET retry_epoch = ? WHERE flow_id = 'flow'").run(epoch ?? 2);
+  it.each([undefined, 0, 2])("acknowledges failed replays read-only and rejects phase changes at epoch %j", async epoch => {
+    raw.prepare("UPDATE flow_runs SET retry_epoch = ? WHERE flow_id = 'flow'").run(epoch ?? 0);
     const first = { ...finalMetadata, status: "failed", current_phase: "P5", retry_epoch: epoch };
     expect((await complete(first)).status).toBe(200);
     await tick();
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId: "flow", status: "failed" });
     expect(await readRun()).toMatchObject({ ...finalMetadata, status: "failed", current_phase: "P5" });
     const settled = snapshot();
-    const supplement = await complete({ ...first, current_phase: "P7" });
-    expect(supplement.status).toBe(epoch === 2 ? 409 : 200);
+    rejectCompletionWrites();
+    const write = vi.spyOn(db, "exec");
+    expect((await complete(first)).status).toBe(200);
+    expect((await complete({ ...first, current_phase: undefined })).status).toBe(200);
+    expect((await complete({ ...first, current_phase: "P7" })).status).toBe(409);
+    expect((await complete({ ...first, current_phase: null })).status).toBe(409);
     await tick();
-    if (epoch === 2) expect(snapshot()).toEqual(settled);
-    else expect(await readRun()).toMatchObject({ status: "failed", current_phase: "P7" });
+    expect(write).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(settled);
     expect(onTerminal).toHaveBeenCalledTimes(1);
   });
 
@@ -317,45 +365,90 @@ describe("completion phase respects current settlement guards", () => {
     expect(snapshot()).toEqual(before);
   });
 
-  it.each([undefined, null, "P7"])("applies phase %j only on the first accepted timeout, not its duplicate", async phase => {
+  it.each([undefined, null, "P7"])("persists timeout phase %j once; only identical/omitted phase can replay", async phase => {
     seedTimeout();
-    expect((await complete({ ...timeoutCompletion, current_phase: phase })).status).toBe(200);
+    const first = { ...timeoutCompletion, current_phase: phase };
+    expect((await complete(first)).status).toBe(200);
     await tick();
     expect(await readRun()).toMatchObject({ status: "failed", current_phase: phase === undefined ? "P4" : phase,
       completed_at: 1_800_000_000, retry_epoch: 2, result_json: timeoutResult });
     const settled = snapshot();
-    expect((await complete({ ...timeoutCompletion, current_phase: "duplicate-must-not-write" })).status).toBe(200);
+    rejectCompletionWrites();
+    const write = vi.spyOn(db, "exec");
+    expect((await complete({ ...first, completed_at: 201 })).status).toBe(200);
+    expect((await complete({ ...first, current_phase: undefined })).status).toBe(200);
+    expect((await complete({ ...first, current_phase: "different-phase" })).status).toBe(409);
     await tick();
+    expect(write).not.toHaveBeenCalled();
     expect(snapshot()).toEqual(settled);
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId: "flow", status: "failed" });
   });
 
-  it.each([0, null, 2])("does not change phase or notify for invalid/mismatched saved timeout budget %j", async budget => {
-    seedTimeout(budget);
-    const before = snapshot();
-    expect((await complete({ ...timeoutCompletion, current_phase: "P7" })).status).toBe(409);
+  it.each(["succeeded", "failed"])("cannot backfill a missing terminal phase after %s closeout", async status => {
+    raw.exec("UPDATE flow_runs SET current_phase = NULL WHERE flow_id = 'flow'");
+    const first = { ...finalMetadata, status };
+    expect((await complete(first)).status).toBe(200);
     await tick();
-    expect(snapshot()).toEqual(before);
-    expect(onTerminal).not.toHaveBeenCalled();
+    expect(await readRun()).toMatchObject({ status, current_phase: null });
+    const settled = snapshot();
+    rejectCompletionWrites();
+    expect((await complete({ ...first, current_phase: null })).status).toBe(200);
+    expect((await complete({ ...first, current_phase: "P7" })).status).toBe(409);
+    await tick();
+    expect(snapshot()).toEqual(settled);
+    expect(onTerminal).toHaveBeenCalledTimes(status === "failed" ? 1 : 0);
   });
 
-  it("loses a timeout snapshot race without writing phase or notifying", async () => {
+  it.each([null, "P7", ""])("requires byte-identical explicit phase %j on a succeeded replay", async phase => {
+    const first = { ...finalMetadata, current_phase: phase };
+    expect((await complete(first)).status).toBe(200);
+    const settled = snapshot();
+    rejectCompletionWrites();
+    const write = vi.spyOn(db, "exec");
+    expect((await complete(first)).status).toBe(200);
+    expect((await complete({ ...first, current_phase: undefined })).status).toBe(200);
+    const different = phase === null ? "P7" : phase === "" ? null : " P7 ";
+    expect((await complete({ ...first, current_phase: different })).status).toBe(409);
+    expect(write).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(settled);
+  });
+
+  it.each(["current_phase", "retry_epoch", "state_json"])("loses a real snapshot race on %s without overwriting phase or notifying", async field => {
     seedTimeout();
     const query = db.query.bind(db);
     let raced = false;
+    let concurrent: unknown;
     vi.spyOn(db, "query").mockImplementation(async (sql, params) => {
       const rows = await query(sql, params);
       if (!raced && /SELECT status, started_at, state_json/.test(sql)) {
         raced = true;
-        raw.exec("UPDATE flow_runs SET started_at = started_at + 1 WHERE flow_id = 'flow'");
+        if (field === "current_phase") raw.exec("UPDATE flow_runs SET current_phase = 'concurrent-phase' WHERE flow_id = 'flow'");
+        else if (field === "retry_epoch") raw.exec("UPDATE flow_runs SET retry_epoch = 3 WHERE flow_id = 'flow'");
+        else raw.exec("UPDATE flow_runs SET state_json = '{}' WHERE flow_id = 'flow'");
+        concurrent = snapshot();
       }
       return rows;
     });
     expect((await complete({ ...timeoutCompletion, current_phase: "P7" })).status).toBe(409);
     await tick();
     expect(raced).toBe(true);
-    expect(await readRun()).toMatchObject({ status: "running", current_phase: "P4", completed_at: null });
+    expect(snapshot()).toEqual(concurrent);
+    expect(await readRun()).toMatchObject({ status: "running", completed_at: null });
     expect(onTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each(["succeeded", "failed"])("does not recount nodes or change phase on a %s replay with omitted fields", async status => {
+    const first = { status, completed_at: 200, current_phase: "P7", retry_epoch: 0 };
+    expect((await complete(first)).status).toBe(200);
+    await tick();
+    expect(await readRun()).toMatchObject({ status, current_phase: "P7", succeeded_count: 3, failed_count: 1 });
+    const settled = snapshot();
+    raw.exec("INSERT INTO node_executions VALUES ('flow', 'late-success', 'succeeded'), ('flow', 'late-failure', 'failed')");
+    rejectCompletionWrites();
+    expect((await complete({ ...first, current_phase: undefined })).status).toBe(200);
+    await tick();
+    expect(snapshot()).toEqual(settled);
+    expect(onTerminal).toHaveBeenCalledTimes(status === "failed" ? 1 : 0);
   });
 
   it("keeps accepted final phase and closeout counts stable against late node events", async () => {

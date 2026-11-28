@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDatabase, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRetryRequestRepository } from '../flow-retry-request-repository.js';
-import { FlowRunRepository } from '../flow-run-repository.js';
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-cancellation-'));
@@ -51,11 +50,10 @@ for (const status of ['cancelled', 'canceled']) {
               selected += 1;
               // A different connection commits cancellation after the real
               // candidate SELECT and before the real CAS statement executes.
-              if (status === 'cancelled') {
-                expect(await new FlowRunRepository(cancellationDb).abort('flow', 'user abort')).toBe(true);
-              } else {
-                await cancellationDb.exec("UPDATE flow_runs SET status = 'canceled' WHERE flow_id = ?", ['flow']);
-              }
+              // This fixture already has a terminal failed parent. Public abort
+              // now correctly refuses it; inject the cancellation precondition
+              // directly to keep testing retry-request CAS, not abort admission.
+              await cancellationDb.exec('UPDATE flow_runs SET status = ? WHERE flow_id = ?', [status, 'flow']);
             }
             return rows;
           },

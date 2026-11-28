@@ -136,18 +136,19 @@ function interceptWrites(before: (sql: string) => void, beforeRead: (sql: string
   return wrap(db);
 }
 
-it('preserves failed mailbox dedupe/claim, legacy status, failed-node retry and retry-resume', async () => {
+it('preserves failed mailbox dedupe/claim and explicit retries without legacy terminal reopening', async () => {
   const first = await request('/retry-requests', { request_id: 'first', flow_id: 'flow' }, 'POST');
   expect(first.status).toBe(200);
   const duplicate = await request('/retry-requests', { request_id: 'duplicate', flow_id: 'flow' }, 'POST');
   expect((await duplicate.json()).data.request_id).toBe('first');
   const claim = await request('/retry-requests/claim', { claim_engine: 'engine', options_version: 1 }, 'POST');
   expect((await claim.json()).data.claimed).toHaveLength(1);
-  expect((await request('/runs/flow/status', { status: 'running' })).status).toBe(200);
-  expect((await request('/runs/flow/completion', { status: 'failed' })).status).toBe(200);
-  expect((await request('/runs/flow/retry-failed', {})).status).toBe(200);
-  expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'pending' });
+  expect((await request('/runs/flow/status', { status: 'running' })).status).toBe(409);
   expect((await request('/runs/flow/retry-resume', { retry_epoch: 1 })).status).toBe(200);
+  expect((await request('/runs/flow/completion', { status: 'failed', retry_epoch: 1 })).status).toBe(200);
+  expect((await request('/runs/flow/retry-failed', {})).status).toBe(409);
+  expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'failed' });
+  expect((await request('/runs/flow/retry-resume', { retry_epoch: 2 })).status).toBe(200);
 });
 
 it('still reports missing runs as 404, not cancellation conflicts', async () => {

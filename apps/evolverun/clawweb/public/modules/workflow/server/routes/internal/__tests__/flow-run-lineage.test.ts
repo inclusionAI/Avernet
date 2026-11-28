@@ -63,7 +63,8 @@ describe('trusted engine run lineage wire contract', () => {
       ['/completion', { status: 'failed', completed_at: 10, succeeded_count: 0, failed_count: 1 }],
       ['/retry-failed', {}], ['/started-at', { started_at: 11 }], ['/status', { status: 'running' }],
     ] as const) {
-      expect((await f.request(`${path}/run${suffix}`, { ...body, ...forged }, 'PUT')).status).toBe(200);
+      const expectedStatus = ['/retry-failed', '/status', '/started-at'].includes(suffix) ? 409 : 200;
+      expect((await f.request(`${path}/run${suffix}`, { ...body, ...forged }, 'PUT')).status).toBe(expectedStatus);
       expect(await f.repo.findFullByFlowId('run')).toMatchObject(expected);
     }
   });

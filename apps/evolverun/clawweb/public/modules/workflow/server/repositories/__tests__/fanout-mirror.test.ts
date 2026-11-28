@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../flow-run-repository.js';
 import { fixture, group } from './fanout-state-fixture.js';
 
@@ -32,29 +33,25 @@ it('rejects forged managed-child identity in an ordinary mirror', async () => {
     .rejects.toMatchObject({ statusCode: 409 });
 });
 
-it('retries a legacy mirror whose read raced with the first committed fanout', async () => {
+it('serializes a fenced legacy mirror with the first concurrent committed fanout', async () => {
   let release!: () => void;
   let observed!: () => void;
   const paused = new Promise<void>(resolve => { observed = resolve; });
   const resume = new Promise<void>(resolve => { release = resolve; });
   let first = true;
-  const racingDb = new Proxy(f.db, {
-    get(target, key) {
-      if (key === 'query') return async (sql: string, params?: unknown[]) => {
-        const rows = await target.query(sql, params);
-        if (first && sql.includes('SELECT flow_id, workflow_id')) { first = false; observed(); await resume; }
-        return rows;
-      };
-      const value = Reflect.get(target, key, target);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
+  const wrap = (db: IDatabase): IDatabase => ({ dbType: db.dbType, dialect: db.dialect,
+    query: async <T>(sql: string, params?: unknown[]) => {
+      const rows = await db.query<T>(sql, params);
+      if (first && sql.includes('SELECT status, state_json')) { first = false; observed(); await resume; }
+      return rows;
+    }, exec: (sql, params) => db.exec(sql, params), transaction: fn => db.transaction(tx => fn(wrap(tx))), close: async () => {},
   });
-  const mirror = new FlowRunRepository(racingDb).updateStateJson('parent', JSON.stringify({ phase: 'after', subworkflowFanouts: {} }));
+  const mirror = new FlowRunRepository(wrap(f.db)).updateStateJson('parent', JSON.stringify({ phase: 'after', subworkflowFanouts: {} }));
   await paused;
-  try {
-    await repo.fanoutState.saveGroup('parent', 'fanout', { group: group(), expectedRevision: null });
-  } finally { release(); }
-  expect(await mirror).toBe(true);
+  const save = repo.fanoutState.saveGroup('parent', 'fanout', { group: group(), expectedRevision: null });
+  try { await new Promise<void>(resolve => setImmediate(resolve)); }
+  finally { release(); }
+  expect(await mirror).toBe(true); await save;
   const saved = JSON.parse(f.raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id='parent'").get().state_json);
   expect(saved.phase).toBe('after');
   expect(saved.subworkflowFanouts.fanout).toEqual(group());

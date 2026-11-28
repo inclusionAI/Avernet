@@ -5,7 +5,6 @@ const INLINE_SECRET_PATTERN = /(?<![A-Za-z0-9_-])(["']?[A-Za-z0-9_-]*(?:authoriz
 const CLI_CREDENTIAL_PATTERN = /--(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)(?:\s+|=)[^\s,;]+/gi;
 const SPACE_SECRET_VALUE = /(?<![A-Za-z0-9_-])(?:(?:[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_)?(?:AUTHORIZATION|COOKIE|TOKEN|SECRET|API_KEY|ACCESS_KEY|ACCESS_TOKEN|PASSWORD|CREDENTIAL)|apiKey|accessKey|accessToken)\s+(?:sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9._~+/=-]{16,})\b/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
-const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const CN_PHONE = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
 const CN_ID = /(?<!\d)\d{17}[0-9Xx](?!\d)/g;
 const BUSINESS_BODY_KEY = /^(?:prompt|prompts|content|contents|messages?|instruction|instructions|user[_-]?input|assistant[_-]?output|conversation|document|documents)$/i;
@@ -43,16 +42,37 @@ const APPROVAL_SECRET_KEYS = new Set([
 
 export const REDACTED_SECRET_TEXT = "[REDACTED_SECRET_TEXT]";
 
+// Visit each possible local-part run once. A domain starts only at its @,
+// stops before the next @, and keeps the old dotted suffix / word boundary.
+function redactEmails(text: string): string {
+  if (!text.includes("@")) return text;
+  const local = /\b[A-Z0-9._%+-]+/gi;
+  const domain = /[A-Z0-9.-]+\.[A-Z]{2,}\b/iy;
+  const parts: string[] = [];
+  let copied = 0;
+  let match: RegExpExecArray | null;
+  while ((match = local.exec(text)) !== null) {
+    if (text[local.lastIndex] !== "@") continue;
+    domain.lastIndex = local.lastIndex + 1;
+    if (!domain.test(text)) continue;
+    parts.push(text.slice(copied, match.index), "[REDACTED_EMAIL]");
+    copied = local.lastIndex = domain.lastIndex;
+  }
+  if (!parts.length) return text;
+  parts.push(text.slice(copied));
+  return parts.join("");
+}
+
 type RedactionOptions = { preserveBusinessBody?: boolean; maxTextBytes?: number; maxItems?: number; maxDepth?: number };
 export function redactText(value: unknown, maxBytes = 32 * 1024, options: RedactionOptions = {}): string {
-  let input = String(value ?? "")
+  const credentialsRedacted = String(value ?? "")
     .replace(BEARER, "Bearer [REDACTED]")
     .replace(CLI_CREDENTIAL_PATTERN, "[REDACTED]")
     .replace(SPACE_SECRET_VALUE, "[REDACTED]")
     .replace(INLINE_SECRET_PATTERN, (_match, key: string) => `${key}=[REDACTED]`)
     .replace(RAW_SECRET_LITERAL_GLOBAL, "[REDACTED]")
-    .replace(SIGNED_QUERY_SECRET_GLOBAL, "$1[REDACTED]")
-    .replace(EMAIL, "[REDACTED_EMAIL]")
+    .replace(SIGNED_QUERY_SECRET_GLOBAL, "$1[REDACTED]");
+  let input = redactEmails(credentialsRedacted)
     .replace(CN_PHONE, "[REDACTED_PHONE]")
     .replace(CN_ID, "[REDACTED_ID]");
   if (!options.preserveBusinessBody) input = input.replace(INLINE_BUSINESS_BODY, (_match, key: string) => `${key}=[REDACTED_BUSINESS_BODY]`);

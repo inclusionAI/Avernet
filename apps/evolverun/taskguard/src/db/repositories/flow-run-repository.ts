@@ -1,14 +1,16 @@
+import { mirrorRunPhase, mirrorRunStatus, resumeRunForRetry } from "./flow-run-lifecycle.js";
 /**
  * FlowRunRepository — persists and queries flow run summaries.
  *
  * Provides fast API access to workflow run listings without
  * joining the large flow_events table. Updated on workflow
  * lifecycle transitions (started → running → succeeded/failed/blocked).
- * Best-effort writes: DB failure is logged but doesn't throw.
+ * Closeout writes propagate persistence failures; ordinary telemetry is best-effort.
  */
 import type { IDatabase, Row } from "../types.js";
 import { nowForDb } from "../types.js";
 import type { IFlowRunRepository, FlowRunReapFields } from "./types.js";
+import { expectedRetryEpoch } from "./retry-epoch.js";
 
 // ── Types ──
 
@@ -18,6 +20,9 @@ export type FlowRunRow = {
   workflow_id: string;
   workflow_title: string | null;
   status: string;
+  /** Historical rows may omit this field; omission means epoch 0 only. */
+  retry_epoch?: number;
+  state_json?: string | null;
   params_json: string | null;
   input_json: string | null;
   result_json: string | null;
@@ -64,6 +69,8 @@ export type FlowRunInsert = {
 };
 
 export type FlowRunCompletion = {
+  /** Expected attempt from the caller snapshot. Omitted means epoch 0 only. */
+  retryEpoch?: number;
   status: string;
   resultJson?: string | null;
   inputJson?: string | null;
@@ -161,8 +168,11 @@ export class FlowRunRepository implements IFlowRunRepository {
   /**
    * Mark a flow run as completed (succeeded, failed, or blocked).
    * Sets status, completed_at, total_duration_ms, total_token_usage, result_json.
+   * Only the caller's expected retry epoch and a nonterminal row may transition.
+   * A lost CAS returns false; persistence failures reject.
    */
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
+    const retryEpoch = expectedRetryEpoch(completion.retryEpoch);
     try {
       const now = nowForDb(this.db.dbType);
       // Build SET clause dynamically: only include fields when explicitly provided.
@@ -204,53 +214,33 @@ export class FlowRunRepository implements IFlowRunRepository {
         sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
         values.push(flowId);
       }
-      values.push(flowId);
-      await this.db.exec(
-        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
+      values.push(flowId, retryEpoch);
+      const result = await this.db.exec(
+        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND retry_epoch = ?
+         AND status IN ('running', 'waiting', 'blocked', 'pending') AND completed_at IS NULL`,
         values,
       );
-      return true;
+      return result.affectedRows > 0;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.updateCompletion failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 
   /**
    * Update the status and gmt_modified of a flow run (e.g. to "blocked").
    */
-  async updateStatus(flowId: string, status: string): Promise<boolean> {
-    try {
-      const now = nowForDb(this.db.dbType);
-      await this.db.exec(
-        `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?`,
-        [status, now, flowId],
-      );
-      return true;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateStatus failed: ${msg}`);
-      return false;
-    }
+  async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
+    return mirrorRunStatus(this.db, flowId, status, retryEpoch);
   }
 
-  /**
-   * Update the current_phase of a flow run during state transitions.
-   */
-  async updateCurrentPhase(flowId: string, currentPhase: string): Promise<boolean> {
-    try {
-      const now = nowForDb(this.db.dbType);
-      await this.db.exec(
-        `UPDATE flow_runs SET current_phase = ?, gmt_modified = ? WHERE flow_id = ?`,
-        [currentPhase, now, flowId],
-      );
-      return true;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateCurrentPhase failed: ${msg}`);
-      return false;
-    }
+  async updateCurrentPhase(flowId: string, currentPhase: string, retryEpoch?: number): Promise<boolean> {
+    return mirrorRunPhase(this.db, flowId, currentPhase, retryEpoch);
+  }
+
+  async resumeForRetry(flowId: string, retryEpoch: number, stateJson?: string): Promise<'resumed' | 'not_found' | 'conflict'> {
+    return resumeRunForRetry(this.db, flowId, retryEpoch, stateJson);
   }
 
   /**
@@ -323,13 +313,13 @@ export class FlowRunRepository implements IFlowRunRepository {
    * legitimately parked as "waiting"/"blocked" (e.g. human approval) are left
    * untouched. Oldest first so the most overdue are handled first.
    */
-  async findStaleRunning(cutoffEpochSecs: number, limit = 100): Promise<FlowRunRow[]> {
+  async findStaleRunning(cutoffEpochSecs: number, limit = 100, offset = 0): Promise<FlowRunRow[]> {
     try {
       return await this.db.query<FlowRunRow>(
         `SELECT * FROM flow_runs
          WHERE status = 'running' AND started_at < ?
-         ORDER BY started_at ASC LIMIT ?`,
-        [cutoffEpochSecs, limit],
+         ORDER BY started_at ASC, flow_id ASC LIMIT ? OFFSET ?`,
+        [cutoffEpochSecs, limit, offset],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -401,15 +391,16 @@ export class FlowRunRepository implements IFlowRunRepository {
 
   /**
    * CAS-claim a timeout reap: the server transitions the row to failed only
-   * when it is not already terminal. Exactly one engine process sharing the
-   * DB wins — losers get claimed=false and skip logging/notifications.
+   * when it is running in the expected retry epoch. Exactly one engine process
+   * sharing the DB wins — losers get claimed=false and skip logging/notifications.
    */
   async markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean> {
+    const retryEpoch = expectedRetryEpoch(fields.retryEpoch);
     try {
       const now = nowForDb(this.db.dbType);
-      const result = await this.db.query<{ affected_rows: number }>(
+      const result = await this.db.exec(
         `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?, gmt_modified = ?
-         WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled', 'completed')`,
+         WHERE flow_id = ? AND status = 'running' AND retry_epoch = ?`,
         [
           fields.reason,
           fields.currentPhase,
@@ -417,14 +408,14 @@ export class FlowRunRepository implements IFlowRunRepository {
           fields.completedAt,
           now,
           flowId,
+          retryEpoch,
         ],
       );
-      // SQLite returns the number of rows affected. claimed when exactly 1.
-      return result.length > 0 && (result[0]?.affected_rows ?? 0) > 0;
+      return result.affectedRows > 0;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.markFailedIfRunning failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 

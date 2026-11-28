@@ -1,3 +1,5 @@
+import { captureStateAttempt } from "../recovery/attempt.js";
+import { stateAttemptEpoch } from "../db/repositories/retry-epoch.js";
 /**
  * DatabaseTaskFlowAdapter — TaskFlow implementation for MCP Server mode.
  *
@@ -106,8 +108,8 @@ function normalizeFlowListResult(
 /** Convert a FlowRunRow from the API into the Record shape the Controller expects. */
 function rowToFlowRecord(row: Record<string, unknown>): Record<string, unknown> {
   // Extract stateJson from params_json (may contain embedded _clawmind_state)
-  let stateJson = "{}";
-  const paramsJson = row.params_json;
+  let stateJson = typeof row.state_json === "string" ? row.state_json : "{}";
+  const paramsJson = row.state_json == null ? row.params_json : undefined;
   if (typeof paramsJson === "string" && paramsJson) {
     try {
       const parsed = JSON.parse(paramsJson);
@@ -123,8 +125,12 @@ function rowToFlowRecord(row: Record<string, unknown>): Record<string, unknown> 
     }
   }
 
+  const state = JSON.parse(stateJson);
+  captureStateAttempt(row, state);
+  stateJson = JSON.stringify(state);
   return {
     flowId: row.flow_id,
+    retry_epoch: row.retry_epoch ?? 0,
     goal: row.workflow_title ?? row.workflow_id ?? "",
     status: row.status,
     currentStep: row.current_phase ?? "start",
@@ -166,6 +172,22 @@ function recoveredRecordToInMemoryFlow(
     controllerId: String(record.controllerId ?? "mcp-server"),
     sessionScope: String(record.sessionKey ?? ""),
   };
+}
+
+function terminalStatus(status: string): boolean {
+  return ["succeeded", "failed", "completed", "cancelled", "canceled"].includes(status.trim().toLowerCase());
+}
+
+function assertResumeAttempt(flow: InMemoryFlow, nextStateJson: string): number {
+  const priorEpoch = stateAttemptEpoch(JSON.parse(flow.stateJson));
+  const nextEpoch = stateAttemptEpoch(JSON.parse(nextStateJson));
+  const status = flow.status.trim().toLowerCase();
+  if (["cancelled", "canceled"].includes(status)
+    || (terminalStatus(flow.status) && nextEpoch !== priorEpoch + 1)
+    || (!terminalStatus(flow.status) && nextEpoch !== priorEpoch && nextEpoch !== priorEpoch + 1)) {
+    throw Object.assign(new Error("TaskFlow resume requires an admitted next retry epoch"), { status: 409 });
+  }
+  return nextEpoch;
 }
 
 // ── DatabaseTaskFlowAdapter ──
@@ -298,25 +320,20 @@ export class DatabaseTaskFlowAdapter implements TaskFlowAdapter {
     if (rev !== flow.revision) {
       throw new Error(`状态更新冲突，请重试 (expected ${rev}, current ${flow.revision})`);
     }
+    if (terminalStatus(flow.status)) return { applied: false, flow: inMemoryToFlowRecord(flow) };
+    const nextStateJson = stateJson === "{}" ? flow.stateJson : stateJson;
+    const epoch = stateAttemptEpoch(JSON.parse(nextStateJson));
+    if (this.apiRepo) {
+      if (!await this.apiRepo.updateStatus(flowId, "waiting", epoch)) throw new Error("TaskFlow waiting status was not persisted");
+      if (currentStep && !await this.apiRepo.updateCurrentPhase(flowId, currentStep, epoch)) throw new Error("TaskFlow waiting phase was not persisted");
+    }
+    if (flow.revision !== rev) throw new Error("状态更新冲突，请重试");
     flow.status = "waiting";
     flow.currentStep = currentStep || flow.currentStep;
-    flow.stateJson = stateJson === "{}" ? flow.stateJson : stateJson;
+    flow.stateJson = nextStateJson;
     flow.waitJson = waitJson ?? undefined;
     flow.revision++;
     flow.updatedAt = now();
-
-    // Persist status transition via API
-    if (this.apiRepo) {
-      try {
-        await this.apiRepo.updateStatus(flowId, "waiting");
-        if (currentStep) {
-          await this.apiRepo.updateCurrentPhase(flowId, currentStep);
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[clawmind:taskflow] API setWaiting threw for ${flowId}: ${msg}`);
-      }
-    }
 
     return { applied: true, flow: inMemoryToFlowRecord(flow) };
   }
@@ -336,24 +353,19 @@ export class DatabaseTaskFlowAdapter implements TaskFlowAdapter {
     if (rev !== flow.revision) {
       throw new Error(`状态更新冲突，请重试 (expected ${rev}, current ${flow.revision})`);
     }
+    const nextStateJson = stateJson === "{}" ? flow.stateJson : stateJson;
+    const epoch = assertResumeAttempt(flow, nextStateJson);
+    if (this.apiRepo) {
+      if (!await this.apiRepo.updateStatus(flowId, status, epoch)) throw new Error("TaskFlow resume status was not persisted");
+      if (currentStep && !await this.apiRepo.updateCurrentPhase(flowId, currentStep, epoch)) throw new Error("TaskFlow resume phase was not persisted");
+    }
+    if (flow.revision !== rev) throw new Error("状态更新冲突，请重试");
     flow.status = status;
     flow.currentStep = currentStep || flow.currentStep;
-    flow.stateJson = stateJson === "{}" ? flow.stateJson : stateJson;
+    flow.stateJson = nextStateJson;
     flow.waitJson = undefined;
     flow.revision++;
     flow.updatedAt = now();
-
-    if (this.apiRepo) {
-      try {
-        await this.apiRepo.updateStatus(flowId, status);
-        if (currentStep) {
-          await this.apiRepo.updateCurrentPhase(flowId, currentStep);
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[clawmind:taskflow] API resume threw for ${flowId}: ${msg}`);
-      }
-    }
 
     return { applied: true, flow: inMemoryToFlowRecord(flow) };
   }
@@ -408,14 +420,8 @@ export class DatabaseTaskFlowAdapter implements TaskFlowAdapter {
     flow.revision++;
     flow.updatedAt = now();
 
-    if (this.apiRepo) {
-      try {
-        await this.apiRepo.updateStatus(flowId, status);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[clawmind:taskflow] API fail threw for ${flowId}: ${msg}`);
-      }
-    }
+    // Like finish(), terminal DB writes belong exclusively to the controller's
+    // epoch-fenced completeFlowRun. A separate status PUT would bypass admission.
 
     return { ...inMemoryToFlowRecord(flow), applied: true };
   }

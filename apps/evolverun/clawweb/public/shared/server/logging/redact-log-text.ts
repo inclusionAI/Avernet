@@ -1,6 +1,8 @@
 import { redactText } from "../services/redaction.js";
 
 const TRUNCATED = "...[truncated]";
+const ENCODED = "[REDACTED_ENCODED_TEXT]";
+const MAX_SAMPLE = 16 * 1024;
 
 function prefix(text: string, length: number): string {
   let end = Math.max(0, length);
@@ -13,19 +15,30 @@ function prefix(text: string, length: number): string {
  * encoded tokens. Never expose a partially sampled URL/credential token.
  * Safe text (including console format tokens and stack whitespace) is unchanged.
  */
-export function redactLogText(text: string, maxChars = 16 * 1024): string {
-  const limit = Number.isSafeInteger(maxChars) && maxChars >= 4 ? maxChars : 16 * 1024;
+export function redactLogText(text: string, maxChars = MAX_SAMPLE): string {
+  const limit = Number.isSafeInteger(maxChars) && maxChars >= 4 ? Math.min(maxChars, MAX_SAMPLE) : MAX_SAMPLE;
   const clipped = text.length > limit;
   let sample = prefix(text, limit);
-  if (clipped) sample = sample.replace(/\S+$/, "");
+  if (clipped) {
+    let end = sample.length;
+    while (end > 0 && !/\s/.test(sample[end - 1])) end--;
+    sample = sample.slice(0, end);
+  }
   for (let pass = 0; pass < 4; pass++) {
-    const decoded = sample.replace(/%([0-7][0-9a-f])/gi, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    // Decoding a delimiter could expose the suffix of a single opaque value.
+    let ambiguous = false;
+    const decoded = sample.replace(/%([0-7][0-9a-f])/gi, (_match, hex: string) => {
+      const char = String.fromCharCode(parseInt(hex, 16));
+      if (/[\x00-\x20\x7f"'<>?#&,;]/.test(char)) ambiguous = true;
+      return char;
+    });
+    if (ambiguous) return prefix(ENCODED, limit);
     if (decoded === sample) break;
     sample = decoded;
   }
   // Ambiguous/deeper encoding is not useful enough to justify leaking a token.
-  sample = sample.replace(/\S*%[0-9a-f]{2}\S*/gi, "[REDACTED_ENCODED_TEXT]")
-    .replace(/([/\\]evidence-access[/\\])[^?#\s"'<>]+/gi, "$1[REDACTED]");
+  if (/%[0-9a-f]{2}/i.test(sample)) return prefix(ENCODED, limit);
+  sample = sample.replace(/([/\\]evidence-access[/\\])[^?#\s"'<>]+/gi, "$1[REDACTED]");
   sample = redactText(sample, limit * 4);
   if (clipped || sample.length > limit) {
     const suffix = limit >= TRUNCATED.length ? TRUNCATED : "";

@@ -1,5 +1,7 @@
+import { RetryCheckpointInvalid } from '../../repositories/flow-run-retry-checkpoint.js';
 import { FlowRunLineageError, normalizeFlowRunLineage } from '../../services/flow-run-lineage.js';
-import { captureApiError, errorStack } from "../error-log-format.js";
+import { redactLogText } from "@avernet/clawweb-shared/server/logging/redact-log-text";
+import { apiErrorDiagnostic, captureApiError, errorStack } from "../error-log-format.js";
 import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
 import { RepairBatchError } from '../../contracts/repair-batch.js';
@@ -12,7 +14,7 @@ import { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import { FanoutStorageError, type FanoutAdmissionConfig } from "../../repositories/fanout-state-repository.js";
 import { createInternalFanoutsRouter } from "./fanouts.js";
 import { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
-import { apiLog, apiLogBody } from "../internal-logger.js";
+import { apiLog, apiLogBody, RUN_COMPLETION_LOG_PATH } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
@@ -33,13 +35,20 @@ function hasInitialDispatchClaim(state: Record<string, unknown>): boolean {
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
   input: { flowId: string; status: string },
+  source: "completion" | "fail-if-running",
 ): void {
   if (!observer) return;
   setImmediate(() => {
     void Promise.resolve()
       .then(() => observer(input))
-      .catch((error) => {
-        console.warn("[internal-runs] terminal observer failed for %s: %s", input.flowId, error instanceof Error ? error.message : String(error), errorStack(error));
+      .catch((error: unknown) => {
+        if (source === "completion") {
+          console.warn("[internal-runs] terminal observer failed");
+          return;
+        }
+        const diagnostic = apiErrorDiagnostic(error);
+        console.warn("[internal-runs] terminal observer failed for %s: %s", redactLogText(input.flowId, 1024),
+          redactLogText(diagnostic.message, 2048), redactLogText(diagnostic.stack, 8192));
       });
   });
 }
@@ -299,37 +308,38 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/completion — update completion fields */
   router.put("/:flowId/completion", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    apiLogBody("PUT", `/runs/${flowId}/completion`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
+      apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: 503 }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      const { status, result_json, input_json, current_phase, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch } = req.body as {
+      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch, current_phase } = req.body as {
         status?: string;
         result_json?: string;
         input_json?: string;
-        current_phase?: string | null;
         total_duration_ms?: number;
         total_token_usage?: number;
         succeeded_count?: number;
         failed_count?: number;
         completed_at?: number;
         retry_epoch?: number;
+        current_phase?: string | null;
       };
       if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: 400 });
         res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
         return;
       }
 
       if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase()) {
+        apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: 400 });
         res.status(400).json({ success: false, error: "Bad Request", message: "status must be a nonempty lowercase string without surrounding whitespace" });
         return;
       }
 
-      if (current_phase !== undefined && current_phase !== null && typeof current_phase !== "string") {
-        res.status(400).json({ success: false, error: "Bad Request", message: "current_phase must be a string or null" });
+      if (current_phase !== undefined && current_phase !== null && typeof current_phase !== 'string') {
+        res.status(400).json({ success: false, error: 'Bad Request', message: 'current_phase must be a string or null' });
         return;
       }
 
@@ -339,6 +349,7 @@ export function createInternalRunsRouter(
         totalTokenUsage: total_token_usage ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
         retryEpoch: retry_epoch,
+        currentPhase: current_phase,
       };
       // result_json: only set when explicitly provided (undefined = preserve existing value)
       if (result_json !== undefined) {
@@ -346,9 +357,6 @@ export function createInternalRunsRouter(
       }
       if (input_json !== undefined) {
         completion.inputJson = input_json;
-      }
-      if (current_phase !== undefined) {
-        completion.currentPhase = current_phase;
       }
       if (succeeded_count !== undefined) {
         completion.succeededCount = succeeded_count;
@@ -359,22 +367,22 @@ export function createInternalRunsRouter(
       const outcome = await flowRunRepo.updateCompletionOutcome(flowId, completion);
       if (outcome === 'rejected') {
         const exists = await flowRunRepo.findStatusByFlowId(flowId);
-        apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: exists ? 409 : 404 });
-        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a conflicting policy, snapshot, retry epoch or terminal status` : `Flow run "${flowId}" not found` });
+        apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: exists ? 409 : 404 });
+        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a conflicting snapshot, retry epoch or terminal status` : `Flow run "${flowId}" not found` });
         return;
       }
-      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 200, newStatus: status });
+      apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: 200 });
       res.json({ success: true, data: true });
-      if (outcome === "updated" && status === "failed") scheduleTerminalObserver(observers.onTerminal, { flowId, status });
+      if (outcome === "updated" && status === "failed") scheduleTerminalObserver(observers.onTerminal, { flowId, status }, "completion");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 500, error: msg }, error, res);
+      apiLog("PUT", RUN_COMPLETION_LOG_PATH, { status: 500 }, undefined, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
 
   /** PUT /:flowId/fail-if-running — CAS claim for the engine timeout watchdog.
-   *  Transitions the row to failed only when it is not already terminal, so
+   *  Transitions the row to failed only when its exact status is running, so
    *  exactly one engine process sharing this DB wins the reap. Always 200
    *  when the SQL ran; `claimed` tells the caller whether it won. */
   router.put("/:flowId/fail-if-running", asyncHandler(async (req: Request, res: Response) => {
@@ -388,7 +396,7 @@ export function createInternalRunsRouter(
     try {
       const { reason, current_phase, total_duration_ms, completed_at, retry_epoch } = req.body as {
         reason?: string;
-        current_phase?: string;
+        current_phase?: string | null;
         total_duration_ms?: number | null;
         completed_at?: number;
         retry_epoch?: number;
@@ -401,16 +409,20 @@ export function createInternalRunsRouter(
         res.status(400).json({ success: false, error: "Bad Request", message: "reason is required" });
         return;
       }
+      if (current_phase !== undefined && current_phase !== null && typeof current_phase !== 'string') {
+        res.status(400).json({ success: false, error: "Bad Request", message: "current_phase must be a string or null" });
+        return;
+      }
       const claimed = await flowRunRepo.markFailedIfRunning(flowId, {
         reason,
-        currentPhase: current_phase ?? "timeout",
+        currentPhase: current_phase,
         totalDurationMs: total_duration_ms ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
         retryEpoch: retry_epoch,
       });
       apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 200, claimed });
       res.json({ success: true, data: { claimed } });
-      if (claimed) scheduleTerminalObserver(observers.onTerminal, { flowId, status: "failed" });
+      if (claimed) scheduleTerminalObserver(observers.onTerminal, { flowId, status: "failed" }, "fail-if-running");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 500, error: msg }, error, res);
@@ -476,7 +488,7 @@ export function createInternalRunsRouter(
       if (!row) {
         const existing = await flowRunRepo.findStatusByFlowId(flowId);
         const cancelled = existing && ['cancelled', 'canceled'].includes(existing.status);
-        const conflict = cancelled || (existing && status === 'failed');
+        const conflict = existing !== null;
         apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: conflict ? 409 : 404 });
         res.status(conflict ? 409 : 404).json({ success: false, error: conflict ? "Conflict" : "Not Found", message: conflict ? `Flow run "${flowId}" ${cancelled ? 'is cancelled' : 'cannot accept this status write'}` : `Flow run "${flowId}" not found` });
         return;
@@ -493,7 +505,7 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/phase — update current phase */
   router.put("/:flowId/phase", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    const { phase } = req.body as { phase?: string };
+    const { phase, retry_epoch } = req.body as { phase?: string; retry_epoch?: number };
     apiLog("PUT", `/runs/${flowId}/phase`, { flowId, phase });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
@@ -501,16 +513,19 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      if (!phase) {
+      if (typeof phase !== 'string' || !phase
+        || (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0))) {
         apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 400, error: "Missing phase" });
-        res.status(400).json({ success: false, error: "Bad Request", message: "Missing required field: phase" });
+        res.status(400).json({ success: false, error: "Bad Request", message: "phase must be a nonempty string and retry_epoch must be a nonnegative safe integer" });
         return;
       }
 
-      const row = await flowRunRepo.updateCurrentPhase(flowId, phase);
+      const row = await flowRunRepo.updateCurrentPhase(flowId, phase, retry_epoch);
       if (!row) {
-        apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        const exists = await flowRunRepo.findStatusByFlowId(flowId);
+        const status = exists ? 409 : 404;
+        apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status });
+        res.status(status).json({ success: false, error: exists ? 'Conflict' : 'Not Found', message: exists ? 'Phase mirror conflicts with the saved generation or settlement' : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 200, phase });
@@ -522,7 +537,7 @@ export function createInternalRunsRouter(
     }
   }));
 
-  /** PUT /:flowId/started-at — reset started_at before manual retry marks an old run running again. */
+  /** PUT /:flowId/started-at — deprecated read-only rejection; retry-resume preserves original start. */
   router.put("/:flowId/started-at", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
     const { started_at } = req.body as { started_at?: number };
@@ -540,14 +555,12 @@ export function createInternalRunsRouter(
         return;
       }
 
-      const ok = await flowRunRepo.resetStartedAt(flowId, Math.floor(startedAt));
-      if (!ok) {
-        apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
-        return;
-      }
-      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 200, startedAt: Math.floor(startedAt) });
-      res.json({ success: true });
+      const exists = await flowRunRepo.findStatusByFlowId(flowId);
+      const status = exists ? 409 : 404;
+      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status });
+      res.status(status).json({ success: false, error: exists ? 'Conflict' : 'Not Found', message: exists
+        ? 'started-at is deprecated; coordinated retry-resume advances retry_epoch while preserving the original started_at. No run was changed.'
+        : `Flow run "${flowId}" not found` });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 500, error: msg }, error, res);
@@ -587,7 +600,7 @@ export function createInternalRunsRouter(
     }
   }));
 
-  /** PUT /:flowId/result-json — overwrite result_json with last successful node output */
+  /** PUT /:flowId/result-json — deprecated read-only rejection; completion owns final result. */
   router.put("/:flowId/result-json", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
     apiLogBody("PUT", `/runs/${flowId}/result-json`, { fields: Object.keys(req.body ?? {}) }, { flowId });
@@ -614,21 +627,19 @@ export function createInternalRunsRouter(
         return;
       }
 
-      const { nodeId, ...result } = parsed;
+      const { nodeId } = parsed;
       if (!nodeId || typeof nodeId !== "string") {
         apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 400, error: "Missing nodeId in result_json" });
         res.status(400).json({ success: false, error: "Bad Request", message: "result_json must contain a nodeId field" });
         return;
       }
 
-      const ok = await flowRunRepo.updateResultJson(flowId, nodeId, result);
-      if (!ok) {
-        apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
-        return;
-      }
-      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 200, nodeId });
-      res.json({ success: true });
+      const exists = await flowRunRepo.findStatusByFlowId(flowId);
+      const status = exists ? 409 : 404;
+      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status });
+      res.status(status).json({ success: false, error: exists ? 'Conflict' : 'Not Found', message: exists
+        ? 'result-json is deprecated; use fenced completion for the final result. No run was changed.'
+        : `Flow run "${flowId}" not found` });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 500, error: msg }, error, res);
@@ -636,7 +647,7 @@ export function createInternalRunsRouter(
     }
   }));
 
-  /** PUT /:flowId/retry-failed — reset failed nodes to pending and update run status */
+  /** PUT /:flowId/retry-failed — deprecated, read-only rejection; retry-resume owns generation admission. */
   router.put("/:flowId/retry-failed", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
     apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId });
@@ -653,13 +664,8 @@ export function createInternalRunsRouter(
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
-      if (result.status === 'conflict') {
-        apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 409 });
-        res.status(409).json({ success: false, error: "Conflict", message: `Flow run "${flowId}" is cancelled` });
-        return;
-      }
-      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
-      res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
+      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 409 });
+      res.status(409).json({ success: false, error: "Conflict", message: "retry-failed is deprecated; use coordinated retry-resume with retry_epoch captured from the original attempt plus one. No run or node was changed." });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg }, error, res);
@@ -680,7 +686,14 @@ export function createInternalRunsRouter(
         res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a positive safe integer" });
         return;
       }
-      const outcome = await flowRunRepo.resumeForRetry(flowId, retryEpoch as number);
+      const stateJson = (req.body as { state_json?: unknown })?.state_json;
+      if (stateJson !== undefined && typeof stateJson !== 'string') {
+        res.status(400).json({ success: false, error: 'Bad Request', message: 'state_json must be a checkpoint JSON object string' });
+        return;
+      }
+      const outcome = typeof stateJson !== 'string'
+        ? await flowRunRepo.resumeForRetry(flowId, retryEpoch as number)
+        : await flowRunRepo.resumeForRetry(flowId, retryEpoch as number, stateJson);
       if (outcome === 'not_found') {
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
@@ -691,6 +704,10 @@ export function createInternalRunsRouter(
       }
       res.json({ success: true });
     } catch (error) {
+      if (error instanceof RetryCheckpointInvalid) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: error.message });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       console.error("[internal/runs] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message });
@@ -707,10 +724,11 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { state_json } = req.body as { state_json?: string };
-      if (!state_json || typeof state_json !== "string") {
+      const { state_json, retry_epoch } = req.body as { state_json?: string; retry_epoch?: number };
+      if (!state_json || typeof state_json !== "string"
+        || (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0))) {
         apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 400, error: "Missing or invalid state_json" });
-        res.status(400).json({ success: false, error: "Bad Request", message: "Missing required field: state_json (JSON string)" });
+        res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON string and retry_epoch must be a nonnegative safe integer" });
         return;
       }
       try {
@@ -721,10 +739,12 @@ export function createInternalRunsRouter(
         return;
       }
 
-      const ok = await flowRunRepo.updateStateJson(flowId, state_json);
+      const ok = await flowRunRepo.updateStateJson(flowId, state_json, retry_epoch);
       if (!ok) {
-        apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        const exists = await flowRunRepo.findStatusByFlowId(flowId);
+        const status = exists ? 409 : 404;
+        apiLog("PUT", `/runs/${flowId}/state`, { flowId, status });
+        res.status(status).json({ success: false, error: exists ? 'Conflict' : 'Not Found', message: exists ? 'State mirror conflicts with the saved generation or settlement' : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 200, bytes: state_json.length });

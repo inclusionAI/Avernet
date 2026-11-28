@@ -4,6 +4,8 @@
  * Calls evolvetrace's /api/internal/node-executions endpoints.
  */
 import type { ApiClient } from "../api-client.js";
+import { expectedRetryEpoch } from "../repositories/retry-epoch.js";
+import { assertWriteAccepted } from "./write-response.js";
 import type {
   INodeExecutionRepository,
   NodeExecutionRow,
@@ -125,11 +127,12 @@ export class NodeExecutionApiRepository implements INodeExecutionRepository {
         `/api/internal/node-executions/${id}/completion`,
         body,
       );
-      return resp.ok;
+      assertWriteAccepted(resp, "updateCompletion");
+      return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[NodeExecApi] updateCompletion(id) failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 
@@ -150,11 +153,12 @@ export class NodeExecutionApiRepository implements INodeExecutionRepository {
         `/api/internal/node-executions/${encodeURIComponent(flowId)}/${encodeURIComponent(nodeId)}/${attempt}/completion`,
         body,
       );
-      return resp.ok;
+      assertWriteAccepted(resp, "updateCompletionByFlowNode");
+      return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[NodeExecApi] updateCompletionByFlowNode failed: ${msg}`);
-      return false;
+      throw error;
     }
   }
 
@@ -225,18 +229,23 @@ export class NodeExecutionApiRepository implements INodeExecutionRepository {
     }
   }
 
-  async reconcileStaleRunning(flowId: string, flowStatus: string): Promise<number> {
+  async reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string, retryEpoch?: number): Promise<number> {
+    const expectedEpoch = expectedRetryEpoch(retryEpoch);
     try {
       const resp = await this.api.put<{ reconciled: number }>(
         `/api/internal/node-executions/${encodeURIComponent(flowId)}/reconcile-stale-running`,
-        { flow_status: flowStatus },
+        { flow_status: flowStatus, retry_epoch: expectedEpoch, custom_error_text: customErrorText },
       );
-      if (!resp.ok || !resp.data) return 0;
-      return resp.data.reconciled ?? 0;
+      assertWriteAccepted(resp, "reconcileStaleRunning");
+      const reconciled = resp.data?.reconciled;
+      if (!Number.isSafeInteger(reconciled) || reconciled < 0) {
+        throw Object.assign(new Error("reconcileStaleRunning returned no valid persistence acknowledgement"), { status: resp.status });
+      }
+      return reconciled;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[NodeExecApi] reconcileStaleRunning failed: ${msg}`);
-      return 0;
+      throw error;
     }
   }
 }

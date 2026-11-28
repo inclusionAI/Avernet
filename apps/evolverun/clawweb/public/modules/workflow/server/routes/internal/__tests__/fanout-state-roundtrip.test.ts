@@ -23,7 +23,7 @@ const db = {
     return [{
       flow_id: "parent",
       workflow_id: "cct-drill-evaluation",
-      status: "running",
+      status: "running", retry_epoch: 0, completed_at: null, current_phase: null, params_json: null,
       state_json: stateJson,
     }];
   },

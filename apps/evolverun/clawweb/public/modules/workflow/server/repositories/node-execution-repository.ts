@@ -1,3 +1,4 @@
+import { reconcileTerminalNodes } from './node-reconcile.js';
 /**
  * NodeExecutionRepository — reads and writes node_executions table via raw SQL.
  * No dependency on ClawFlow; shares the same database schema.
@@ -342,37 +343,7 @@ export class NodeExecutionRepository {
    *  When customErrorText is provided (e.g. for user-initiated abort), it
    *  overrides the default error message so the abort reason is recorded in
    *  the node_executions table. */
-  async reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string): Promise<number> {
-    try {
-      const now = this.db.dialect.now();
-      const completedAt = Math.floor(Date.now() / 1000);
-      let targetStatus: string;
-      let errorText: string;
-      if (flowStatus === "succeeded") {
-        targetStatus = "skipped";
-        errorText = "Node still running when workflow succeeded — reconciled to skipped";
-      } else if (flowStatus === "cancelled") {
-        // User-initiated abort: running nodes are victims, not failures.
-        // Mark as "skipped" so they don't inflate failed_count or trigger failure alerts.
-        targetStatus = "skipped";
-        errorText = customErrorText ?? "Node still running when workflow was aborted — reconciled to skipped";
-      } else {
-        targetStatus = "failed";
-        errorText = customErrorText ?? "Node still running when workflow failed — reconciled to failed";
-      }
-      const result = await this.db.exec(
-        `UPDATE node_executions SET status = ?, error_text = ?, completed_at = ?, gmt_modified = ? WHERE flow_id = ? AND status = 'running'`,
-        [targetStatus, errorText, completedAt, now, flowId],
-      );
-      const changes = result.affectedRows ?? 0;
-      if (changes > 0) {
-        console.log(`[db] NodeExecutionRepository.reconcileStaleRunning: flowId=${flowId} flowStatus=${flowStatus} reconciled=${changes} rows -> ${targetStatus}`);
-      }
-      return changes;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] NodeExecutionRepository.reconcileStaleRunning failed: ${msg}`);
-      return 0;
-    }
+  async reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string, retryEpoch?: number): Promise<number> {
+    return reconcileTerminalNodes(this.db, flowId, flowStatus, customErrorText, retryEpoch);
   }
 }
