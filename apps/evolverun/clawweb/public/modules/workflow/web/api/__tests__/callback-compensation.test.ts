@@ -127,7 +127,7 @@ describe('native callback compensation transport through shared fetchJson', () =
   })
 
   it.each(Object.keys(calls) as Array<keyof typeof calls>)('retains only safe status and code on %s HTTP failure', async (method) => {
-    const sensitive = 'secret=do-not-retain-receiver-token'
+    const sensitive = 'test-token'
     http.mockResolvedValue(json({ code: 'EXECUTION_DISABLED', message: sensitive, body: sensitive, config: { secret: sensitive } }, 409))
     const error = await rejection(calls[method]())
     expect(error.status).toBe(409)
@@ -182,10 +182,12 @@ describe('native callback compensation transport through shared fetchJson', () =
   })
 
   it('loads safe receiver choices only from capabilities and drops extra secret config fields', async () => {
-    const sensitive = 'callback-signing-secret'
-    http.mockResolvedValue(json({ ...capabilities, configs: [{ ...receiver, secret: sensitive, url: `https://receiver.example/path?token=${sensitive}` }] }))
+    const sensitive = 'test-token'
+    http.mockResolvedValue(json({ ...capabilities, configs: [{ ...receiver, secret: sensitive, url: 'https://receiver.example/path?token=test-token' }] }))
     const result = await calls.capabilities()
     expect(result.configs).toEqual([receiver])
+    expect(result.configs[0]).not.toHaveProperty('secret')
+    expect(result.configs[0]).not.toHaveProperty('url')
     expect(JSON.stringify(result)).not.toContain(sensitive)
     expect(http.mock.calls.map(([url]) => url)).toEqual([`${base}/capabilities`])
   })
