@@ -1564,6 +1564,14 @@ export type SubworkflowFlowMeta = {
 export const MAX_SUBWORKFLOW_DEPTH = 3;
 
 export type FlowState = {
+  /** Frozen at new/child startup; 0 disables this run's timeout. Absent only on historical runs. */
+  effectiveFlowTimeoutMinutes?: number;
+  /** Attempt captured before execution; never replace it with a later row's epoch at closeout. */
+  retryEpoch?: number;
+  /** Wall-clock anchor frozen in the admitted manual-retry checkpoint; shared started_at is unchanged. */
+  retryStartedAtMs?: number;
+  /** Imported Mind execution alias; not the local clock epoch. Both fields must agree. */
+  recoveryEpoch?: number;
   workflowId: string;
   workflowVersion: number;
   params: Record<string, string>;

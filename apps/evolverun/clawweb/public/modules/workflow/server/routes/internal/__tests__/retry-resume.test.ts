@@ -55,9 +55,10 @@ it('the timeout claim still wins only once', async () => {
     .toEqual({ status: 'failed', result_json: timeoutReason });
 });
 
-it('keeps the legacy status endpoint able to resume a failed TaskGuard run', async () => {
+it('requires generation-advancing retry-resume instead of status reopening a failed run', async () => {
   raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at) VALUES (?, ?, ?)').run('legacy-status', 'failed', 123);
-  expect((await put('legacy-status/status', { status: 'running' })).status).toBe(200);
+  expect((await put('legacy-status/status', { status: 'running' })).status).toBe(409);
+  expect((await put('legacy-status/retry-resume', { retry_epoch: 1 })).status).toBe(200);
   expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get('legacy-status'))
     .toEqual({ status: 'running', started_at: 123 });
 });
@@ -79,11 +80,12 @@ it('keeps retry available for waiting, blocked, and succeeded runs but not cance
   }
 });
 
-it('keeps the legacy status endpoint able to explicitly restart a completed run', async () => {
+it('requires a new generation to restart a completed run', async () => {
   raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at) VALUES (?, ?, ?)')
-    .run('legacy-order', 'failed', 123);
+    .run('legacy-order', 'running', 123);
   expect((await put('legacy-order/completion', { status: 'succeeded', completed_at: 789 })).status).toBe(200);
-  expect((await put('legacy-order/status', { status: 'running' })).status).toBe(200);
+  expect((await put('legacy-order/status', { status: 'running' })).status).toBe(409);
+  expect((await put('legacy-order/retry-resume', { retry_epoch: 1 })).status).toBe(200);
   expect(raw.prepare('SELECT status, completed_at FROM flow_runs WHERE flow_id = ?').get('legacy-order'))
     .toEqual({ status: 'running', completed_at: null });
 });
@@ -101,16 +103,19 @@ it('supports legacy status writes while retaining explicit epoch compatibility',
   raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)')
     .run('status-epoch', 'running', 1);
   expect((await put('status-epoch/status', { status: 'waiting', retry_epoch: 0 })).status).not.toBe(200);
-  expect((await put('status-epoch/status', { status: 'waiting' })).status).toBe(200);
+  expect((await put('status-epoch/status', { status: 'waiting' })).status).toBe(409);
   expect((await put('status-epoch/status', { status: 'waiting', retry_epoch: 1 })).status).toBe(200);
   expect(raw.prepare('SELECT status FROM flow_runs WHERE flow_id = ?').get('status-epoch'))
     .toEqual({ status: 'waiting' });
 });
 
-it('accepts original completion and watchdog requests for previously epoch-enabled records', async () => {
+it('rejects omitted epochs on protected records and accepts matching explicit epochs', async () => {
   raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)').run('compatible-completion', 'running', 2);
-  expect((await put('compatible-completion/completion', { status: 'succeeded' })).status).toBe(200);
+  expect((await put('compatible-completion/completion', { status: 'succeeded' })).status).toBe(409);
+  expect((await put('compatible-completion/completion', { status: 'succeeded', retry_epoch: 2 })).status).toBe(200);
   raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at) VALUES (?, ?, ?, 1)').run('compatible-timeout', 'running', 2);
   expect(await (await put('compatible-timeout/fail-if-running', { reason: timeoutReason })).json())
+    .toEqual({ success: true, data: { claimed: false } });
+  expect(await (await put('compatible-timeout/fail-if-running', { reason: timeoutReason, retry_epoch: 2 })).json())
     .toEqual({ success: true, data: { claimed: true } });
 });

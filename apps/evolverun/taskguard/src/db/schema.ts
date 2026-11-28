@@ -882,4 +882,12 @@ END`,
       `CREATE INDEX IF NOT EXISTS idx_campaign_gates_status ON campaign_gates (status)`,
     ],
   },
+  {
+    version: 36,
+    description: "Add flow retry epoch closeout fence and optional state snapshot",
+    sql: [
+      `ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE flow_runs ADD COLUMN state_json TEXT`,
+    ],
+  },
 ];

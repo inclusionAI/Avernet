@@ -62,10 +62,13 @@ must still exclude endpoint-specific protected payloads.
 `boundedLogValue` for strings and keys. It bounds sampling before regex work,
 redacts raw Evidence access path capabilities and signed-query credentials
 case-insensitively, and handles up to four ASCII percent-decoding layers.
-Remaining encoded tokens are conservatively hidden. Clipped input drops its
-final non-whitespace token before redaction so a partial secret prefix cannot
+If a layer contains an ambiguous encoded delimiter or percent escapes remain
+after decoding, the **entire sample** is masked rather than logging a fragment.
+Clipped input drops its final non-whitespace token before redaction so a partial secret prefix cannot
 escape; output is surrogate-safe and bounded by `maxChars` (minimum 4, invalid
-values use the default). Safe stack whitespace and console `%s`/`%d`/`%j`/`%%`
-remain literal. Consumers must pass the result as a value to a fixed console
+values use the default, hard ceiling 16,384 UTF-16 code units even for larger
+requests). The clipped tail is found with one reverse scan; email local parts
+and candidate domains are scanned without retrying overlapping prefixes.
+Safe stack whitespace and console `%s`/`%d`/`%j`/`%%` remain literal. Consumers must pass the result as a value to a fixed console
 format string, not use untrusted text as the format string. This is diagnostic
 normalization, not a URL parser or a general authorization/security boundary.

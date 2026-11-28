@@ -21,7 +21,7 @@ describe.each([false, true])('parent-related replay lineage (fanout: %s)', fanou
     expect(await f.post(body)).toMatchObject({ status: 201, body: { data: { ...lineage, parent_relation: f.relation } } });
     await f.repo.updateStateJson('native-child', '{"workflowId":"child-wf","currentPhase":"done"}');
     await f.repo.updateCurrentPhase('native-child', 'done');
-    await f.repo.updateStatus('native-child', 'succeeded');
+    expect(await f.repo.updateCompletion('native-child', { status: 'succeeded', completedAt: 10, succeededCount: 1, failedCount: 0 })).toBe(true);
     expect(await f.post(body)).toMatchObject({ status: 200, body: { data: { ...lineage, status: 'succeeded', current_phase: 'done' } } });
     expect((await f.post(f.body)).status).toBe(200); // Old retry omits both assertions.
     for (const patch of [{ parent_flow_id: 'conflict' }, { root_flow_id: 'conflict' },
@@ -69,8 +69,8 @@ describe.each([false, true])('trial registration lineage (saved compatibility: %
     const { parent_flow_id: _reportedParent, root_flow_id: _reportedRoot, ...legacyChild } = child;
     expect(await f.request(path, { ...legacyChild, flow_id: 'legacy-trial-child' }))
       .toMatchObject({ status: 201, body: { data: unknownLineage } });
+    expect(await f.repo.updateStateJson('trial-child', '{"workflowId":"child-wf","currentPhase":"done"}')).toBe(true);
     await f.repo.updateCompletion('trial-child', { status: 'succeeded', completedAt: 10, inputJson: '{"changed":true}', succeededCount: 1, failedCount: 0 });
-    await f.repo.updateStateJson('trial-child', '{"workflowId":"child-wf","currentPhase":"done"}');
     expect(await f.request(path, child)).toMatchObject({ status: 200, body: { data: { ...nested, status: 'succeeded' } } });
     const { parent_flow_id: _parent, root_flow_id: _root, ...omitted } = child;
     expect((await f.request(path, omitted)).status).toBe(200);
@@ -101,9 +101,9 @@ describe('signed ordinary association lineage', () => {
     const fields = ['wf', null, 'pending', null, null, null, 0, null, null, null, null, null, null, null, null, null, null, null];
     const fingerprint = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     expect(f.raw.prepare('SELECT request_fingerprint FROM ordinary_run_requests').get()).toEqual({ request_fingerprint: fingerprint });
+    expect(await f.repo.updateStateJson('child', '{"workflowId":"wf","currentPhase":"done"}')).toBe(true);
+    expect(await f.repo.updateCurrentPhase('child', 'done')).toBe(true);
     await f.repo.updateCompletion('child', { status: 'succeeded', completedAt: 10, inputJson: '{"advanced":true}', succeededCount: 1, failedCount: 0 });
-    await f.repo.updateStateJson('child', '{"workflowId":"wf","currentPhase":"done"}');
-    await f.repo.updateCurrentPhase('child', 'done');
     expect(await f.request(registerPath, { ...request, run: { ...request.run, flow_id: 'proposed-again', started_at: 99 } }))
       .toMatchObject({ status: 200, body: { data: { created: false, flow_id: 'child', parent_flow_id: 'parent' } } });
     expect((await f.request(registerPath, start)).status).toBe(200);

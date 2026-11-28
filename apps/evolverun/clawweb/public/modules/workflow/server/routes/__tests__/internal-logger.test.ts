@@ -420,3 +420,42 @@ it.each(capabilityCases)("redacts %s in actual apiLog/apiLogBody console and fil
     expect(output).toMatch(/REDACTED|truncated/);
   }
 });
+
+// Exercise both public logger entry points, including direct calls with a concrete path.
+it.each([["runs", "completion"], ["node-executions", "reconcile-stale-running"]])(
+  "protects %s before path sampling, projection, preview or diagnostic capture", async (family, action) => {
+    const { apiLog, apiLogBody, flushInternalApiLog } = await loadLogger();
+    const path = `/api/internal/${family}/${"private-id".repeat(200)}/${action}/?key=private-query`;
+    const read = vi.fn((): never => { throw new Error("unexpected inspection"); });
+    const opaque = new Proxy({}, { ownKeys: read, get: read, getOwnPropertyDescriptor: read });
+    const details = new Proxy({ httpStatus: 500, status: "private-status", error: opaque, headers: opaque,
+      path: "private-path", response: opaque, body: opaque }, { ownKeys: read, get: read });
+    const response = { locals: { unrelated: true } };
+    apiLog("PUT", path, details, opaque, response);
+    apiLogBody("PUT", path, opaque, { status: "private-status", headers: opaque });
+    await flushInternalApiLog();
+    expect(read).not.toHaveBeenCalled();
+    const fixed = { ts: expect.any(String), method: "PUT", path: `/${family}/:flowId/${action}` };
+    expect(records()).toEqual([{ ...fixed, status: 500, stackSource: "observation",
+      stack: "Workflow closeout failure observed (exception withheld)" }, fixed]);
+    expect(response.locals).toMatchObject({ unrelated: true, taskGuardApiDiagnostic: { stackSource: "observation" } });
+    expect(JSON.stringify([response.locals, vi.mocked(console.error).mock.calls, vi.mocked(console.log).mock.calls])).not.toContain("private-");
+  });
+
+it.each([["READ", "/runs/id/completion"], ["PUT", "/runs/id/completion-info"],
+  ["PUT", "/node-executions/id/completion"], ["PUT", "/runs/id/completion/other"]] as const)(
+  "retains ordinary logging for adjacent %s %s", async (method, path) => {
+    const { apiLogBody, flushInternalApiLog } = await loadLogger();
+    apiLogBody(method, path, { fixture: "ok" });
+    await flushInternalApiLog();
+    expect(records()[0]).toMatchObject({ path, bodyPreview: '{"fixture":"ok"}' });
+  });
+
+it("preserves workflow WARN severity even if an ambiguous encoded query hides the whole path", async () => {
+  const { apiLog, flushInternalApiLog } = await loadLogger();
+  apiLog("READ", "/api/internal/runs/id?next=private%2526data", { httpStatus: 409 });
+  await flushInternalApiLog();
+  expect(records()[0]).toMatchObject({ path: "[REDACTED_ENCODED_TEXT]", httpStatus: 409 });
+  expect(console.warn).toHaveBeenCalledOnce();
+  expect(console.error).not.toHaveBeenCalled();
+});

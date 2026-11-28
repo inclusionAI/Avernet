@@ -17,8 +17,12 @@ launching, and product boundaries.
 ## Workflow safety
 
 - [Approval consumption contract](public/modules/workflow/docs/approval-consumption-contract.md): terminal-run polling exclusion, durable approval acknowledgments, and schema-first rollout.
-- [Workflow timeout write policy](docs/workflow-timeout-write-policy.md): legacy
-  watchdog validation, atomic write fences, failure-settlement compatibility,
-  observer idempotence, and the remaining non-owner/native-store limits.
+- [Workflow timeout write policy](docs/workflow-timeout-write-policy.md): the executor decides
+  when a run times out; Clawweb fences the database write and notifies the
+  terminal observer only on first settlement. First pause/isolate faulty old
+  writers, then deploy server/schema, upgrade and validate Mind and legacy
+  TaskGuard, and only then restore writes. This version removes the old 4505
+  checks: without isolation, do not release it independently. Nginx emergency
+  filtering remains off by default; no runtime feature flag is introduced.
 - [Rolling-release safety](docs/rolling-release-safety.md): static asset delivery
   and shutdown behavior; not a timeout authorization policy.

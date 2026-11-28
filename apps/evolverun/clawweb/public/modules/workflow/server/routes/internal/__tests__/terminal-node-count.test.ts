@@ -18,7 +18,7 @@ beforeAll(async () => {
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, succeeded_count INTEGER,
     failed_count INTEGER, completed_at INTEGER, gmt_modified INTEGER,
     total_duration_ms INTEGER, total_token_usage INTEGER, current_phase TEXT,
-    result_json TEXT, input_json TEXT
+    result_json TEXT, input_json TEXT, started_at INTEGER, state_json TEXT, retry_epoch INTEGER DEFAULT 0
   )`);
   const app = express();
   app.use(express.json());
@@ -79,7 +79,8 @@ it('freezes completion-reconciled counts and allows a genuine reopened failed re
   const settled = row();
   expect((await request('failed_count')).status).toBe(404);
   expect(row()).toEqual(settled);
-  expect(await runs.updateStatus('flow', 'running')).toBe(true);
+  expect(await runs.updateStatus('flow', 'running')).toBe(false);
+  expect(await runs.resumeForRetry('flow', 1)).toBe('resumed');
   expect((await request('succeeded_count')).status).toBe(200);
   expect(row()).toMatchObject({ status: 'running', succeeded_count: 3, failed_count: 1, completed_at: null });
 });
@@ -92,7 +93,7 @@ it('retains missing-row and invalid-field HTTP responses', async () => {
   expect(row()).toEqual(before);
 });
 
-it.each(['succeeded', 'failed', 'cancelled', 'canceled'])('freezes canonical terminal %s with no completion timestamp', async status => {
+it.each(['succeeded', 'failed', 'cancelled', 'canceled', 'completed', ' COMPLETED '])('freezes terminal %s with no completion timestamp', async status => {
   raw.prepare("UPDATE flow_runs SET status = ? WHERE flow_id = 'flow'").run(status);
   const before = row();
   for (const field of ['succeeded_count', 'failed_count'] as const) {

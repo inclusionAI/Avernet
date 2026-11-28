@@ -18,6 +18,13 @@ describe("Repair redaction", () => {
     expect(used.user + used.system).toBeLessThan(500000);
     expect(containsRepairSecret(input)).toBe(false);
   });
+  it("retains email boundaries, stack package names and adjacent business redaction", () => {
+    const text = "at @scope/package: user.name+qa@sub.example.invalid, next=second@example.test.\n"
+      + "note@local: owner@example.test-prompt: synthetic body";
+    expect(redactText(text)).toBe("at @scope/package: [REDACTED_EMAIL], next=[REDACTED_EMAIL].\n"
+      + "note@local: [REDACTED_EMAIL]-prompt=[REDACTED_BUSINESS_BODY]");
+  });
+
   it("retains prefixed credential labels while removing their complete assigned values", () => {
     for (const key of ["prefixSecret", "OPENAI_API_KEY", "abc_access-token", "_password", '"mysecret"']) {
       const result = redactText(`${key}=private-canary-value`);

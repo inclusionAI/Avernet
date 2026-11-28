@@ -1,3 +1,7 @@
+import { matchesRetryEpoch, withRetryEpochRead } from './flow-run-write-fence.js';
+import { writeRunMirror } from './flow-run-mirror.js';
+import { resumeWithCheckpoint } from './flow-run-retry-checkpoint.js';
+import { writeRunStatus } from './flow-run-status.js';
 import { completeFlowRun } from './flow-run-completion.js';
 import { writeTimeoutFailure, type CompletionOutcome } from './flow-run-timeout-write.js';
 import { normalizeFlowRunLineage } from '../services/flow-run-lineage.js';
@@ -104,7 +108,7 @@ export type FlowRunInsert = {
 
 export type FlowRunCompletion = {
   status: string;
-  /** Optional compatibility field for already deployed epoch-aware clients. */
+  /** Omission means legacy epoch zero; positive attempts must explicitly match. */
   retryEpoch?: number;
   resultJson?: string | null;
   inputJson?: string | null;
@@ -159,7 +163,6 @@ export type FindWorkflowTypesPageResult = {
   total: number;
 };
 
-class RetryCancelledError extends Error {}
 
 export class FlowRunRepository {
   readonly fanoutState: FanoutStateRepository;
@@ -213,6 +216,16 @@ export class FlowRunRepository {
       [flowId],
     );
     return rows[0] ?? null;
+  }
+
+  /** Strict, small control snapshot. List rows intentionally do not expose retry_epoch. */
+  async findForAbort(flowId: string): Promise<{
+    workflow_id: string; status: string; completed_at: number | null; retry_epoch?: number | null;
+  } | null> {
+    type Run = { workflow_id: string; status: string; completed_at: number | null; retry_epoch?: number | null };
+    return withRetryEpochRead(this.db, async (db, epoch) => (await db.query<Run>(
+      `SELECT workflow_id, status, completed_at${epoch ? ', retry_epoch' : ''} FROM flow_runs WHERE flow_id = ?`,
+      [flowId]))[0] ?? null, async (_db, saved) => saved);
   }
 
   /**
@@ -472,7 +485,7 @@ export class FlowRunRepository {
       const now = this.db.dialect.now();
       // Completion owns the final counts; late node events must not change them.
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ? AND completed_at IS NULL AND LOWER(TRIM(status)) NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')`,
+        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ? AND completed_at IS NULL AND LOWER(TRIM(status)) NOT IN ('succeeded', 'failed', 'cancelled', 'canceled', 'completed')`,
         [now, flowId],
       );
       return result.affectedRows > 0;
@@ -483,87 +496,57 @@ export class FlowRunRepository {
     }
   }
 
-  /** Compatibility API: accepted duplicate timeouts remain successful boolean writes. */
+  /** Compatibility API: accepted identical settlements remain successful boolean writes. */
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
     return await this.updateCompletionOutcome(flowId, completion) !== 'rejected';
   }
 
-  /** Routes distinguish an actual transition from an idempotent timeout acknowledgement. */
+  /** Routes distinguish an actual transition from an idempotent settlement acknowledgement. */
   updateCompletionOutcome(flowId: string, completion: FlowRunCompletion): Promise<CompletionOutcome> {
     return completeFlowRun(this.db, flowId, completion);
   }
 
-  /** The dedicated watchdog path always requires saved policy and elapsed evidence. */
+  /** The engine decides timeout; only the first unsettled snapshot can be claimed. */
   async markFailedIfRunning(flowId: string, fields: {
     reason: string;
-    currentPhase: string;
+    currentPhase?: string | null;
     totalDurationMs?: number | null;
     completedAt: number;
     retryEpoch?: number;
   }): Promise<boolean> {
-    return await writeTimeoutFailure(this.db, flowId, { ...fields, resultJson: fields.reason }, completedAt => ({
-      sets: ["status = 'failed'", 'result_json = ?', 'current_phase = ?', 'total_duration_ms = ?', 'completed_at = ?'],
-      values: [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, completedAt],
-    })) === 'updated';
+    return await writeTimeoutFailure(this.db, flowId, { ...fields, resultJson: fields.reason }, completedAt => {
+      const sets = ["status = 'failed'", 'result_json = ?', 'total_duration_ms = ?', 'completed_at = ?'];
+      const values: unknown[] = [fields.reason, fields.totalDurationMs ?? null, completedAt];
+      if (fields.currentPhase !== undefined) { sets.push('current_phase = ?'); values.push(fields.currentPhase); }
+      return { sets, values };
+    }) === 'updated';
   }
 
   async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
-    // Old watchdogs call TaskFlow.fail -> adapter.updateStatus before completion.
-    // With no failure evidence this path cannot safely distinguish that write.
-    if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase() || status === 'failed') return false;
-    const now = this.db.dialect.now();
-    if (retryEpoch === undefined) {
-      if (status === 'running') {
-        try {
-          // Reopening through the original API retires the preceding explicit
-          // epoch. Do this in the same write, before assigning the new status.
-          const result = await this.db.exec(
-            `UPDATE flow_runs SET retry_epoch = CASE WHEN status <> 'running' AND retry_epoch > 0 THEN 0 ELSE retry_epoch END,
-             status = ?, gmt_modified = ?, completed_at = NULL WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')`,
-            [status, now, flowId],
-          );
-          return result.affectedRows > 0;
-        } catch (error) {
-          if (!/unknown column.*retry_epoch|no such column: retry_epoch\b/i.test(String(error))) throw error;
-          // Older schemas have no epoch to invalidate; keep their original API.
-        }
-      }
-      const result = await this.db.exec(
-        `UPDATE flow_runs SET status = ?, gmt_modified = ?${status === 'running' ? ', completed_at = NULL' : ''} WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')`,
-        [status, now, flowId],
-      );
-      return result.affectedRows > 0;
-    }
-    const result = await this.db.exec(
-      // Compatibility with already deployed clients that explicitly send an epoch.
-      status === 'running'
-        ? `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?
-           AND status IN ('failed', 'blocked', 'waiting', 'running')
-           AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`
-        : `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?
-           AND (COALESCE(retry_epoch, 0) = 0 OR (status NOT IN ('succeeded', 'cancelled', 'canceled')
-             AND (status <> 'failed' OR completed_at IS NULL)))`,
-      [status, now, flowId, retryEpoch],
-    );
-    return result.affectedRows > 0;
+    return writeRunStatus(this.db, flowId, status, retryEpoch);
   }
 
-  /** Abort a flow run: set status to "cancelled" (user-initiated abort) and record completed_at + result_json. */
-  async abort(flowId: string, reason?: string): Promise<boolean> {
-    try {
-      const now = this.db.dialect.now();
+  /** Abort only the selected active generation; omitted epoch is legacy zero. Errors propagate. */
+  async abort(flowId: string, reason?: string, retryEpoch?: number): Promise<boolean> {
+    type Parent = { status: string; completed_at: number | null; retry_epoch?: number | null };
+    return withRetryEpochRead(this.db, async (db, epoch) => (await db.query<Parent>(
+      `SELECT status, completed_at${epoch ? ', retry_epoch' : ''} FROM flow_runs WHERE flow_id = ?`, [flowId]))[0], async (db, saved) => {
+      if (!saved || !['running', 'waiting', 'blocked', 'pending', 'queued', 'postActionsRunning'].includes(saved.status)
+        || saved.completed_at !== null || !matchesRetryEpoch(saved, retryEpoch)) return false;
+      const exact = (column: string) => db.dialect.driver === 'mysql2'
+        ? `BINARY ${column} = BINARY ?` : `${column} COLLATE BINARY = ?`;
       const completedAt = Math.floor(Date.now() / 1000);
       const resultJson = JSON.stringify({ aborted: true, reason: reason ?? "用户手动中止", abortedAt: completedAt });
-      const result = await this.db.exec(
-        "UPDATE flow_runs SET status = 'cancelled', completed_at = ?, result_json = ?, gmt_modified = ? WHERE flow_id = ?",
-        [completedAt, resultJson, now, flowId],
-      );
+      const params: unknown[] = [completedAt, resultJson, db.dialect.now(), flowId, saved.status];
+      const conditions = [exact('flow_id'), exact('status'), 'completed_at IS NULL'];
+      if (Object.hasOwn(saved, 'retry_epoch')) {
+        conditions.push(saved.retry_epoch === null ? 'retry_epoch IS NULL' : 'retry_epoch = ?');
+        if (saved.retry_epoch !== null) params.push(saved.retry_epoch);
+      }
+      const result = await db.exec(`UPDATE flow_runs SET status = 'cancelled', completed_at = ?, result_json = ?, gmt_modified = ?
+        WHERE ${conditions.join(' AND ')}`, params);
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.abort failed: ${msg}`);
-      return false;
-    }
+    });
   }
 
   async updateAnalysisStatus(flowId: string, status: string): Promise<boolean> {
@@ -582,36 +565,23 @@ export class FlowRunRepository {
     }
   }
 
-  async updateCurrentPhase(flowId: string, currentPhase: string): Promise<boolean> {
-    try {
-      const now = this.db.dialect.now();
-      const result = await this.db.exec(
-        "UPDATE flow_runs SET current_phase = ?, gmt_modified = ? WHERE flow_id = ?",
-        [currentPhase, now, flowId],
-      );
-      return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateCurrentPhase failed: ${msg}`);
-      return false;
-    }
+  async updateCurrentPhase(flowId: string, currentPhase: string, retryEpoch?: number): Promise<boolean> {
+    return writeRunMirror(this.db, flowId, 'current_phase', currentPhase, retryEpoch);
   }
 
-  async resetStartedAt(flowId: string, startedAt: number): Promise<boolean> {
-    const result = await this.db.exec(
-      "UPDATE flow_runs SET started_at = ?, completed_at = NULL WHERE flow_id = ?",
-      [startedAt, flowId],
-    );
-    return result.affectedRows > 0;
+  /** @deprecated Retry admission preserves started_at; legacy mutations always fail closed. */
+  async resetStartedAt(flowId: string, _startedAt: number): Promise<boolean> {
+    await this.findStatusByFlowId(flowId); // Preserve read errors; never touch run timestamps.
+    return false;
   }
 
   /**
    * Mirror the engine's TaskFlow stateJson (written at flow boundaries:
-   * start / waiting / terminal). Same gmt_modified policy as resetStartedAt:
-   * the DB maintains it (manual assignment was rejected on pre).
+   * start / waiting / terminal). Admission and any embedded sync use the
+   * captured execution epoch; terminal mirrors cannot rewrite saved settlement.
    */
-  async updateStateJson(flowId: string, stateJson: string): Promise<boolean> {
-    return this.fanoutState.updateMirror(flowId, stateJson);
+  async updateStateJson(flowId: string, stateJson: string, retryEpoch?: number): Promise<boolean> {
+    return writeRunMirror(this.db, flowId, 'state_json', stateJson, retryEpoch);
   }
 
   /** Read back the mirrored TaskFlow stateJson, or null when absent. */
@@ -629,46 +599,27 @@ export class FlowRunRepository {
     }
   }
 
-  /** Legacy retry: change child nodes and the run in one transaction. */
+  /**
+   * @deprecated No generation-bearing admission: never reset nodes or reopen a run.
+   * Kept as a read-only compatibility entry point so callers get an honest
+   * conflict/not_found. Use coordinated resumeForRetry with a captured epoch+1.
+   */
   async resetFailedForRetry(
     flowId: string,
-    resetFailedNodes: (tx: IDatabase) => Promise<number>,
-  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' } | { status: 'conflict' }> {
-    try {
-      return await this.db.transaction(async tx => {
-        // Serialize against abort without touching an already cancelled run.
-        await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')", [flowId]);
-        const rows = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
-        if (!rows.length) return { status: 'not_found' };
-        if (['cancelled', 'canceled'].includes(rows[0].status)) return { status: 'conflict' };
-        const resetCount = await resetFailedNodes(tx);
-        const now = tx.dialect.now();
-        const result = await tx.exec(
-          "UPDATE flow_runs SET failed_count = GREATEST(failed_count - ?, 0), status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')",
-          [resetCount, now, flowId],
-        );
-        if (result.affectedRows !== 1) {
-          const current = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
-          // Throw through the transaction so the child-node reset rolls back.
-          if (current[0] && ['cancelled', 'canceled'].includes(current[0].status)) {
-            throw new RetryCancelledError(`Flow run ${flowId} is cancelled`);
-          }
-          throw new Error(`Failed to reset flow run ${flowId} for retry`);
-        }
-        return { status: 'updated', resetCount };
-      });
-    } catch (error) {
-      if (error instanceof RetryCancelledError) return { status: 'conflict' };
-      throw error;
-    }
+    _resetFailedNodes: (tx: IDatabase) => Promise<number>,
+  ): Promise<{ status: 'not_found' } | { status: 'conflict' }> {
+    const rows = await this.db.query('SELECT flow_id FROM flow_runs WHERE flow_id = ?', [flowId]);
+    return { status: rows.length ? 'conflict' : 'not_found' };
   }
 
   /** Resume a locally authorized manual retry without rewriting node history or started_at. */
-  async resumeForRetry(flowId: string, retryEpoch: number): Promise<'resumed' | 'not_found' | 'conflict'> {
+  async resumeForRetry(flowId: string, retryEpoch: number, stateJson?: string): Promise<'resumed' | 'not_found' | 'conflict'> {
+    if (!Number.isSafeInteger(retryEpoch) || retryEpoch < 1) throw new TypeError('retry_epoch must be a positive safe integer');
+    if (stateJson !== undefined) return resumeWithCheckpoint(this.db, flowId, retryEpoch, stateJson);
     const now = this.db.dialect.now();
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'running', retry_epoch = ?, completed_at = NULL, gmt_modified = ?
-       WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?`,
+       WHERE flow_id = ? AND LOWER(TRIM(status)) NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?`,
       [retryEpoch, now, flowId, retryEpoch - 1],
     );
     if (result.affectedRows > 0) return 'resumed';
@@ -707,21 +658,10 @@ export class FlowRunRepository {
     }
   }
 
-  /** Overwrite result_json with the last successful node's output. Best-effort. */
-  async updateResultJson(flowId: string, nodeId: string, result: Record<string, unknown>): Promise<boolean> {
-    try {
-      const now = this.db.dialect.now();
-      const resultJson = JSON.stringify({ nodeId, ...result });
-      const res = await this.db.exec(
-        "UPDATE flow_runs SET result_json = ?, gmt_modified = ? WHERE flow_id = ?",
-        [resultJson, now, flowId],
-      );
-      return res.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateResultJson failed: ${msg}`);
-      return false;
-    }
+  /** @deprecated Only fenced completion owns the final result; never write node output here. */
+  async updateResultJson(flowId: string, _nodeId: string, _result: Record<string, unknown>): Promise<boolean> {
+    await this.findStatusByFlowId(flowId); // Read-only even for nonterminal epoch-zero rows.
+    return false;
   }
 
   /**
