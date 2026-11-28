@@ -51,12 +51,19 @@ class Env(StrEnum):
 
 
 class DeviceBindingStatus(StrEnum):
-    """Device binding status enumeration."""
+    """Device binding status enumeration.
+
+    Mirrors ``agentclaw.community.core.devices.models.DeviceBindingStatus``;
+    OFFLINE / RELEASING are desktop reconciliation statuses that can be
+    persisted on binding rows and must remain representable in API responses.
+    """
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     STOPPED = "STOPPED"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
+    OFFLINE = "OFFLINE"
+    RELEASING = "RELEASING"
 
 
 T = TypeVar("T")
