@@ -2,10 +2,12 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import httpx
 
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
     DesktopBotServiceError,
+    MachineNotConnectedError,
     _DesktopLayoutConfirmationStatus,
     _format_datetime,
     _generate_request_id,
@@ -144,6 +146,66 @@ class TestListDirectory:
             result = service.list_directory(machine_id="m-001")
 
         assert result == {}
+
+    @pytest.mark.parametrize("error_code", [
+        "MACHINE_NOT_CONNECTED",
+        "MACHINE_OFFLINE",
+        "INSTANCE_NOT_ASSIGNED",
+        "WORKER_OFFLINE",
+    ])
+    def test_machine_connectivity_error_raises_typed_exception(self, error_code, caplog):
+        caplog.set_level("INFO")
+        service = _make_service()
+        mock_response = MagicMock(status_code=503)
+        mock_response.json.return_value = {"detail": {"error_code": error_code}}
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = (
+                mock_response
+            )
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "BaaS returned 503", request=httpx.Request("GET", "http://baas"), response=mock_response
+            )
+
+            with pytest.raises(MachineNotConnectedError) as exc_info:
+                service.list_directory(machine_id="m-001")
+
+        assert exc_info.value.baas_error_code == error_code
+        assert "machine not connected: machine_id=m-001" in caplog.text
+
+    def test_machine_connectivity_error_does_not_log_service_error(self, caplog):
+        service = _make_service()
+        mock_response = MagicMock(status_code=503)
+        mock_response.json.return_value = {"detail": {"error_code": "MACHINE_NOT_CONNECTED"}}
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = (
+                mock_response
+            )
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "BaaS returned 503", request=httpx.Request("GET", "http://baas"), response=mock_response
+            )
+
+            with pytest.raises(MachineNotConnectedError):
+                service.list_directory(machine_id="m-001")
+
+        assert "HTTP error: 503" not in caplog.text
+
+    def test_503_without_machine_error_code_is_service_error(self):
+        service = _make_service()
+        mock_response = MagicMock(status_code=503)
+        mock_response.json.return_value = {"detail": {"error_code": "SERVICE_UNAVAILABLE"}}
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = (
+                mock_response
+            )
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "BaaS returned 503", request=httpx.Request("GET", "http://baas"), response=mock_response
+            )
+
+            with pytest.raises(DesktopBotServiceError):
+                service.list_directory(machine_id="m-001")
 
 
 class TestListDevices:
