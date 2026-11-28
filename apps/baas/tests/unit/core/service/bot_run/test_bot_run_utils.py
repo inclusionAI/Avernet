@@ -30,6 +30,7 @@ from secbaas.community.core.service.bot_run._bot_run_utils import (
     build_chat_metadata,
     is_caller_mode,
     normalize_caller_identity_metadata,
+    plan_session_id,
     strip_sensitive_metadata,
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
@@ -251,6 +252,54 @@ class TestResolveUserId:
 
         result = resolve_user_id(metadata, binding_info, context, "bot_id")
         assert result == "custom-user-001"
+
+    def test_caller_user_id_overrides_app_id(self):
+        """caller 身份 user_id 优先于 API 应用 app_id（外部平台代发消息归属真实使用者）"""
+        metadata = {"user_id": "518491"}
+        binding_info = MockBotBindingInfo(entity_id="entity123", bot_type="service")
+        context = MockBotChatContext(app_id="cortex-app-id", app_type="app")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "518491"
+
+    def test_caller_user_id_normalizes_numeric_value(self):
+        """caller 身份为数字时按字符串返回，去掉首尾空白"""
+        metadata = {"user_id": 518491}
+        binding_info = MockBotBindingInfo(entity_id="entity123", bot_type="service")
+        context = MockBotChatContext(app_id="cortex-app-id")
+
+        assert resolve_user_id(metadata, binding_info, context, "bot_id") == "518491"
+
+    def test_blank_caller_user_id_falls_through(self):
+        """caller 身份为空串时保持既有回退链路"""
+        metadata = {"user_id": "   "}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_sender_options_owner_keeps_priority_over_caller_user_id(self):
+        """显式 sender_options.from=owner 仍优先于 caller 身份"""
+        metadata = {"user_id": "518491", "sender_options": {"from": "owner"}}
+        binding_info = MockBotBindingInfo(entity_id="entity456")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "entity456"
+
+    def test_caller_identity_is_encoded_in_planned_session_key(self):
+        """代发消息的计划会话键编码真实使用者，前端才能归入其「我的互动」。"""
+        metadata = {"user_id": "518491"}
+        binding_info = MockBotBindingInfo(entity_id="entity123", bot_type="service")
+        context = MockBotChatContext(app_id="cortex-app-id")
+
+        user_id = resolve_user_id(metadata, binding_info, context, "bot-id")
+        session_key = plan_session_id(
+            tc_bot_id="bot-id", user_id=user_id, run_id="run-1"
+        )
+
+        assert session_key == "agent:bot-id:session:run-1:user:518491"
 
 
 # ==================== Tests: extract_lifecycle_stage ====================
