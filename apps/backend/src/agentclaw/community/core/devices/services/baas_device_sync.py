@@ -24,6 +24,7 @@ logger = get_logger()
 
 _SYMLINK_RETRY_DELAYS_SECONDS = (1, 2, 4)
 _RETRYABLE_SYMLINK_STATUS_CODES = frozenset({502, 503, 504})
+_HERMES_LEGACY_LOCAL_SKILL_SOURCE = "/home/admin/.hermes/workspace/skills/skills-local"
 
 
 class BaasDeviceSyncService(DeviceSync):
@@ -67,12 +68,24 @@ class BaasDeviceSyncService(DeviceSync):
             self._bot_uuid, symlinks_count,
         )
 
+        # Hermes stores legacy Skill pool entries elsewhere. That root is
+        # delivered through the logical mapping projection, so reflating it via
+        # the old BaaS symlink path races that projection and can drive the
+        # recovery loop. Filter only this legacy source root;保留其余 source/target。
+        action_symlinks = self._drop_hermes_legacy_local_symlinks(symlinks)
+
         try:
-            if symlinks_count == 0:
+            if len(action_symlinks) == 0:
+                if symlinks_count > 0:
+                    return {
+                        "success": True,
+                        "message": "同步成功",
+                        "data": {"skipped_symlinks": symlinks_count},
+                    }
                 path = "/api/skills/symlink/clean"
                 body = {"directories": ["/home/admin/.openclaw/workspace/skills"]}
             else:
-                valid_symlinks = self._ensure_center_skills(symlinks)
+                valid_symlinks = self._ensure_center_skills(action_symlinks)
                 path = "/api/skills/symlink/bindpath"
                 body = {
                     "symlinks": [
@@ -221,6 +234,25 @@ class BaasDeviceSyncService(DeviceSync):
 
     def has_mcp(self, server_code: str) -> bool:
         return mcp_transport.probe_mcp(self._transport, server_code)
+
+    @staticmethod
+    def _drop_hermes_legacy_local_symlinks(
+        symlinks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Drop the Hermes legacy local root from the BaaS symlink payload.
+
+        This root is delivered through the logical mapping projection. Forward
+        it again here can race that projection and, for an Engine that does not
+        implement the old layout, turn recovery into persistent bindpath noise.
+        ``source_layout=legacy`` in the wider request carries this source layout;
+        the BaaS contract itself only accepts the physical source/target pair.
+        """
+        return [
+            symlink for symlink in symlinks
+            if not symlink.get("source", "").startswith(
+                f"{_HERMES_LEGACY_LOCAL_SKILL_SOURCE}/"
+            )
+        ]
 
     def _ensure_center_skills(
         self, symlinks: list[dict[str, Any]]
