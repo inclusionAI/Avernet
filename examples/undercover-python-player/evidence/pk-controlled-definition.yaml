@@ -1,0 +1,243 @@
+name: "受控 PK 平票测试"
+metadata:
+  description: "BCS 原生 state machine 受控测试：四票 2:2 平票后进入 PK 节点"
+participants:
+  seat1:
+    display_name: "测试座位1"
+    required: true
+  seat2:
+    display_name: "测试座位2"
+    required: true
+  seat3:
+    display_name: "测试座位3"
+    required: true
+  seat4:
+    display_name: "测试座位4"
+    required: true
+  referee:
+    display_name: "测试主持人"
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 1
+    nodes:
+      start:
+        kind: bot_task
+        display_name: "受控 PK 测试开始"
+        assignee:
+          type: bot_binding
+          binding: referee
+        instruction: |
+          你是 1 号，你的词是【测试物】。描述你的词：受控 PK 测试开始。
+          只输出一句不超过 25 字的测试开始语，不出现「测试物」。
+        transitions:
+          complete:
+            targets: [vote_1, vote_2, vote_3, vote_4]
+      vote_1:
+        kind: bot_task
+        display_name: "vote_1"
+        assignee:
+          type: bot_binding
+          binding: seat1
+        instruction: |
+          你是 1 号，你的词是【测试物】。
+          第 1 轮投票。只输出「我投N号」或「我弃权」，不超过 10 字。
+          可以投：2号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [tally]
+
+      vote_2:
+        kind: bot_task
+        display_name: "vote_2"
+        assignee:
+          type: bot_binding
+          binding: seat2
+        instruction: |
+          你是 2 号，你的词是【测试物】。
+          第 1 轮投票。只输出「我投N号」或「我弃权」，不超过 10 字。
+          可以投：1号、3号、4号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [tally]
+
+      vote_3:
+        kind: bot_task
+        display_name: "vote_3"
+        assignee:
+          type: bot_binding
+          binding: seat3
+        instruction: |
+          你是 3 号，你的词是【测试物】。
+          第 1 轮投票。只输出「我投N号」或「我弃权」，不超过 10 字。
+          可以投：1号、2号、4号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [tally]
+
+      vote_4:
+        kind: bot_task
+        display_name: "vote_4"
+        assignee:
+          type: bot_binding
+          binding: seat4
+        instruction: |
+          你是 4 号，你的词是【测试物】。
+          第 1 轮投票。只输出「我投N号」或「我弃权」，不超过 10 字。
+          可以投：1号、2号、3号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [tally]
+      tally:
+        kind: bot_task
+        display_name: "tally"
+        assignee:
+          type: bot_binding
+          binding: referee
+        instruction: |
+          你是 1 号，你的词是【测试物】。描述你的词：本轮平票，进入 PK。
+          只输出一句不超过 25 字的受控计票结论，不出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_speak_1, pk_speak_2, pk_speak_3, pk_speak_4]
+      pk_speak_1:
+        kind: bot_task
+        display_name: "pk_speak_1"
+        assignee:
+          type: bot_binding
+          binding: seat1
+        instruction: |
+          你是 1 号，你的词是【测试物】。PK 额外发言。
+          描述你的词，只输出一句话，不超过 25 字。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_vote_1]
+
+      pk_speak_2:
+        kind: bot_task
+        display_name: "pk_speak_2"
+        assignee:
+          type: bot_binding
+          binding: seat2
+        instruction: |
+          你是 2 号，你的词是【测试物】。PK 额外发言。
+          描述你的词，只输出一句话，不超过 25 字。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_vote_2]
+
+      pk_speak_3:
+        kind: bot_task
+        display_name: "pk_speak_3"
+        assignee:
+          type: bot_binding
+          binding: seat3
+        instruction: |
+          你是 3 号，你的词是【测试物】。PK 额外发言。
+          描述你的词，只输出一句话，不超过 25 字。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_vote_3]
+
+      pk_speak_4:
+        kind: bot_task
+        display_name: "pk_speak_4"
+        assignee:
+          type: bot_binding
+          binding: seat4
+        instruction: |
+          你是 4 号，你的词是【测试物】。PK 额外发言。
+          描述你的词，只输出一句话，不超过 25 字。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_vote_4]
+      pk_vote_1:
+        kind: bot_task
+        display_name: "pk_vote_1"
+        assignee:
+          type: bot_binding
+          binding: seat1
+        instruction: |
+          你是 1 号，你的词是【测试物】。
+          【本轮 PK 投票】只输出「我投N号」，禁止弃权。
+          可以投：2号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_tally]
+
+      pk_vote_2:
+        kind: bot_task
+        display_name: "pk_vote_2"
+        assignee:
+          type: bot_binding
+          binding: seat2
+        instruction: |
+          你是 2 号，你的词是【测试物】。
+          【本轮 PK 投票】只输出「我投N号」，禁止弃权。
+          可以投：1号、3号、4号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_tally]
+
+      pk_vote_3:
+        kind: bot_task
+        display_name: "pk_vote_3"
+        assignee:
+          type: bot_binding
+          binding: seat3
+        instruction: |
+          你是 3 号，你的词是【测试物】。
+          【本轮 PK 投票】只输出「我投N号」，禁止弃权。
+          可以投：1号、2号、4号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_tally]
+
+      pk_vote_4:
+        kind: bot_task
+        display_name: "pk_vote_4"
+        assignee:
+          type: bot_binding
+          binding: seat4
+        instruction: |
+          你是 4 号，你的词是【测试物】。
+          【本轮 PK 投票】只输出「我投N号」，禁止弃权。
+          可以投：1号、2号、3号；不能投自己。
+          [Input] 为受控 PK 测试输入；[Upstream Outputs] 为受控投票。
+          输出不得出现「测试物」。
+        transitions:
+          complete:
+            targets: [pk_tally]
+      pk_tally:
+        kind: bot_task
+        display_name: "pk_tally"
+        final_output: true
+        assignee:
+          type: bot_binding
+          binding: referee
+        instruction: |
+          你是 1 号，你的词是【测试物】。描述你的词：PK 结束，2 号胜出。
+          只输出一句不超过 25 字的受控 PK 结论，不出现「测试物」。

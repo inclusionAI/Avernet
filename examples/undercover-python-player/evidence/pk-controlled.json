@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "controlled BCS-native state-machine PK with actual CPython BcnClient participant",
+  "disclaimer": "真实 BCS 原生 state machine 的受控协议测试。seat1 是实际 CPython BcnClient（RulesBrain 负责 PK 发言，受控合法目标负责投票）；其余 4 个 Bot 为脚本化测试 Bot。不是已完成三局，也没有调用主持人本地函数或修改 BCS/主持人源码。",
+  "observed_at": "2026-11-02",
+  "bcs": "local standalone BCS 0.1.4-beta.3",
+  "api_flow": [
+    "POST /groups (chat group with controlled test bots)",
+    "POST /sessions/{session_id}/state-machine-runs with definition_yaml + participant_bindings",
+    "GET /state-machine-runs/{run_id} until completed"
+  ],
+  "group_id": "bcs_grp_458f4a0e01544a48b2c7da85ba14f456",
+  "session_id": "bcs_grp_458f4a0e01544a48b2c7da85ba14f456:45ef7318",
+  "run_id": "sm-5993b2ce-caec-4d64-a8d2-a2d64433d2b7",
+  "definition_id": "4135c152-0af7-4848-bdc6-ffd732cf7ed4",
+  "definition_sha256": "8afe6a86c86d1788b9924537b84b56d90610550f184f8fc7a5b19a96cb102571",
+  "status": "completed",
+  "output": "PK结束，2号胜出。",
+  "participants": {
+    "seat1": "actual CPython BcnClient + ControlledRulesBrain (RulesBrain speech, controlled legal vote)",
+    "seat2": "scripted test bot",
+    "seat3": "scripted test bot",
+    "seat4": "scripted test bot",
+    "referee": "scripted test bot"
+  },
+  "actual_cpython_player": {
+    "seat": 1,
+    "bot_uuid": "bot_f1142772",
+    "brain": "ControlledRulesBrain (RulesBrain for speech; controlled legal target for vote)",
+    "received_v3_chat_send": [
+      {
+        "request_id": "smnode-sm-5993b2ce-caec-4d64-a8d2-a2d64433d2b7-pk_speak_1-0",
+        "node_id": "pk_speak_1",
+        "method": "chat.send",
+        "session_id": "bcs_grp_458f4a0e01544a48b2c7da85ba14f456:45ef7318"
+      },
+      {
+        "request_id": "smnode-sm-5993b2ce-caec-4d64-a8d2-a2d64433d2b7-pk_vote_1-0",
+        "node_id": "pk_vote_1",
+        "method": "chat.send",
+        "session_id": "bcs_grp_458f4a0e01544a48b2c7da85ba14f456:45ef7318"
+      }
+    ],
+    "sent_v3_chat_final": [
+      {
+        "run_id": "smnode-sm-5993b2ce-caec-4d64-a8d2-a2d64433d2b7-pk_speak_1-0",
+        "node_id": "pk_speak_1",
+        "state": "final",
+        "seq": 1,
+        "content": "用起来得两只手，急不得。"
+      },
+      {
+        "run_id": "smnode-sm-5993b2ce-caec-4d64-a8d2-a2d64433d2b7-pk_vote_1-0",
+        "node_id": "pk_vote_1",
+        "state": "final",
+        "seq": 1,
+        "content": "我投2号"
+      }
+    ]
+  },
+  "regular_votes": {
+    "vote_1": "我投2号",
+    "vote_2": "我投1号",
+    "vote_3": "我投1号",
+    "vote_4": "我投2号"
+  },
+  "regular_counts": {
+    "1": 2,
+    "2": 2
+  },
+  "regular_tie": true,
+  "pk_votes": {
+    "pk_vote_2": "我投1号",
+    "pk_vote_1": "我投2号",
+    "pk_vote_3": "我投2号",
+    "pk_vote_4": "我投2号"
+  },
+  "pk_counts": {
+    "1": 1,
+    "2": 3
+  },
+  "pk_path": [
+    "pk_speak_1",
+    "pk_speak_2",
+    "pk_speak_3",
+    "pk_vote_2",
+    "pk_vote_1",
+    "pk_vote_3",
+    "pk_speak_4",
+    "pk_vote_4",
+    "pk_tally"
+  ],
+  "nodes": [
+    {
+      "node_id": "start",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "受控流程开始。",
+      "started_at": "2026-11-02 01:37:45.192",
+      "completed_at": "2026-11-02 01:37:45.207"
+    },
+    {
+      "node_id": "vote_1",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投2号",
+      "started_at": "2026-11-02 01:37:45.208",
+      "completed_at": "2026-11-02 01:37:45.215"
+    },
+    {
+      "node_id": "vote_2",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投1号",
+      "started_at": "2026-11-02 01:37:45.212",
+      "completed_at": "2026-11-02 01:37:45.222"
+    },
+    {
+      "node_id": "vote_3",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投1号",
+      "started_at": "2026-11-02 01:37:45.216",
+      "completed_at": "2026-11-02 01:37:45.232"
+    },
+    {
+      "node_id": "vote_4",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投2号",
+      "started_at": "2026-11-02 01:37:45.220",
+      "completed_at": "2026-11-02 01:37:45.228"
+    },
+    {
+      "node_id": "tally",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "本轮平票，进入PK。",
+      "started_at": "2026-11-02 01:37:45.234",
+      "completed_at": "2026-11-02 01:37:45.238"
+    },
+    {
+      "node_id": "pk_speak_1",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "用起来得两只手，急不得。",
+      "started_at": "2026-11-02 01:37:45.239",
+      "completed_at": "2026-11-02 01:37:45.250"
+    },
+    {
+      "node_id": "pk_speak_2",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "继续按线索判断。",
+      "started_at": "2026-11-02 01:37:45.243",
+      "completed_at": "2026-11-02 01:37:45.248"
+    },
+    {
+      "node_id": "pk_speak_3",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "继续按线索判断。",
+      "started_at": "2026-11-02 01:37:45.246",
+      "completed_at": "2026-11-02 01:37:45.255"
+    },
+    {
+      "node_id": "pk_vote_2",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投1号",
+      "started_at": "2026-11-02 01:37:45.249",
+      "completed_at": "2026-11-02 01:37:45.258"
+    },
+    {
+      "node_id": "pk_vote_1",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投2号",
+      "started_at": "2026-11-02 01:37:45.251",
+      "completed_at": "2026-11-02 01:37:45.266"
+    },
+    {
+      "node_id": "pk_vote_3",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投2号",
+      "started_at": "2026-11-02 01:37:45.256",
+      "completed_at": "2026-11-02 01:37:45.263"
+    },
+    {
+      "node_id": "pk_speak_4",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "继续按线索判断。",
+      "started_at": "2026-11-02 01:37:45.273",
+      "completed_at": "2026-11-02 01:37:45.277"
+    },
+    {
+      "node_id": "pk_vote_4",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "我投2号",
+      "started_at": "2026-11-02 01:37:45.278",
+      "completed_at": "2026-11-02 01:37:45.282"
+    },
+    {
+      "node_id": "pk_tally",
+      "status": "completed",
+      "outcome": "complete",
+      "artifact_text": "PK结束，2号胜出。",
+      "started_at": "2026-11-02 01:37:45.283",
+      "completed_at": "2026-11-02 01:37:45.290"
+    }
+  ],
+  "limitations": [
+    "只有 seat1 是实际 CPython BcnClient；其余参与者是脚本化测试 Bot。",
+    "这是协议级受控测试，不是已完成三局里的真实主持人 PK；没有人类玩家或主持人 LLM。",
+    "测试输入使用合成词“测试物”；投票目标是受控合法目标。"
+  ],
+  "redaction": {
+    "omitted": [
+      "token",
+      "本机路径",
+      "真实对局词语",
+      "主持人脚本原始文件"
+    ],
+    "retained": [
+      "测试 group/session/run ID",
+      "受控票面",
+      "实际 CPython 玩家 V3 请求/终态",
+      "节点时间与状态"
+    ]
+  }
+}
