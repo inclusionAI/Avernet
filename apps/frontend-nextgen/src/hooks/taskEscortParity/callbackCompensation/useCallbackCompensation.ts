@@ -3,7 +3,6 @@ import {
   callbackCompensationDefaultRange,
   callbackCompensationExecutionReady,
   callbackCompensationRange,
-  callbackCompensationStorageKey,
 } from '@/domain/taskEscortParity/callbackCompensation';
 import {
   callbackCompensationErrorMessage,
@@ -11,7 +10,6 @@ import {
 } from '@/domain/taskEscortParity/callbackCompensationErrors';
 import type {
   CallbackCompensationCapabilities,
-  CallbackCompensationCreate,
   CallbackCompensationPreview,
   CallbackCompensationRange,
 } from '@/domain/taskEscortParity/callbackCompensationTypes';
@@ -19,26 +17,14 @@ import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { callbackCompensationService as service } from '@/services/taskEscortParity/callbackCompensationService';
 import { useEffect, useRef, useState } from 'react';
 import { useCallbackCompensationBatch } from './useCallbackCompensationBatch';
+import { useCallbackCompensationPending } from './useCallbackCompensationPending';
 
-// In-memory only: keep an ambiguous create frozen across route remounts. Never persist reasons/payloads/keys.
-// Partitioning is for UI isolation, not authorization; every retry still goes through server auth.
-const unresolvedCreates = new Map<string, CallbackCompensationCreate>();
-function requestKey() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 15) | 64;
-  bytes[8] = (bytes[8] & 63) | 128;
-  return Array.from(
-    bytes,
-    (value, index) => `${[4, 6, 8, 10].includes(index) ? '-' : ''}${value.toString(16).padStart(2, '0')}`,
-  ).join('');
-}
 export function useCallbackCompensation(
   context: TaskEscortParityContext,
   capabilities: CallbackCompensationCapabilities,
   onDenied: () => void,
 ) {
   const scope = { workflowId: context.workflowId, environment: capabilities.environment };
-  const key = callbackCompensationStorageKey({ ...scope, scopeKey: context.scopeKey, userId: context.userId });
   const [open, setOpen] = useState(false);
   const [range, setRange] = useState(callbackCompensationDefaultRange);
   const [configId, setConfigId] = useState(capabilities.configs[0]?.configId ?? '');
@@ -50,8 +36,8 @@ export function useCallbackCompensation(
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState(''),
     [acknowledged, setAcknowledged] = useState(false);
-  const [pending, setPending] = useState<CallbackCompensationCreate | null>(() => unresolvedCreates.get(key) ?? null);
-  const pendingRef = useRef(pending);
+  const { pending, pendingRef, freezePending, resolvePending } =
+    useCallbackCompensationPending(context, capabilities.environment);
   const [busy, setBusy] = useState<'preview' | 'create' | null>(null),
     busyRef = useRef(false);
   const [error, setError] = useState('');
@@ -169,21 +155,16 @@ export function useCallbackCompensation(
       )
         return;
       try {
-        input = {
+        input = freezePending({
           previewId: preview!.previewId,
-          itemIds: [...selected],
+          itemIds: selected,
           reason: reason.trim(),
-          requestKey: requestKey(),
-        };
+        });
       } catch {
         setError('当前浏览器无法生成安全请求标识，未发起补偿。');
         return;
       }
-      unresolvedCreates.set(key, input);
-      pendingRef.current = input;
-      setPending(input);
     }
-    // Freeze before the network call. A timeout/abort/error can never unlock a new preview or request key.
     busyRef.current = true;
     setBusy('create');
     setError('');
@@ -193,9 +174,7 @@ export function useCallbackCompensation(
       const value = await service.create(scope, input, request.signal);
       if (!alive.current || request.signal.aborted) return;
       batch.accept(value);
-      unresolvedCreates.delete(key);
-      pendingRef.current = null;
-      setPending(null);
+      resolvePending();
     } catch (failure) {
       if (!alive.current || request.signal.aborted) return;
       if (callbackCompensationErrorStatus(failure) === 403) onDenied();
