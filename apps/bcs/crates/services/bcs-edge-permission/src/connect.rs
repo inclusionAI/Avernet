@@ -568,6 +568,23 @@ impl DbConnectService {
         }
     }
 
+    /// Resolve the best display name for a friend-list entry.
+    ///
+    /// Priority for human actors: nickname (花名) → staff_no (工号) → raw actor_id.
+    /// Priority for bot actors: bot config name → raw actor_id.
+    async fn resolve_friend_entry_name(&self, actor_id: &str) -> Option<String> {
+        if let Some(name) = self.resolve_actor_display_name(actor_id).await {
+            return Some(name);
+        }
+        match actor_kind_of(actor_id) {
+            ActorKind::Human => actor_id
+                .strip_prefix("human_")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            ActorKind::Bot => None,
+        }
+    }
+
     /// Find pending `Connect` requests from `from` → `to` in this env.
     ///
     /// Implemented on top of the existing `list_inbox(to, env, status)` (the
