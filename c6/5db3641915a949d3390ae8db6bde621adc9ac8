@@ -1,0 +1,200 @@
+apps/evolverun/clawweb/README.md
+  h_bb3ca6fb13c5df 19-25
+apps/evolverun/clawweb/docs/workflow-timeout-write-policy.md
+  h_bb3ca6fb13c5df 3-318,359-366,369-459,464-465,469,471-472,474,477,483,486,490,499-500,504
+apps/evolverun/clawweb/public/modules/workflow/docs/cross-instance-run-tools.md
+  h_bb3ca6fb13c5df 64-71,102-104,146-150
+apps/evolverun/clawweb/public/modules/workflow/docs/internal-version-contract.md
+  h_bb3ca6fb13c5df 69-77,81-151,153,155-156,158-179
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  h_bb3ca6fb13c5df 37-41
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/abort-epoch.test.ts
+  h_bb3ca6fb13c5df 1-74
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/epoch-schema-race.test.ts
+  h_bb3ca6fb13c5df 1-70
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-mirror.test.ts
+  h_bb3ca6fb13c5df 3,36,42-47,49,51-54
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/flow-retry-cancellation-race.test.ts
+  h_bb3ca6fb13c5df 53-56
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/flow-run-lineage.test.ts
+  h_bb3ca6fb13c5df 62,66,71-73,75-77,79-81
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/legacy-run-mutation.test.ts
+  h_bb3ca6fb13c5df 1-25
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/mirror-fence.test.ts
+  h_bb3ca6fb13c5df 1-106
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-admission.test.ts
+  h_bb3ca6fb13c5df 1-62
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-checkpoint.fixture.ts
+  h_bb3ca6fb13c5df 1-50
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-checkpoint.test.ts
+  h_bb3ca6fb13c5df 1-168
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-epoch.test.ts
+  h_bb3ca6fb13c5df 64,75-77,81,90-91,95,123,142-143,148,163,170-171,173-174,178-179,199,210-220,224,226-227,232-235,246-247,255-256,259,261
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-legacy-transaction.test.ts
+  h_bb3ca6fb13c5df 7,20
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/run-cancellation.test.ts
+  h_bb3ca6fb13c5df 19-20,66-67,79,88,91,93-103,107,112,116-118
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/terminal-admission.test.ts
+  h_bb3ca6fb13c5df 1-148
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/timeout-write-policy.test.ts
+  h_bb3ca6fb13c5df 15-33,35,38-40,42,45-51,53-55,57,83,85-87,100,122-123,138-154,177,179-183,185-201,204,207,212,277-286,288-296,301-318,321,330,334-336
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-completion.ts
+  h_bb3ca6fb13c5df 3-4,7,33-35
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-mirror.ts
+  h_bb3ca6fb13c5df 1-60
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 1-4,111,221-230,488,499,504,509,512,517-522,526,529-537,540-547,549,568-569,572-575,580-581,583-584,602-606,609-612,616-618,622,661-664
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-retry-checkpoint.ts
+  h_bb3ca6fb13c5df 1-104
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-status.ts
+  h_bb3ca6fb13c5df 1-27
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-timeout-write.ts
+  h_bb3ca6fb13c5df 3-4,21,24-25,27,30,37-39
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-write-fence.ts
+  h_bb3ca6fb13c5df 1-118
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/node-execution-repository.ts
+  h_bb3ca6fb13c5df 1,346-347
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/node-reconcile.ts
+  h_bb3ca6fb13c5df 1-42
+apps/evolverun/clawweb/public/modules/workflow/server/routes/README.md
+  h_bb3ca6fb13c5df 36-61
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/console-format-safety.test.ts
+  h_bb3ca6fb13c5df 18-20,113,125,130-145,178,187
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-logger.test.ts
+  h_bb3ca6fb13c5df 423-461
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-run-completion.test.ts
+  h_bb3ca6fb13c5df 13-15,134,174,187-189,207-216,230,233,240-257,287-306,321,323-324,331-332,339-344,346-347,368,370-371,376-380,382,387-390,392-399,402-416,420,425-428,435-436,440-453
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/web-abort-epoch.test.ts
+  h_bb3ca6fb13c5df 1-101
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-route-logging.test.ts
+  h_bb3ca6fb13c5df 14-15,250-297
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal-logger.ts
+  h_bb3ca6fb13c5df 30-51,64-71,81-83,85-86,89,92,138-139
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/cancellation.test.ts
+  h_bb3ca6fb13c5df 139,146,148-151
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-state-roundtrip.test.ts
+  h_bb3ca6fb13c5df 26
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/flow-run-lineage-replay.test.ts
+  h_bb3ca6fb13c5df 24,72,104-105
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/flow-run-lineage.test.ts
+  h_bb3ca6fb13c5df 66-67
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/legacy-run-mutation.test.ts
+  h_bb3ca6fb13c5df 1-43
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/legacy-timeout-bypass.test.ts
+  h_bb3ca6fb13c5df 48,52-55,61,77,84-85,90,93-94,97,106-107,110-112
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/retry-checkpoint.test.ts
+  h_bb3ca6fb13c5df 1-72
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/retry-deprecation.test.ts
+  h_bb3ca6fb13c5df 1-41
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/retry-resume.test.ts
+  h_bb3ca6fb13c5df 58,60-61,83,85,87-88,106,112,114-115,118-119
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/terminal-admission.test.ts
+  h_bb3ca6fb13c5df 1-140
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/terminal-node-count.test.ts
+  h_bb3ca6fb13c5df 21,82-83,96
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/timeout-write-policy.test.ts
+  h_bb3ca6fb13c5df 8,11-15,17,24-26,39,42-44,46,49-52,57,74,89,98,102,104,115,120
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/node-executions.ts
+  h_bb3ca6fb13c5df 1,7,306,308,313-317,320-322,325-329,331
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_bb3ca6fb13c5df 1,3-4,17,38,44-51,312,317,327,330,336,341-342,352,370-371,374,376,379,385,399,412-415,418,425,491,508,516-517,519,523,525-528,540,558-563,603,630,637-642,650,667-668,689-696,707-710,727-729,731,742,744-747
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_bb3ca6fb13c5df 411,434-436,439,445
+apps/evolverun/clawweb/public/shared/server/logging/README.md
+  h_bb3ca6fb13c5df 65-67,69-72
+apps/evolverun/clawweb/public/shared/server/logging/__tests__/redact-log-text.test.ts
+  h_bb3ca6fb13c5df 16-18,43-59
+apps/evolverun/clawweb/public/shared/server/logging/redact-log-text.ts
+  h_bb3ca6fb13c5df 4-5,18-19,22-26,28-35,40-41
+apps/evolverun/clawweb/public/shared/server/services/__tests__/redaction.test.ts
+  h_bb3ca6fb13c5df 21-27
+apps/evolverun/clawweb/public/shared/server/services/redaction.ts
+  h_bb3ca6fb13c5df 45-65,68,74-75
+apps/evolverun/taskguard/.gitignore
+  h_bb3ca6fb13c5df 1
+apps/evolverun/taskguard/README.md
+  h_bb3ca6fb13c5df 19
+apps/evolverun/taskguard/docs/flow-timeout-closeout.md
+  h_bb3ca6fb13c5df 1-167
+apps/evolverun/taskguard/src/controller.ts
+  h_bb3ca6fb13c5df 1-9,721,766-767,781-783,785-794,797,814,821,824-834,837-839,844,849-861,863-867,1805-1811,1813-1815,2009-2019,2066-2094,2101-2112,2166-2168,2184,2256,2288-2293,2325,2327-2328,2358-2385,2428,2450-2453,2455-2461,2463,2474-2475,2501-2502,2516-2517,2523,2534-2535,2537-2549,2551-2553,2555-2557,2707-2709,3575,4424-4425,4671,4697-4699,6163,6281,6714,6852,6939,7088-7089,7093,7148,7252-7254,7796-7797,7838-7839,9212,9405,10421-10422,12926-12927,12930,12988,13088,13143,13182-13183,13188,13517-13518,13521,13557,13682,13715-13716,13795,13835-13836,13841
+apps/evolverun/taskguard/src/db/api-repositories/flow-run-api-repository.ts
+  h_bb3ca6fb13c5df 11-13,49-50,121,125,134,140,151-152,157,163,169-171,173,195-201,204-219,265,269,331
+apps/evolverun/taskguard/src/db/api-repositories/node-execution-api-repository.ts
+  h_bb3ca6fb13c5df 7-8,130-131,135,156-157,161,232-233,237,239-244,248
+apps/evolverun/taskguard/src/db/api-repositories/write-response.ts
+  h_bb3ca6fb13c5df 1-15
+apps/evolverun/taskguard/src/db/repositories/flow-run-lifecycle.ts
+  h_bb3ca6fb13c5df 1-50
+apps/evolverun/taskguard/src/db/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 1,8,13,23-25,72-73,171-172,175,217-220,223,227,234-235,238-243,316,321-322,394-395,398,401,403,411,414,418,440
+apps/evolverun/taskguard/src/db/repositories/node-execution-repository.ts
+  h_bb3ca6fb13c5df 10,333,399,517-519,521-524,551,553-558,568
+apps/evolverun/taskguard/src/db/repositories/retry-checkpoint.ts
+  h_bb3ca6fb13c5df 1-38
+apps/evolverun/taskguard/src/db/repositories/retry-epoch.ts
+  h_bb3ca6fb13c5df 1-35
+apps/evolverun/taskguard/src/db/repositories/types.ts
+  h_bb3ca6fb13c5df 21,25,36-38,85-86,100-101,122,124-125,131-134,144-145,240-243,936
+apps/evolverun/taskguard/src/db/schema.ts
+  h_bb3ca6fb13c5df 885-892
+apps/evolverun/taskguard/src/executors/subworkflow.ts
+  h_bb3ca6fb13c5df 1-2,251-252
+apps/evolverun/taskguard/src/index.ts
+  h_bb3ca6fb13c5df 1,3961,3969,3988-3989,4007-4012,4020-4026,4038-4042
+apps/evolverun/taskguard/src/platform/database-taskflow.ts
+  h_bb3ca6fb13c5df 1-2,111-112,128-130,133,177-192,323-330,333,356-362,365,423-424
+apps/evolverun/taskguard/src/recovery/async-driver.ts
+  h_bb3ca6fb13c5df 1-51
+apps/evolverun/taskguard/src/recovery/attempt.ts
+  h_bb3ca6fb13c5df 1-23
+apps/evolverun/taskguard/src/recovery/completion.ts
+  h_bb3ca6fb13c5df 1-50
+apps/evolverun/taskguard/src/recovery/flow-timeout.ts
+  h_bb3ca6fb13c5df 1-80
+apps/evolverun/taskguard/src/recovery/manual-retry.ts
+  h_bb3ca6fb13c5df 1-19
+apps/evolverun/taskguard/src/recovery/scan.ts
+  h_bb3ca6fb13c5df 1-74
+apps/evolverun/taskguard/src/recovery/timeout-clock.ts
+  h_bb3ca6fb13c5df 1-15
+apps/evolverun/taskguard/src/recovery/timeout-sweep.ts
+  h_bb3ca6fb13c5df 1-61
+apps/evolverun/taskguard/src/types.ts
+  h_bb3ca6fb13c5df 1567-1574
+apps/evolverun/taskguard/tests/async-driver-admission.test.ts
+  h_bb3ca6fb13c5df 1-142
+apps/evolverun/taskguard/tests/closeout-repositories-http.test.ts
+  h_bb3ca6fb13c5df 1-140
+apps/evolverun/taskguard/tests/closeout-repositories-sqlite.test.ts
+  h_bb3ca6fb13c5df 1-264
+apps/evolverun/taskguard/tests/completion-admission.test.ts
+  h_bb3ca6fb13c5df 1-117
+apps/evolverun/taskguard/tests/fixtures/async-driver-failure.ts
+  h_bb3ca6fb13c5df 1-49
+apps/evolverun/taskguard/tests/flow-timeout-policy.test.ts
+  h_bb3ca6fb13c5df 1-105
+apps/evolverun/taskguard/tests/flow-timeout-watchdog.test.ts
+  h_bb3ca6fb13c5df 1-75
+apps/evolverun/taskguard/tests/manual-retry-clock.test.ts
+  h_bb3ca6fb13c5df 1-100
+apps/evolverun/taskguard/tests/mind-state-epoch-compatibility.test.ts
+  h_bb3ca6fb13c5df 1-152
+apps/evolverun/taskguard/tests/post-closeout-ownership.test.ts
+  h_bb3ca6fb13c5df 1-100
+apps/evolverun/taskguard/tests/recovery-timeout.test.ts
+  h_bb3ca6fb13c5df 1-76
+apps/evolverun/taskguard/tests/timeout-scan-pagination.test.ts
+  h_bb3ca6fb13c5df 1-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c65db3641915a949d3390ae8db6bde621adc9ac8",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
