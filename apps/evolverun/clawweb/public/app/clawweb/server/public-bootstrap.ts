@@ -260,7 +260,11 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       app.use("/api/insight/v1", createSessionRecoveryRouter(options.sessionRecovery));
       app.use("/api/insight/v1", createInsightManagementRuntime(db).router);
       app.use("/api/insight/v1", createInsightRouter(insight.service));
-      // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)
+      // Keep browser approval identity separate from authenticated engine delivery/ACKs.
+      const engineAuth = createInternalEngineAuth({
+        environment: context.environment,
+        publicKeyB64: resolveSignatureConfig().publicKeyB64,
+      });
       const approvalCardRepo = new ApprovalCardRepository(db);
       app.use("/api/approval", createApprovalRouter(db, {
         resolveSessionIdentity: async (request) => {
@@ -270,7 +274,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
             : { ok: false, error: "未登录或登录状态已失效" };
         },
       }));
-      app.use("/api/approval-cards", createInternalApprovalCardsRouter(approvalCardRepo));
+      app.use("/api/approval-cards", engineAuth, createInternalApprovalCardsRouter(approvalCardRepo));
 
       // AutoHeal fallbacks only; the router resolves DB overrides on each save/deploy.
       const autoHealConfig = resolveAutoHealConfig();
@@ -291,10 +295,6 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const alertRepo = new AlertRepository(db);
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
-      const engineAuth = createInternalEngineAuth({
-        environment: context.environment,
-        publicKeyB64: resolveSignatureConfig().publicKeyB64,
-      });
       app.use("/api/internal/runs", engineAuth, createInternalRunsRouter(
         flowRunRepo, nodeExecRepo, resolveFlowControlConfig(),
       ));

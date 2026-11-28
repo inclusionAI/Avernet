@@ -16,6 +16,7 @@ launching, and product boundaries.
 
 ## Workflow safety
 
+- [Approval consumption contract](public/modules/workflow/docs/approval-consumption-contract.md): terminal-run polling exclusion, durable approval acknowledgments, and schema-first rollout.
 - [Workflow timeout write policy](docs/workflow-timeout-write-policy.md): legacy
   watchdog validation, atomic write fences, failure-settlement compatibility,
   observer idempotence, and the remaining non-owner/native-store limits.

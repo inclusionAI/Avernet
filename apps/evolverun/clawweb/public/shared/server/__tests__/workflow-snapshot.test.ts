@@ -1,4 +1,5 @@
 import { dialectFor } from '../db/dialect.js';
+import { migrations } from '../schema.js';
 import { repairReleaseMigrations } from '../schema-repair-release.js';
 import { workflowSnapshotColumnDdl } from '../schema-workflow-snapshot.js';
 import Database from 'better-sqlite3';
@@ -96,6 +97,10 @@ it('adds associations with real migrations and preserves old rows on repeated mi
   const db = new SqliteDatabase(new Database(':memory:')); opened.push(db);
   // A v144 fixture includes the release journal created by v142.
   for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await db.exec(db.dialect.renderDdl(sql));
+  // This partial v144 fixture omits the approval_cards baseline from global v15.
+  for (const sql of migrations.find(m => m.version === 15)!.sql) {
+    await db.exec(db.dialect.renderDdl(sql));
+  }
   await db.exec('CREATE TABLE schema_version (version INTEGER, description TEXT)');
   await db.exec('INSERT INTO schema_version VALUES (144, \'legacy\')');
   await db.exec('CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, status TEXT, started_at INTEGER)');
@@ -112,6 +117,10 @@ it('does not require an analysis table to boot existing workflow deployments', a
   const db = new SqliteDatabase(new Database(':memory:')); opened.push(db);
   // A v144 fixture includes the release journal created by v142.
   for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await db.exec(db.dialect.renderDdl(sql));
+  // This partial v144 fixture omits the approval_cards baseline from global v15.
+  for (const sql of migrations.find(m => m.version === 15)!.sql) {
+    await db.exec(db.dialect.renderDdl(sql));
+  }
   await db.exec('CREATE TABLE schema_version (version INTEGER, description TEXT)');
   await db.exec("INSERT INTO schema_version VALUES (144,'legacy')");
   await db.exec('CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY)');

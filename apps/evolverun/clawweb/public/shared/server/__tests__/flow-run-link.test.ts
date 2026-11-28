@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import { allMigrations as currentMigrations } from '../db.js';
 import { describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
@@ -21,6 +22,7 @@ const mysqlSchemaQuery = async (sql: string) => sql.includes('COLUMNS')
 describe('independent flow run links', () => {
   it('creates and upgrades SQLite through the migration runner and is idempotent', async () => {
     const raw = new Database(':memory:');
+    seedLegacyApprovalCards(raw);
     const db = new SqliteDatabase(raw);
     // Existing installation at the reserved v146, including the run table required by v151.
     raw.exec('CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (146, \'existing\')');
@@ -48,6 +50,7 @@ describe('independent flow run links', () => {
   it.each([146, 147, 151].flatMap(version => [false, true].map(hasModify => ({ version, hasModify }))))(
     'preserves a provisioned SQLite table and data at v$version with optional gmt_modify=$hasModify', async ({ version, hasModify }) => {
     const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
+    seedLegacyApprovalCards(raw);
     raw.exec(`CREATE TABLE flow_runs (flow_id TEXT);
       CREATE TABLE schema_version (version INTEGER, description TEXT);
       INSERT INTO schema_version VALUES (${version}, 'existing');
@@ -114,6 +117,7 @@ describe('independent flow run links', () => {
 
   it('upgrades a v147 SQLite table in place without losing rows or enforcing its old VARCHAR declaration', async () => {
     const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
+    seedLegacyApprovalCards(raw);
     raw.exec(`CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT);
       INSERT INTO schema_version VALUES (147, 'old');
       CREATE TABLE flow_run_links (child_flow_id VARCHAR(190) NOT NULL PRIMARY KEY,
