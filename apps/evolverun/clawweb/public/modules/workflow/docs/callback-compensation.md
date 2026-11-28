@@ -119,7 +119,13 @@ confirmed body is never silently rebuilt from newer run/config data. Every
 actual POST recomputes the existing millisecond timestamp/HMAC-SHA256 signature
 of `timestamp + "." + rawBody`, using the current matching server-side secret;
 `X-Callback-Config-Id` remains the string config identifier. Changing the config,
-secret, state, generation or snapshot after preview invalidates delivery.
+secret, state, generation or snapshot before final database authorization
+invalidates delivery. The final item/lease CAS also compares the last verified
+run/config values, complete node set and trial/history predicates; text checks
+are byte-sensitive, not dependent on database collation or second-resolution
+modification timestamps. That authorization is not a transaction with the
+external receiver or a lock on future engine writes; receiver business
+idempotency remains required.
 
 ## Persistence, concurrency and restart
 
@@ -128,7 +134,10 @@ cover environment/workflow/run/trusted generation/event/logical receiver, not
 configuration versions. Batch request keys and delivery identities have unique
 constraints. Queued items enter `sending` through an atomic compare-and-set;
 multiple workers cannot POST the same compensation item. There is no network
-retry. The worker runs at low concurrency and freezes the confirmed encrypted
+retry. Final authority predicates use a balanced conjunction without truncating
+the node set; a snapshot exceeding the conservative database bind budget stays
+review-only before a batch can reserve its delivery identity. The worker runs
+at low concurrency and freezes the confirmed encrypted
 body, config fingerprint and reviewed evidence before sending.
 
 - `received`: HTTP 2xx durably recorded; not a business-success assertion.

@@ -3,6 +3,7 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { CallbackCompensationSource } from '../../repositories/callback-compensation-source.js';
 import type { RunSnapshot } from '../../repositories/callback-compensation-source.js';
 import { CallbackCompensationRepository } from '../../repositories/callback-compensation-repository.js';
+import { postAuthorityWithinBudget } from '../../repositories/callback-compensation-authority.js';
 import type { BatchRow, ItemRow } from '../../repositories/callback-compensation-repository.js';
 import type { HttpCallbackConfigRow } from '../../repositories/http-callback-config-repository.js';
 import type { BatchDto, CallbackCompensationServiceApi, CapabilitiesDto, CompensationEvidence, CompensationOptions,
@@ -100,6 +101,8 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
     const reasons = [...runErrors, ...configReasons(config), ...this.blockReasons(),
       ...evidenceReasons(evidence, { ...query, now: iso(this.now()) }, config, snapshot.run.current_phase)];
     if (reasons.length) return { status: 'review', reasons, evidence };
+    if (!postAuthorityWithinBudget(this.db, snapshot, evidence!))
+      return { status: 'review', reasons: ['AUTHORITY_SIZE_REQUIRES_REVIEW'], evidence };
     const attempts = await this.source.attempts(snapshot.run.workflow_id, snapshot.run.flow_id, evidence!);
     if (attempts === 'delivered') return { status: 'delivered', reasons: ['RECEIVER_ALREADY_DELIVERED'], evidence };
     if (attempts === 'review') return { status: 'review', reasons: ['EXISTING_RECEIVER_ATTEMPT'], evidence };
@@ -138,7 +141,7 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
       dto_json: JSON.stringify(dto), frozen_cipher: this.key ? protect(frozen, this.key, `preview:${scope}:${previewId}`) : null });
     return dto;
   }
-  private async checkFrozen(f: FrozenItem, source = this.source): Promise<{ config?: HttpCallbackConfigRow; reason?: string }> {
+  private async checkFrozen(f: FrozenItem, source = this.source): Promise<{ config?: HttpCallbackConfigRow; snapshot?: RunSnapshot; reason?: string }> {
     const snapshot = await source.snapshot(f.workflowId, f.flowId);
     if (!snapshot) return { reason: 'RUN_MISSING' };
     if (snapshot.snapshotHash !== f.snapshotHash || runReasons(snapshot, this.options.environment, source.completedAt(snapshot)).length)
@@ -159,7 +162,8 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
     if (!latestConfig || configHash(latestConfig) !== f.configHash) return { reason: 'CONFIG_DRIFT' };
     if (f.environment !== this.options.environment || bodyHash(f.rawBody) !== f.rawBodyHash
       || this.deliveryKey(f.workflowId, f.flowId, evidence!) !== f.deliveryKey) return { reason: 'FROZEN_SNAPSHOT_INVALID' };
-    return { config };
+    if (!postAuthorityWithinBudget(this.db, latest, evidence!)) return { reason: 'AUTHORITY_SIZE_REQUIRES_REVIEW' };
+    return { config: latestConfig, snapshot: latest };
   }
   async create(workflowId: string, actorId: string, input: CreateInput): Promise<BatchDto> {
     const scope = this.identity(workflowId, actorId);
@@ -267,9 +271,10 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
       const postUntil = Math.max(claimUntil + 1, checkedAt + timeoutMs + 30_000);
       // Provider/DB preflight can outlive the claim. Never POST after another instance
       // recovered unknown, after expiry, or after stop while preflight was pending.
-      const authorized = checkedAt < claimUntil && await this.repo.authorizePost(row.item_id, claimUntil, checkedAt, postUntil);
+      const authorized = checkedAt < claimUntil && await this.repo.authorizePost(row.item_id, claimUntil, checkedAt, postUntil,
+        checked.snapshot && checked.config && !checked.reason ? { snapshot: checked.snapshot, config: checked.config, evidence: f.evidence } : null);
       if (!authorized || this.now() >= claimUntil) {
-        await this.repo.abandonBeforePost(row.item_id, claimUntil, this.now());
+        await this.repo.abandonBeforePost(row.item_id, claimUntil, this.now(), checked.reason);
         continue;
       }
       const sendNow = this.now();

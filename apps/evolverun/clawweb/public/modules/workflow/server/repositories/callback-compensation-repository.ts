@@ -1,4 +1,5 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { postAuthorityPredicate, type PostAuthority } from './callback-compensation-authority.js';
 import type { ItemState } from '../services/callback-compensation/types.js';
 
 export interface PreviewRow { preview_id: string; scope_key: string; expires_ms: number; dto_json: string; frozen_cipher: string | null }
@@ -76,19 +77,25 @@ export class CallbackCompensationRepository {
   /** Last short CAS before POST: an expired/recovered claim or stopped batch may not send.
    * Increment deadline even at an identical clock tick so MySQL changed-row semantics are unambiguous.
    */
-  async authorizePost(itemId: string, originalUntil: number, now: number, nextUntil: number): Promise<boolean> {
+  async authorizePost(itemId: string, originalUntil: number, now: number, nextUntil: number, authority: PostAuthority | null): Promise<boolean> {
+    if (!authority) return false;
+    const guard = postAuthorityPredicate(this.db, authority);
     const result = await this.db.exec(`UPDATE ${itemTable} SET sending_until_ms = ?, gmt_modified = ?
       WHERE item_id = ? AND state = 'sending' AND sending_until_ms = ? AND sending_until_ms > ?
-      AND EXISTS (SELECT 1 FROM ${batchTable} b WHERE b.batch_id = ${itemTable}.batch_id AND b.stopped = 0)`,
-    [nextUntil, this.db.dialect.now(), itemId, originalUntil, now]);
+      AND EXISTS (SELECT 1 FROM ${batchTable} b WHERE b.batch_id = ${itemTable}.batch_id AND b.stopped = 0)
+      AND ${guard.sql}`,
+    [nextUntil, this.db.dialect.now(), itemId, originalUntil, now, ...guard.params]);
     return result.affectedRows === 1;
   }
-  async abandonBeforePost(itemId: string, originalUntil: number, now: number): Promise<void> {
+  async abandonBeforePost(itemId: string, originalUntil: number, now: number, reason = 'AUTHORITY_CHANGED_BEFORE_POST'): Promise<void> {
     // No network has started. Stop is a skip; expired sending is still conservative unknown.
     await this.db.exec(`UPDATE ${itemTable} SET state = 'skipped', reason = 'ADMIN_STOP_BEFORE_POST', gmt_modified = ?
       WHERE item_id = ? AND state = 'sending' AND EXISTS
       (SELECT 1 FROM ${batchTable} b WHERE b.batch_id = ${itemTable}.batch_id AND b.stopped = 1)`,
     [this.db.dialect.now(), itemId]);
+    await this.db.exec(`UPDATE ${itemTable} SET state = 'skipped', reason = ?, gmt_modified = ?
+      WHERE item_id = ? AND state = 'sending' AND sending_until_ms = ? AND sending_until_ms > ?`,
+    [reason, this.db.dialect.now(), itemId, originalUntil, now]);
     if (now >= originalUntil) await this.db.exec(`UPDATE ${itemTable} SET state = 'unknown',
       reason = 'SENDING_LEASE_EXPIRED', audit_pending = 1, gmt_modified = ? WHERE item_id = ? AND state = 'sending'`,
     [this.db.dialect.now(), itemId]);
