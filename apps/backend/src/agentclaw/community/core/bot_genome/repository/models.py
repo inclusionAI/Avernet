@@ -185,6 +185,7 @@ class GenomePromotionRow(BaseModel):
     actor_id: str
     actor_run_id: Optional[str] = None  #: the evolution run, for a ``strategy_run`` actor
     reason: str
+    authorization: str | None = None  #: immutable human authorization JSON; None for normal promotions
     status: str
     apply_id: Optional[str] = None  #: the apply run delivering it, once started
     apply_detail: str = ""
@@ -320,6 +321,7 @@ class GenomePromotionModel(Base):
     actor_id = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     actor_run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     reason = Column(String(1024), nullable=False)
+    authorization = Column(Text, nullable=True, comment="immutable manual authorization JSON; NULL for normal promotion")
     status = Column(String(16), nullable=False, comment="pending/applying/applied/applied_partial/apply_failed")
     apply_id = Column(String(32), nullable=True, comment="the apply run delivering it, once started")
     apply_detail = Column(String(1024), nullable=False, default="", comment="one line on how the delivery went")

@@ -27,6 +27,7 @@ Read only the sources relevant to the boundary being changed.
 | Gateway | [Gateway guide](apps/gateway/README.md) — teamclawgw community edition, open-source gateway skeleton (DI/SPI plugin pattern). |
 | Proxy | [Proxy guide](apps/proxy/README.md) — sandboxproxy-community, standalone reverse proxy delegating client traffic to Aliyun ACK pods. |
 | Frontend nextgen | [Nextgen README](apps/frontend-nextgen/README.md) and [CLAUDE.md](apps/frontend-nextgen/CLAUDE.md) — open-core export from TeamClaw; boundary rules in root `CLAUDE.md`. |
+| Evolution RSI control plane | [Evolution guide](apps/evolution/README.md), [shared Genome contracts](packages/genome-contracts/README.md), [ADR 0021](docs/adr/0021-evolution-control-plane-in-apps-evolution.md); standalone execution and migration limitations, not the evaluation prototype below. |
 | Evolverun / AgentEvolve | [Evolverun README](apps/evolverun/README.md) and [Agent evolve doc](docs/agent-evolve.md) — historical `clawweb-*` names retained in paths; `apps/evolverun` has no `AGENTS.md` yet. |
 
 Add a module-level `CONTEXT.md` only when that module has stable vocabulary
@@ -85,6 +86,17 @@ overview; it does not require moving existing docs or inventing topic content.
 
 - [Backend runtime targeting](docs/flows/backend-runtime-targeting.md): identity, binding, provider transport and runtime failure boundaries.
 - [Knowledge layout](docs/agents/knowledge-standard.md): file responsibilities and maintenance.
+
+## Isolated prototypes
+
+These are executable experiments, not registered production modules or service entrypoints.
+
+- [Evolution prototype](apps/evolution_prototype/README.md): single-Bot evaluation platform with common/business evaluation Skills,
+  frozen Bot targets, turn-by-turn platform runtime sessions, shared rules and three-stage semantic review.
+  Businesses supply rubrics and tasks; shopping is an asset/fixture example, not a required business adapter.
+  Only the fixed-target assessment entrypoint is supported; retired designs live in prototype docs/history.
+  See the [fixed-target contract](apps/evolution_prototype/specs/2026-11-02-frozen-target/spec.md).
+  Final service ownership remains governed by [ADR 0021](docs/adr/0021-evolution-control-plane-in-apps-evolution.md).
 
 ## Where new knowledge belongs
 

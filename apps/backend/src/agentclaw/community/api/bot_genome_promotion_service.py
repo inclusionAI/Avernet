@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.bot_genome.promotion.promotion_service_protocol import (
     GenomePromotionServiceProtocol,
+    ManualPromotionAuthorization,
 )
 
-__all__ = ["GenomePromotionServiceProtocol"]
+__all__ = ["GenomePromotionServiceProtocol", "ManualPromotionAuthorization"]

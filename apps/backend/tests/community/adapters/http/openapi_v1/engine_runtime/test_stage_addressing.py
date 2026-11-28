@@ -201,6 +201,26 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/genome/promotions"),
     ("get", "/openapi/v1/bots/{bot_id}/genome/promotions"),
     ("get", "/openapi/v1/bots/{bot_id}/genome/promotions/{promotion_id}"),
+    # RSI control records address the Bot, not a selected runtime. Baseline
+    # initialization and drift inspection use the same optional owner seam.
+    ("post", "/openapi/v1/bots/{bot_id}/genome/baseline:initialize"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/drift"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/bindings"),
+    ("put", "/openapi/v1/bots/{bot_id}/evolution/bindings"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/runs"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/runs"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/runs/{run_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/runs/{run_id}:cancel"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/runs/{run_id}/candidates"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/runs/{run_id}/evidence"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/runs/{run_id}/strategy-output"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/strategies"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/candidates/{candidate_id}"),
+    ("get", "/openapi/v1/bots/{bot_id}/evolution/review-queue"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/candidates/{candidate_id}:approve"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/candidates/{candidate_id}:reject"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/candidates/{candidate_id}:authorize-promotion"),
+    ("post", "/openapi/v1/bots/{bot_id}/evolution/candidates/{candidate_id}:apply"),
     # W9's CLI tools take the config-manifest group's bars, so they address a
     # bot that may be someone else's the same way. No ``stage`` for the same
     # reason: a tool is installed on the bot, not on one of its runtimes — and
@@ -327,7 +347,7 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # ``owner_user_id`` query (a distinct, declared param) rather than the
     # ``owner_id`` seam -- so they stop carrying ``owner_id`` and drop out of
     # this pin (they still carry no ``stage``, since the switch is per-bot, not
-    # a runtime). See ``test_explicit_user_id._NO_USER_DIMENSION``.
+    # a runtime). See ``test_explicit_user_id_schema._NO_USER_DIMENSION``.
 }
 
 

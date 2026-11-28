@@ -1,0 +1,65 @@
+# Template, NOT an immediately deployable production integration. Supply a
+# reviewed platform factory in your image; no Backend package imports allowed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evolution
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # no two SQLite authorities during rolling replacement
+  selector:
+    matchLabels: {app: evolution}
+  template:
+    metadata:
+      labels: {app: evolution}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+      containers:
+        - name: evolution
+          image: REPLACE_WITH_YOUR_REVIEWED_PLATFORM_IMAGE
+          ports: [{name: http, containerPort: 8091}]
+          env:
+            - {name: EVOLUTION_PROFILE, value: production}
+            - {name: EVOLUTION_HOST, value: '0.0.0.0'}
+            - {name: EVOLUTION_DATABASE, value: /var/lib/evolution/control.db}
+            - {name: EVOLUTION_SIGNING_KEY_FILE, value: /run/secrets/evolution/worker-key}
+            # Existing platform principal material, not an IAM cookie or worker key.
+            - {name: EVOLUTION_BACKEND_PRINCIPAL_KEY_FILE, value: /run/secrets/platform/principal-key}
+            - {name: EVOLUTION_BACKEND_TENANT, value: REPLACE_WITH_BACKEND_TENANT}
+            - {name: EVOLUTION_PLATFORM_FACTORY, value: 'your_platform.evolution:build_platform'}
+            - {name: EVOLUTION_JOB_ENDPOINT, value: 'http://evolution:8091/openapi/v1/evolution/jobs'}
+          volumeMounts:
+            - {name: state, mountPath: /var/lib/evolution}
+            - {name: signing, mountPath: /run/secrets/evolution, readOnly: true}
+            - {name: backend-trust, mountPath: /run/secrets/platform, readOnly: true}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 15}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: '1', memory: 512Mi}
+      volumes:
+        - name: state
+          persistentVolumeClaim: {claimName: evolution-state}
+        - name: signing
+          secret: {secretName: evolution-worker-key, defaultMode: 0440}
+        # A separate deployment-managed secret containing the existing platform key.
+        - name: backend-trust
+          secret: {secretName: platform-principal-key, defaultMode: 0440}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: evolution-state}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: evolution}
+spec:
+  selector: {app: evolution}
+  ports: [{name: http, port: 8091, targetPort: http}]

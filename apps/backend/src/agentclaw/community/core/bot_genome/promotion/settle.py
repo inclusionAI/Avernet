@@ -21,12 +21,19 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from agentclaw.community.core.apply_engine.compiler import StateRef
-from agentclaw.community.core.apply_engine.completion import ApplyCompletionHandler, ApplyOutcome
+from agentclaw.community.core.apply_engine.completion import (
+    ApplyCompletionHandler,
+    ApplyOutcome,
+)
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_genome.models import PromotionStatus, RefLabel
 from agentclaw.community.core.bot_genome.repository.models import SettleResult
-from agentclaw.community.core.repository.protocols.bot.genome import GenomePromotionRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot.genome import (
+    GenomePromotionRepositoryProtocol,
+)
 from agentclaw.community.log import get_logger
+
+from .promotion_service_protocol import ManualPromotionAuthorization
 
 __all__ = ["GenomeCompletionHandler", "PromotionSettler"]
 
@@ -64,6 +71,14 @@ class PromotionSettler:
             status, labels = PromotionStatus.APPLIED_PARTIAL, (RefLabel.PARTIAL.value,)
         else:
             status, labels = PromotionStatus.APPLY_FAILED, ()
+        expected_statuses = self._promotable
+        row = self._promotions.get(env=env, entity_id=entity_id, bot_id=bot_id, promotion_id=promotion_id)
+        if row is not None and row.authorization is not None:
+            auth = ManualPromotionAuthorization.model_validate_json(row.authorization)
+            if (auth.id, auth.revision_id, auth.parent_revision_id, auth.user_id) != (
+                    row.promotion_id, row.revision_id, row.from_revision_id, row.actor_id):
+                raise ValueError("manual promotion audit binding mismatch")
+            expected_statuses = ("candidate",)
         result = self._promotions.settle(
             env=env,
             entity_id=entity_id,
@@ -74,7 +89,7 @@ class PromotionSettler:
             apply_detail=f"apply {outcome.apply_id}: {outcome.summary}"[:_DETAIL_CHARS],
             move_refs=delivered,
             labels=labels,
-            expected_statuses=self._promotable,
+            expected_statuses=expected_statuses,
             settled_at=self._now(),
         )
         if result is SettleResult.REF_CONFLICT:

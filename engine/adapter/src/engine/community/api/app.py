@@ -268,7 +268,10 @@ attach_injector(app, _INJECTOR)
 from engine.community.api.engine.default_model import router as default_model_router
 
 app.include_router(engine_router)
+from engine.community.api.engine.model_completion import router as model_completion_router
+
 app.include_router(default_model_router)
+app.include_router(model_completion_router)
 app.include_router(session_router)
 app.include_router(session_favorites_router)
 app.include_router(dws_hosting_router)

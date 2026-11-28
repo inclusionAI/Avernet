@@ -128,7 +128,7 @@ if [[ -z "$changed_files" ]]; then
   exit 0
 fi
 
-if matches_any '^apps/backend/'; then
+if matches_any '^(apps/backend/|apps/evolution/|packages/genome-contracts/)'; then
   # Backend 默认强卡点:
   # 1) python_sast_local.sh 近似线上 python-sast block 规则,且只扫本次变更 Python 文件
   # 2) backend ci_test.sh 跑 pytest + coverage + report_check
@@ -136,6 +136,11 @@ if matches_any '^apps/backend/'; then
   run_required "$repo_root/singlebox/ci/python_sast_local.sh" apps/backend 1 --base "$base" --head "$head"
   run_heavy "$repo_root/apps/backend/scripts/ci_test.sh" --base "$base" --head "$head"
   run_singlebox_coverage_once
+fi
+
+if matches_any '^(apps/evolution/|packages/genome-contracts/|.github/workflows/evolution.yml$)'; then
+  run_required "$repo_root/apps/evolution/scripts/ci_test.sh" --lint
+  run_heavy "$repo_root/apps/evolution/scripts/ci_test.sh" --test
 fi
 
 if matches_any '^(apps/backend/tests/community/(compatibility|acceptance/legacy_skills)/|singlebox/ci/legacy_skill_compatibility\.sh)$'; then

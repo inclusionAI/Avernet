@@ -770,6 +770,8 @@ export interface AppCapabilities {
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
+  /** Independent Bot RSI service. Disabled until gateway/auth routing is deployed. */
+  getRsiEnabled: () => CapabilityResult<boolean>;
   /**
    * 社区 BBS Topic API 前缀（list/get/posts/create/close 共用）。
    * 当前部署已切换公开 task 域 `/openapi/v1/collaboration/tasks/bbs/topics`；

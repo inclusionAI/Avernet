@@ -500,3 +500,95 @@ engine-only refresh and restart-publication are excluded. Without an extension,
 confirmation-only restart behavior is unchanged. See
 [capability types](src/capabilities/types.ts) and
 [workshop service](src/services/botWorkshop/botWorkshopService.ts).
+
+## RSI final strategy output
+
+The selected Run in the RSI side panel separately loads
+`GET /openapi/v1/bots/{bot_id}/evolution/runs/{run_id}/strategy-output` through the
+shared authenticated Backend client. It displays the redacted final rationale,
+proposed file replacements and expandable final response text (never rendered as
+HTML/Markdown). Proposed changes do not imply a submitted candidate, passed
+verification or Apply. Missing historical output and read errors are distinct.
+The current attempt refreshes while running and is fetched once again on terminal
+transition; terminal output is not downloaded on every Run-list poll. Bot/Run keyed
+mounting discards late responses from a different scope. Server schema and
+availability follow the [Evolution contract](../evolution/src/avernet_evolution/core/evolution_run/README.md#protected-final-strategy-output).
+
+## Genome baseline reconciliation and candidate Diff
+
+The RSI side panel's [baseline manager](src/components/rsi/GenomeBaselinePanel.tsx)
+uses the existing authenticated Genome API, separately from RSI candidate review.
+Opening or refreshing reads refs, live drift and recent promotions; it does not
+capture or change a Bot. A missing `active` is distinct from a null drift result.
+An explicit capture records the current **whole Genome** and previews its Diff
+against the exact active revision, without moving refs. Existing content keeps
+its revision status: capturing a candidate or rejected revision cannot turn it
+into a promotable owner draft.
+
+Reconciliation requires a reason, confirmation of the full snapshot and the
+server's Owner/edit-lock permission. Before POST, the UI rechecks active, observed
+content and in-flight promotions; it sends the reviewed hashes as target and CAS
+expectation. This reduces stale confirmation but is **not an atomic runtime-file
+lock**. Pause chat/other edits while reconciling. The existing promotion service
+runs Apply and settles refs; `applying`, `applied_partial` and `apply_failed` are
+not presented as successful reconciliation. Even `applied` is rechecked against
+active, partial labels and current drift. Nothing automatically reruns RSI.
+
+Promotion POST has no idempotency guarantee. The client never replays it and
+stores only uncertain target/expected hashes, a random operation correlation ID
+and a returned promotion ID in
+session storage, scoped to actor/owner/Bot. Closing/reopening the panel or
+refreshing the tab retains that marker. Unknown outcomes block a new submission;
+a generated `[client-operation:…]` tag is appended to the audit reason (not an
+idempotency guarantee). Users may explicitly track a recent promotion matching
+that tag and both hashes, then read its final state. An older same-target
+promotion is not a receipt for this operation.
+An absent record in the latest 20 entries does not prove failure: unresolved
+outcomes require server-side investigation, not resetting the marker or retrying
+from another tab. Credentials, reasons, configuration and captured content are
+not persisted by this store.
+
+[Candidate reports](src/components/rsi/RsiReview.tsx) load the actual Genome Diff
+between the recorded candidate and its immutable parent hash. This is independent
+of the strategy's final output/proposed replacements. File paths and Diff text
+are rendered as text; missing textual hunks and read errors are not treated as
+no change. Neither Diff viewing nor baseline reconciliation is a behavior-quality
+verdict, and neither enables RSI candidate Apply or bypasses its gates.
+
+Regression tests: `npm test -- --runInBand test/components/rsi test/services/rsi`.
+
+## Audited human RSI intervention
+
+Candidate details expose **human authorization → explicit Apply** when the server
+reports the capability. Inspect Diff, enter a reason and confirm authorization;
+this records `basis=human`, preserving the verdict and leaving the Bot untouched.
+A second confirmation applies that exact candidate through Backend. The original
+authorizer must still have ADMIN access. Reject/known safety failures, drift,
+stale parent and platform freeze/kill cannot be overridden.
+The UI keeps one authorization request/key after a lost reply, reads authoritative
+state on refresh and polls delivery without automatically replaying writes.
+Run submissions, risk reviews and manual authorization use the same 128-bit
+`crypto.getRandomValues` request-key generator, including HTTP deployments where
+`randomUUID` is unavailable. Random-source failure is reported as unsent; it
+never falls back to weak randomness. After POST, unknown outcomes still freeze
+the authorization key and body for same-request recovery.
+Pending/applying, applied, applied_partial and apply_failed are distinct; partial
+is not full acceptance. This intervention does not implement sandbox benchmark
+quality evaluation. Record-only risk-review approval remains separate.
+See [ADR 0028](../../docs/adr/0028-human-promotion-authorization-is-not-evaluation.md)
+and `test/components/rsi/RsiManualPromotion.test.tsx`.
+
+
+## RSI submission recovery
+
+Run submission keeps the same idempotency key and binding after an uncertain
+reply, including network failures, 5xx and unclassified 422 responses. Reopening
+or refreshing the panel does not abandon that request. Only HTTP 422 with the
+exact domain code `binding_check_failed` releases the matching pending submission:
+this validation rejection precedes Run creation. The UI shows a safe instruction
+to check registered strategy versions and binding configuration, then allows
+editing again. It does not automatically migrate bindings or change the baseline.
+An existing pending request can be retried with its original key to receive this
+definite rejection; a late response cannot clear a different pending key.
+See [`RsiPanel.test.tsx`](test/components/rsi/RsiPanel.test.tsx) and
+[`errors.test.ts`](test/services/rsi/errors.test.ts).

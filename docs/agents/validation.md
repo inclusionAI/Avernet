@@ -21,6 +21,16 @@ alongside its file, line, and rule, so authors can locate and remove it without
 leaking the complete credential into terminal or CI logs. This check is always
 enabled and is independent of the lint/test mode below.
 
+Python value inspection is bounded to the credential expression: enclosing
+call/mapping delimiters and logical newlines end it, while balanced multiline
+calls are inspected through their nested values. Runtime references, short
+non-secret constants and literal-free type declarations are not credentials;
+unknown syntax retains conservative checks. Known credential formats and private
+key markers are checked before expression recognition. Test directories are not
+exempt: use explicit placeholder values, generate signed test tokens at runtime,
+and assemble detection fixtures rather than embedding credential-shaped data.
+Scanner regression tests live in `devops/hook/test_check_secrets.py`.
+
 By default the pre-push hook runs in **lint-only** mode: for changed Python
 modules it runs the fast `python_sast_local.sh` SAST/lint gate, but skips the
 heavier unit tests, changed-line coverage, and Singlebox E2E. Set

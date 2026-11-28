@@ -41,3 +41,9 @@
   最多的失败模式。
 - **始终要求人工批准。** 不作为默认值：会阻塞低风险的记忆更新；作为所有者
   策略保留可用。
+
+## Amendment (2026-11-26)
+
+[ADR 0028](0028-human-promotion-authorization-is-not-evaluation.md) adds an explicit human testing/intervention authorization
+without changing the verification verdict. Normal automated promotion remains
+evaluation-gated; platform-only delivery and safety/provenance constraints remain.

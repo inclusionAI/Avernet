@@ -1,26 +1,12 @@
 """FastAPI composition root.
 
-Two phases, because importing this module and *initializing a worker* are
-different jobs and only the second has to happen after a ``fork``.
-``AGENTCLAW_HTTP_BOOT_MODE`` decides which an import performs;
-:mod:`agentclaw.community.adapters.http.boot` owns that switch and documents the
-split, its guards and the fork reasoning in full.
-
-Phase 1, always at import: read the deploy profile, run the pre-DI
-registrations, construct ``app``, and register the exception handlers, the
-health endpoint and every router. Nothing here builds an injector, opens a
-connection, reads a secret or starts a thread — that is what makes the result
-safe to ``fork``.
-
-Phase 2, :func:`finalize_worker_runtime`: everything a worker owns. Inline at
-the bottom of this module under ``eager`` (the default); once per worker after
-the fork under ``preload``.
-
-Otherwise unchanged: ``_app_lifespan`` drives every ``Lifecycle`` participant in
-the worker's injector (``bootstrap`` → ``startup`` → yield → ``shutdown`` →
-``teardown``), middleware bodies live in
-:mod:`agentclaw.community.adapters.http.middleware`, startup work lives on the
-components that own it, and ``app.state.injector`` is the single injector handle.
+Two phases because importing this module and *initializing a worker* are
+different jobs: only the second happens after a ``fork``. Phase 1 builds the
+app, exception handlers, health endpoint and every router; no injector,
+connections, secrets or threads here, so import is safe to ``fork``. Phase 2
+(finalize_worker_runtime) owns worker lifecycle; each ``Lifecycle`` participant
+runs through ``bootstrap`` → ``startup`` → yield → ``shutdown`` → ``teardown``.
+Middleware bodies live in ``agentclaw.community.adapters.http.middleware``.
 """
 import asyncio
 from contextlib import asynccontextmanager
@@ -410,7 +396,9 @@ def _is_public_api(request: Request) -> bool:
     return is_public_api(request)
 
 def _uses_envelope_contract(request: Request) -> bool:
-    return _is_public_api(request) or request.url.path.rstrip("/") in (
+    from avernet_evolution.adapters.backend_data import PREFIX
+
+    return _is_public_api(request) or request.url.path.startswith(PREFIX + "/") or request.url.path.rstrip("/") in (
         "/api/v1/work-orders/events",
         "/api/internal/bot-friend-auth/sync",
     )
@@ -985,6 +973,9 @@ app.include_router(enums_router)
 # Public OpenAPI surface, with its own authentication and contract.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
+
+from agentclaw.community.adapters.http.openapi_v1.evolution_data import router as evolution_data_router  # noqa: E402
+app.include_router(evolution_data_router)
 
 
 # =============================================================================

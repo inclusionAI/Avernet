@@ -16,9 +16,11 @@ from .models_authorization import EDIT_LOCK, Authorization, Check
 _GENOME = "/openapi/v1/bots/{bot_id}/genome"
 
 GENOME_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", f"{_GENOME}/drift"): Check(PermissionLevel.MEMBER),
     ("GET", f"{_GENOME}/revisions"): Check(PermissionLevel.MEMBER),
     ("POST", f"{_GENOME}/revisions"): Check(PermissionLevel.ADMIN),
     ("POST", f"{_GENOME}/revisions:capture"): Check(PermissionLevel.ADMIN),
+    ("POST", f"{_GENOME}/baseline:initialize"): Check(PermissionLevel.ADMIN),
     ("GET", f"{_GENOME}/revisions/{{rev:path}}/diff"): Check(PermissionLevel.MEMBER),
     ("GET", f"{_GENOME}/revisions/{{rev:path}}"): Check(PermissionLevel.MEMBER),
     ("PUT", f"{_GENOME}/policy"): Check(PermissionLevel.OWNER),

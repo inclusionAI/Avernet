@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
-
 from agentclaw.community.core.bot_genome.capture import CapturedMcpServer, CapturedPersonaFile
 from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotStateReader
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
+from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 
 #: ``entity_id`` + ``bot_id`` identify the bot; ``owner_id`` is the owner's user id: the reader must not mix them up.
 BOT = BotRef(entity_id="staff_u1", bot_id="bot_1", owner_id="u1", engine_type="openclaw", bot_type="arca")
@@ -31,21 +32,25 @@ class FakeIdentity:
         return self.files[file_type]
 
 
-class FakeStorage:
-    def __init__(self, files):
-        self.files = files
-
-    async def read_package_files(self):
-        return list(self.files)
-
-
 class FakeSkillFactory:
     def __init__(self, packages: dict[str, list[tuple[str, bytes]]]) -> None:
         self.packages, self.calls = packages, []
 
-    def local_skill_package_storage_for_locator(self, **kw):
+    def local_skill_package_storage_for_locator(self, **kw) -> LocalSkillPackageStorage:
         self.calls.append(kw)
-        return "/dev/skills-local/" + kw["skill_name"], FakeStorage(self.packages[kw["locator"]])
+        if kw["locator"] not in self.packages:
+            raise ValueError("locator rejected")
+        directory = "/dev/skills-local/" + kw["skill_name"]
+        files = dict(self.packages[kw["locator"]])
+        filesystem = SimpleNamespace(
+            list_dir=AsyncMock(
+                return_value=[{"relative_path": path} for path in files]
+            ),
+            read_file=AsyncMock(
+                side_effect=lambda path: files.get(path.removeprefix(directory + "/"))
+            ),
+        )
+        return LocalSkillPackageStorage(filesystem, directory)
 
 
 class FakeCapabilities:
@@ -150,7 +155,9 @@ async def test_skills_are_classified_by_locator() -> None:
         SimpleNamespace(name="refund", git_path="center://sc/refund", skill_uuid="uuid-1", sc_version_number="v7"),
         SimpleNamespace(name="weather", git_path="git://team/weather", skill_uuid=None, sc_version_number=None),
     ]
-    factory = FakeSkillFactory({"local://skills-local/tidy": [("SKILL.md", b"---\nname: tidy\n---\n")]})
+    factory = FakeSkillFactory(
+        {"skills-local/tidy": [("SKILL.md", b"---\nname: tidy\n---\n")]}
+    )
     capabilities = FakeCapabilities(assets)
     skills = await _reader(capabilities=capabilities, skill_factory=factory).skills(BOT)
     assert capabilities.asked_for == "u1", "active skills are the owner's rows"
@@ -173,12 +180,40 @@ async def test_skills_are_classified_by_locator() -> None:
         "openclaw",
         "staff",
     )
-    assert (call["is_desktop"], call["is_teclaw"], call["locator"], call["skill_name"]) == (
+    assert (
+        call["is_desktop"],
+        call["is_teclaw"],
+        call["locator"],
+        call["skill_name"],
+    ) == (
         False,
         False,
-        "local://skills-local/tidy",
+        "skills-local/tidy",
         "tidy",
     )
+
+
+@pytest.mark.asyncio
+async def test_local_package_resolution_failure_refuses_capture() -> None:
+    assets = [SimpleNamespace(name="tidy", git_path="local://skills-local/tidy")]
+    with pytest.raises(CaptureRefused) as caught:
+        await _reader(
+            capabilities=FakeCapabilities(assets), skill_factory=FakeSkillFactory({})
+        ).skills(BOT)
+    assert caught.value.reasons[0].code == "skill_package"
+    assert caught.value.reasons[0].location == "skills/tidy"
+
+
+@pytest.mark.asyncio
+async def test_empty_local_package_refuses_capture() -> None:
+    assets = [SimpleNamespace(name="tidy", git_path="local://skills-local/tidy")]
+    with pytest.raises(CaptureRefused) as caught:
+        await _reader(
+            capabilities=FakeCapabilities(assets),
+            skill_factory=FakeSkillFactory({"skills-local/tidy": []}),
+        ).skills(BOT)
+    assert caught.value.reasons[0].code == "skill_package"
+    assert caught.value.reasons[0].location == "skills/tidy"
 
 
 @pytest.mark.asyncio

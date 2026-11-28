@@ -25,6 +25,7 @@ from engine.community.plugin_api.openclaw.plugin import OpenClawPlugin
 from engine.community.plugins.openclaw._approval import _ApprovalPortMixin
 from engine.community.plugins.openclaw._base import OpenClawPortBase
 from engine.community.plugins.openclaw._chat import _ChatPortMixin
+from engine.community.plugins.openclaw._completion import _CompletionPortMixin
 from engine.community.plugins.openclaw._cron import _CronPortMixin
 from engine.community.plugins.openclaw._default_config import _DefaultConfigPortMixin
 from engine.community.plugins.openclaw._file import _FilePortMixin
@@ -44,6 +45,7 @@ class OpenClawPluginImpl(
     _RelayPortMixin,
     _ApprovalPortMixin,
     _ModelsPortMixin,
+    _CompletionPortMixin,
     _NodePortMixin,
     _FilePortMixin,
     _DefaultConfigPortMixin,

@@ -10,6 +10,13 @@ for name in $required_vars; do
   fi
 done
 
+# RSI visibility is opt-in; the existing Gateway/Backend enforces access.
+case "${RSI_ENABLED:-false}" in
+  true|false) ;;
+  *) echo 'RSI_ENABLED must be true or false' >&2; exit 1 ;;
+esac
+# RSI uses TEAMCLAW_GATEWAY_UPSTREAM; there is no browser-to-Evolution route.
+
 escape_js() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -22,6 +29,7 @@ DSH_REGISTRATION_GUIDE_URL_JS=$(escape_js "${DSH_REGISTRATION_GUIDE_URL:-}")
 
 cat > /usr/share/nginx/html/runtime-config.js <<EOF
 window.AVERNET_RUNTIME_CONFIG = {
+  RSI_ENABLED: ${RSI_ENABLED:-false},
   DSH_REGISTRATION_GUIDE_URL: "$DSH_REGISTRATION_GUIDE_URL_JS",
   QWENWORK_PROVIDER_SLUG: "$QWENWORK_PROVIDER_SLUG_JS",
   BCS_ENDPOINT_PRE: "$BCS_ENDPOINT_PRE_JS",

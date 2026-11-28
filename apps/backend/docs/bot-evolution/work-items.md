@@ -236,6 +236,34 @@ the rest.
 - **Done when**: episodes from an OpenClaw bot are queryable by revision;
   ClawEvolve diagnose can read from the store.
 
+### RSI-25 Genome capture and editing for SkillSet members
+- **Status**: TODO (recorded 2026-11-17; not implemented; owner to be confirmed).
+- **Modules**: backend (Genome / Skills / apply), engine (content and activation contract review).
+- **Goal**: capture authorized content of the Bot's enabled SkillSet members into a reproducible
+  Genome baseline and support governed editing through workspace, Patch, candidate and delivery,
+  rather than exposing only Direct Skills.
+- **Read first**: [01](01-genome.md), [03](03-strategy.md),
+  [current runtime integration guide (Chinese)](evolution-run-integration.zh-CN.md),
+  [Skills architecture rules](../../src/agentclaw/community/core/skill_center/AGENTS.md).
+- **Review before implementation**: distinguish Set organization/activation from Local/Repo/Center
+  content ownership; freeze member identity, provenance, version/content digest and membership.
+  Decide copy-on-write versus shared-source publication, with authorization, conflict and lifecycle
+  semantics. Do not silently vendor shared content as Local or overwrite a shared Skill.
+- **Done when**:
+  1. Capture/read resolves enabled members' authorized content and preserves identity/provenance;
+     later Set/source changes cannot silently alter a frozen baseline. Any compatibility change to
+     existing contracts, including Center following the latest version, receives explicit review.
+  2. Workspace → Patch → candidate → delivery has a defined mapping; name conflicts, changed
+     sources and missing permissions fail clearly. Publication/activation is not bypassed, and other
+     Bots or shared sources are not changed accidentally.
+  3. Tests cover Local, Set, mixed installs, duplicate names/references, disabled members, shared-source
+     permissions, concurrent source changes, interrupted persistence/retry and reproducibility.
+     Only this Bot's activated members are exposed, never the complete content store.
+  4. Reserved resource paths such as `skills/` remain rejected; resource upload is not Skill installation.
+     Initial 01–06 capture/edit/candidate tests do not depend on shipping 07–09 evaluation.
+- **Scope**: future work, not a claim that Set members are currently evolvable; shared-source write
+  semantics remain undecided.
+
 ## P3/P4 — Evaluation, governance, default strategy
 
 ### RSI-11 Verification Service (bot verification)

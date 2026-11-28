@@ -146,7 +146,7 @@ async def get_user_identity(
     # AND dept come from the staff directory (the gateway signs only the
     # caller). No self-only 403: this is the opposite-contract user_id, carved
     # out of the explicit-user-id rule (see _DIRECTORY_USER_ID in
-    # test_explicit_user_id.py).
+    # test_explicit_user_id_schema.py).
     info = None
     reader = _staff_dept_reader(request)
     if reader is not None:

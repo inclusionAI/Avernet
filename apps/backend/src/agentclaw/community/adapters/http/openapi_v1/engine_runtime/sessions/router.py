@@ -87,6 +87,7 @@ from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecR
 from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 from .listing import list_sessions, _raise_expert_error
+from .operator_reads import list_operator_messages
 from agentclaw.community.di import Injected
 from agentclaw.community.utils.runtime_list_timing import mark
 router = APIRouter(
@@ -868,24 +869,9 @@ async def list_session_messages(
             mapped, page, reported=friend_result.get("total")
         )
         return page_envelope(total, items, request)
-    result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
-        method="GET",
-        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/messages",
-        # The history route tail-limits rather than paginating, so the offset is
-        # applied here instead of being sent. See ``_history_window``.
-        params=_history_window(page),
+    return await list_operator_messages(
+        request, relay, codecs, bot_id, owner_id, facts, stage, session_id, page, device_uuid,
     )
-    mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
-    # The engine's envelope carries a total field, so it is used when filled —
-    # but both bundled adapters return None for history, so this is normally the
-    # derived value. See ``_history_page``.
-    total, items = _history_page(mapped, page, reported=result.total)
-    return page_envelope(total, items, request)
 
 
 @router.delete("/{session_id}/messages", response_model=Envelope[Deleted])

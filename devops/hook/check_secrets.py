@@ -228,38 +228,57 @@ def _added_lines(diff: str, *, include_context: bool = False) -> list[tuple[str,
 def _python_assignment_expression(
     added: list[tuple[str, int, str]], index: int, assignment: re.Match[str],
 ) -> str:
-    """Reconstruct an expression from consecutive new-side diff lines."""
+    """Read one RHS, stopping at its enclosing delimiter or logical newline.
+
+    Diff lines can begin inside a call or mapping. An unmatched closing
+    delimiter ends that RHS; it must not make tokenization consume later
+    statements while looking for a nonexistent opening delimiter.
+    """
     path, line, content = added[index]
-    previous = content[:assignment.start()].rstrip()
-    if previous.endswith(("(", ",")) and "(" in previous:
-        expression = assignment.group("bare") or ""
-    else:
-        expression = content[assignment.start("bare"):]
-    for next_index in range(index + 1, len(added) + 1):
-        try:
-            ast.parse(expression.strip().rstrip(","), mode="eval")
-        except (SyntaxError, ValueError):
-            # Only incomplete lexical constructs can continue on another line.
-            # Invalid fragments (e.g. a mapping's closing brace) must not pull
-            # unrelated later statements into this assignment's value.
-            try:
-                list(tokenize.generate_tokens(io.StringIO(expression).readline))
-            except tokenize.TokenError:
-                pass
-            except IndentationError:
-                break
-            else:
-                break
-            if next_index == len(added):
-                break
-            next_path, next_line, continuation = added[next_index]
-            if next_path != path or next_line != line + 1:
-                break
-            expression += "\n" + continuation
-            line = next_line
-        else:
+    # A comma ends a keyword/mapping value, but belongs to an unparenthesized
+    # tuple RHS. Recognize a complete assignment without evaluating the source.
+    tuple_rhs = False
+    try:
+        statement = ast.parse(content.strip()).body[0]
+        if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            value = statement.value
+            rhs_offset = len(content[:assignment.start("bare")].lstrip().encode("utf-8"))
+            tuple_rhs = isinstance(value, ast.Tuple) and value.col_offset == rhs_offset
+    except (SyntaxError, ValueError, IndexError):
+        pass
+    lines = [content[assignment.start("bare"):]]
+    for next_path, next_line, continuation in added[index + 1:]:
+        if next_path != path or next_line != line + 1:
             break
-    return expression.strip().rstrip(",")
+        lines.append(continuation)
+        line = next_line
+    source = "\n".join(lines)
+    offsets = [0]
+    for item in lines:
+        offsets.append(offsets[-1] + len(item) + 1)
+    brackets: list[str] = []
+    end = 0
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type in (tokenize.NEWLINE, tokenize.ENDMARKER):
+                break
+            if token.type in (tokenize.COMMENT, tokenize.NL):
+                if not brackets:
+                    break
+                continue
+            if token.type == tokenize.OP:
+                if token.string in ("(", "[", "{"):
+                    brackets.append(token.string)
+                elif token.string in (")", "]", "}"):
+                    if not brackets or brackets[-1] != {")": "(", "]": "[", "}": "{"}[token.string]:
+                        break
+                    brackets.pop()
+                elif not brackets and (token.string == ";" or (token.string == "," and not tuple_rhs)):
+                    break
+            end = offsets[token.end[0] - 1] + token.end[1]
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass  # Incomplete diff fragments retain literal and regex checks.
+    return source[:end].strip()
 
 
 def _python_has_plaintext_literal(expression: str) -> bool:
@@ -361,12 +380,11 @@ def _python_reference_is_safe(
         if isinstance(value, (ast.List, ast.Tuple)):
             return all(safe(item) for item in value.elts)
         if isinstance(value, ast.Constant):
-            return not isinstance(value.value, (str, bytes)) or not (
-                _looks_like_plaintext_value(
-                    value.value.decode("utf-8", errors="replace")
-                    if isinstance(value.value, bytes) else value.value
-                )
+            literal = (
+                value.value.decode("utf-8", errors="replace")
+                if isinstance(value.value, bytes) else str(value.value)
             )
+            return not _looks_like_plaintext_value(literal)
         return False
 
     if node is None:
@@ -405,7 +423,8 @@ def _python_reference_is_safe(
         )
     return isinstance(
         node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr, ast.Tuple),
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr,
+         ast.Tuple, ast.Constant, ast.IfExp),
     ) and safe(node)
 
 
@@ -415,8 +434,10 @@ def _python_reference_is_safe(
 RUST_STRING_RE = re.compile(r'(?:b?r(?P<hashes>\#*)"(?P<raw>.*?)"(?P=hashes)|b?"(?P<escaped>(?:\\.|[^"\\])*)")')
 RUST_TYPE_FIELD_RE = re.compile(
     r"(?:^|[({,])\s*(?:pub(?:\(crate\))?\s+)?\w+\s*:\s*"
-    r"(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)"
-    r"(?:<(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)>)?\s*(?=[,)}]|$)"
+    r"(?:&(?:'[A-Za-z_]\w*\s+)?(?:mut\s+)?str|"
+    r"(?:[A-Za-z_]\w*::)*[A-Z]\w*"
+    r"(?:<&?(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|str)>)?)"
+    r"\s*(?=[,)}]|$)"
 )
 
 
@@ -504,12 +525,7 @@ def _findings(diff: str) -> list[Finding]:
                         )
                         if _python_reference_is_safe(content, assignment, expression):
                             continue
-                        # Keyword-reference parsing may stop at a lexical bare
-                        # token. Never lose same-line argument literals beyond it.
-                        source_expression = content[assignment.start("bare"):]
-                        if (_python_has_plaintext_literal(expression)
-                                or (assignment.group("bare") is not None
-                                    and _python_has_plaintext_literal(source_expression))):
+                        if _python_has_plaintext_literal(expression):
                             findings.append(Finding(path, line, rule, _redact_content(content)))
                             detected = True
                             break

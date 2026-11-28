@@ -35,6 +35,7 @@ common starting points, not an exhaustive ownership list:
 | Conversations and collaboration | [bot chat](bot_chat/README.md), [group chat](group_chat/README.md), [expert chat](expert_chat/README.md), [agentswarm](agentswarm/README.md) |
 | Spaces and shared content | [spaces](spaces/README.md), [resources](resources/README.md), [content store](content_store/README.md), [workspace](workspace/README.md) |
 | Platform state | [config](config/README.md), [system config](system_config/README.md), [events](events/README.md), [repositories](repository/README.md) |
+| Bot evolution (RSI) | Backend owns [Genome / platform promotion](bot_genome/README.md) and [Apply](apply_engine/README.md); strategy, run, ledger, verification and gate/review live in [Evolution](../../../../../evolution/README.md). See the [control flow](../../../../docs/flows/bot-evolution-control.md). |
 
 ## Context Boundary maintenance
 

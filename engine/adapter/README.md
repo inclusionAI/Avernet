@@ -65,6 +65,9 @@ changes. The capability does not provide remote fencing for a timed-out
 request. An Engine exposing only `skills.local_package.apply.v1` supports
 whole-package publication without advertising that concurrency contract.
 
+See the [stateless model completion contract](docs/model-completion-api.md) for
+Bot-owned inference, supported authentication and deployment limits.
+
 ## Layout
 
 ```

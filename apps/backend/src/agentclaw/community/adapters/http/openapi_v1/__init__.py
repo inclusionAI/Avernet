@@ -132,7 +132,7 @@ them without deciding which meaning the address should have.
 Because of those exemptions the dependency is declared **per handler**, not per
 group: two of the four sit inside groups whose other routes do take it (1 of 13
 in ``bots``, 3 of 6 in ``mcp``), so a group-level dependency would put the
-parameter on them. ``test_explicit_user_id.py`` is what makes a new route
+parameter on them. ``test_explicit_user_id_schema.py`` is what makes a new route
 impossible to forget — the same trade ``test_path_convention.py`` makes for the
 addressing rule above.
 
@@ -206,6 +206,7 @@ from .desktop_metadata import router as desktop_metadata_router
 from .diagnostics import router as diagnostics_router
 from .dormant import router as dormant_router
 from .editors import router as editors_router
+from .evolution import router as evolution_router
 from .deprecated import (
     ADDRESSED_GROUPS as _LEGACY_ADDRESSED,
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
@@ -406,6 +407,7 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    evolution_router,
     engine_version_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner

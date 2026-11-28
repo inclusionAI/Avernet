@@ -19,13 +19,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from engine.community.core.adapters.openclaw.default_model import (
+    configured_default_model,
+)
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.models.completion import CompletionRequest, ModelCompletion
 from engine.community.core.models.models import Model, ModelCapabilities, Provider
 from engine.community.core.models.protocol import ModelsService
-from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
 from engine.community.plugin_api.openclaw.default_model import OpenClawDefaultModelPort
-from engine.community.core.adapters.openclaw.default_model import configured_default_model
-from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
 
 log = logging.getLogger("openclaw-models-adapter")
 
@@ -179,6 +182,14 @@ class OpenClawModelsAdapter(ModelsService):
 
     def __init__(self, port: OpenClawModelsPort) -> None:
         self._port = port
+
+    async def complete_model(self, request: CompletionRequest) -> ModelCompletion:
+        from engine.community.plugin_api.openclaw.completion import (
+            OpenClawCompletionPort,
+        )
+        if not isinstance(self._port, OpenClawCompletionPort):
+            raise NotImplementedError("stateless completion is not supported")
+        return await self._port.complete_model(request)
 
     async def get_default_model(self, auth: AuthContext | None = None) -> str | None:
         if not isinstance(self._port, OpenClawDefaultModelPort):

@@ -28,6 +28,7 @@ readme = "README.md"
 # this later, but it stays aligned with what the suite is tested against for now.
 requires-python = ">=3.12,<3.13"
 dependencies = [
+  "avernet-evolution==0.1.0",
   # ── Shared base — MIRRORS corp apps/backend/pyproject.toml [project.dependencies].
   #    Keep in lockstep; the drift guard enforces it. ──
   "aiofiles>=25.1.0",
@@ -130,3 +131,7 @@ dev = [
 default = true
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple"
+
+[tool.uv.sources]
+avernet-evolution = { path = "../evolution", editable = true }
+avernet-genome-contracts = { path = "../../packages/genome-contracts", editable = true }

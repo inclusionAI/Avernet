@@ -1,0 +1,101 @@
+[
+    {
+      "id": "skill-manual",
+      "strategy": "simulator/behavior-refinement@1.0.3",
+      "trigger": {
+        "manual": true
+      },
+      "parent": "active",
+      "allowed_genes": [
+        "skills/meeting-actions-local"
+      ],
+      "mutation_scope": [
+        {
+          "gene": "skills",
+          "origin": "local",
+          "include": [
+            "meeting-actions-local"
+          ],
+          "operations": [
+            "update"
+          ]
+        }
+      ],
+      "verification_profile": "behavior-quality@1",
+      "budget": {
+        "max_usd": 0.5,
+        "max_wall_clock_s": 600
+      },
+      "params": {},
+      "auto_promote_ceiling": null
+    },
+    {
+      "id": "persona-manual",
+      "strategy": "simulator/behavior-refinement@1.0.3",
+      "trigger": {
+        "manual": true
+      },
+      "parent": "active",
+      "allowed_genes": [
+        "persona/SOUL.md"
+      ],
+      "mutation_scope": [
+        {
+          "gene": "persona",
+          "include": [
+            "SOUL.md"
+          ],
+          "operations": [
+            "update"
+          ]
+        }
+      ],
+      "verification_profile": "behavior-quality@1",
+      "budget": {
+        "max_usd": 0.5,
+        "max_wall_clock_s": 600
+      },
+      "params": {},
+      "auto_promote_ceiling": null
+    },
+    {
+      "id": "joint-manual",
+      "strategy": "simulator/behavior-refinement@1.0.3",
+      "trigger": {
+        "manual": true
+      },
+      "parent": "active",
+      "allowed_genes": [
+        "persona/SOUL.md",
+        "skills/meeting-actions-local"
+      ],
+      "mutation_scope": [
+        {
+          "gene": "persona",
+          "include": [
+            "SOUL.md"
+          ],
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "gene": "skills",
+          "origin": "local",
+          "include": [
+            "meeting-actions-local"
+          ],
+          "operations": [
+            "update"
+          ]
+        }
+      ],
+      "verification_profile": "behavior-quality@1",
+      "budget": {
+        "max_usd": 0.5,
+        "max_wall_clock_s": 600
+      },
+      "params": {},
+      "auto_promote_ceiling": null
+    }
+  ]

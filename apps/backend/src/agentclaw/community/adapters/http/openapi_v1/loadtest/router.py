@@ -22,7 +22,7 @@ gathered without it would describe a route nobody can call.
 
 **Not user-scoped, so no ``user_id``.** Neither endpoint reads or writes
 anything belonging to anyone, so there is no scope for the parameter to name
-(``test_explicit_user_id.py`` records both alongside the four catalogue reads
+(``test_explicit_user_id_schema.py`` records both alongside the four catalogue reads
 that are exempt for the same reason). The caller still has to be authenticated;
 it just has no user-shaped answer to receive.
 

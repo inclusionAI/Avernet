@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING, Any
 
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.engine.exceptions import CapabilityNotSupportedError, EngineError
+from engine.community.core.engine.exceptions import (
+    CapabilityNotSupportedError,
+    EngineError,
+)
 from engine.community.core.engine.health import HealthStatus
 
 if TYPE_CHECKING:
@@ -97,6 +100,7 @@ _PLUGIN_CAPABILITY_DOMAINS: tuple[tuple[str, tuple[Capability, ...]], ...] = (
         (
             Capability.MODEL_LIST,
             Capability.MODEL_DEFAULT_GET,
+            Capability.MODEL_COMPLETE,
             Capability.MODEL_SWITCH,
         ),
     ),
@@ -384,6 +388,12 @@ class BaseEngine(ABC):
 
             if not isinstance(self._models, DefaultModelService):
                 problems.append("  - default model capability requires DefaultModelService")
+
+        if Capability.MODEL_COMPLETE in declared:
+            from engine.community.core.models.completion import ModelCompletionService
+
+            if not isinstance(self._models, ModelCompletionService):
+                problems.append("  - model completion capability requires ModelCompletionService")
 
         if problems:
             raise EngineError(

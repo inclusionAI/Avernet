@@ -185,3 +185,98 @@ def test_python_call_can_end_in_unchanged_diff_context() -> None:
     assert _findings(diff.replace("connection_type=connection_type", 'connection_type="' + secret + '"'))
     # Context never becomes a new finding by itself.
     assert _findings(_diff('result = runtime_value') + '\n password="' + secret + '"') == []
+
+
+def _python_diff(source: str) -> str:
+    lines = source.replace("SLOT", "token").splitlines()
+    return "\n".join([
+        "+++ b/example.py",
+        f"@@ -0,0 +1,{len(lines)} @@",
+        *("+" + line for line in lines),
+    ])
+
+
+def test_python_enclosing_delimiters_do_not_consume_later_statements() -> None:
+    expressions = [
+        'result = request(client, SLOT=False)',
+        'params = {"fencing_SLOT": fence}',
+        'result = request(json={"fencing_SLOT": fence})',
+        'binder.bind(Issuer, to=Issuer(secret=b"s"))',
+        'async def files(self, fencing_SLOT: str) -> dict[str, bytes]:',
+        'def __init__(self, SLOT: str):',
+        'request(SLOT=runtime_value, note="unrelated-long-diagnostic-message")',
+    ]
+    for expression in expressions:
+        # This is a later statement, not a literal inside the credential RHS.
+        source = expression + '\n    message = "unrelated-long-diagnostic-message"'
+        assert _findings(_python_diff(source)) == [], expression
+
+
+def test_python_short_constants_and_runtime_conditional_are_not_credentials() -> None:
+    for expression in ['False', 'None', 'b"s"', '"test-token"',
+                       'issuer.issue(worker_id) if valid else "invalid"']:
+        assert _findings(_python_diff('SLOT = ' + expression)) == [], expression
+
+
+def test_python_multiline_runtime_call_ignores_mapping_keys_not_values() -> None:
+    source = '''SLOT = signer.encode(
+    claims | overrides, key,
+    algorithm="HS256", headers=headers,
+)
+params = {"fencing_SLOT": fence}
+'''
+    assert _findings(_python_diff(source)) == []
+
+
+def test_python_nested_literals_still_block_after_bounded_rhs_parsing() -> None:
+    credential = "a-real-looking-" + "secret-value-12345"
+    expressions = [
+        'request(SLOT="VALUE")',
+        'request(SLOT=wrap("VALUE"))',
+        'request(SLOT=wrap(b"VALUE"))',
+        'params = {"SLOT": wrap("VALUE")}',
+        'SLOT = wrap(\n    "VALUE",\n)',
+        'SLOT = wrap(\n    # a continuation comment\n    "VALUE",\n)',
+        'SLOT = wrap(\n    {"field_name": "VALUE"},\n)',
+        'SLOT = str("VALUE")',
+        'SLOT = wrap(claims | {"password": "VALUE"})',
+        'SLOT = os.environ.get("AUTH_SLOT", "VALUE")',
+        'SLOT = wrap("VALUE") if valid else runtime_value',
+        'SLOT = runtime_value if valid else wrap("VALUE")',
+        'def fn(SLOT: str = "VALUE"):',
+        'SLOT = unknown_syntax@("VALUE")',
+        'SLOT = runtime_value, "VALUE"',
+        'other, SLOT = runtime_value, "VALUE"',
+    ]
+    for expression in expressions:
+        findings = _findings(_python_diff(expression.replace("VALUE", credential)))
+        assert findings, expression
+        assert all(credential not in finding.content for finding in findings)
+
+
+def test_python_same_line_sibling_credential_is_still_detected() -> None:
+    credential = "a-real-looking-" + "secret-value-12345"
+    for source in [
+        'request(SLOT=False, password="VALUE")',
+        'data = {"fencing_SLOT": fence, "password": "VALUE"}',
+        'SLOT = runtime_value; password = "VALUE"',
+    ]:
+        findings = _findings(_python_diff(source.replace("VALUE", credential)))
+        assert findings, source
+        assert all(credential not in finding.content for finding in findings)
+
+
+def test_python_known_provider_tokens_and_private_keys_are_always_blocked() -> None:
+    values = ["ghp_" + "a" * 30, "Bearer " + "b" * 30,
+              "-----BEGIN " + "PRIVATE KEY-----"]
+    for value in values:
+        for source in ['message = "VALUE"', 'request(SLOT=False, note="VALUE")',
+                       'SLOT = wrap("VALUE")']:
+            findings = _findings(_python_diff(source.replace("VALUE", value)))
+            assert findings, source
+            assert all(value not in finding.content for finding in findings)
+
+
+def test_python_long_numeric_credentials_are_not_short_constants() -> None:
+    credential = "1234567890" * 3
+    assert _findings(_python_diff("SLOT = " + credential))

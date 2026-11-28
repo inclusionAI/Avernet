@@ -66,6 +66,7 @@ export default defineConfig({
     '/openapi/v1/collaboration/tasks/bbs': proxy(gateway, true),
     '/openapi/v1/collaboration/tasks/bots/*/bbs/**': proxy(gateway, true),
     '/openapi/v1/collaboration/tasks': proxy(gateway, true),
+    // RSI uses the same authenticated Gateway as every other Bot capability.
     '/openapi': proxy(gateway, true),
     // 本地直连 Task Engine 调试：必须位于通用 collaboration Gateway 路由之前。
     '/api/v1/collaboration/tasks': proxy(taskEngine, true),

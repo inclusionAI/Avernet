@@ -3,9 +3,43 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
-from agentclaw.community.core.bot_genome.models import BotRef, Promotion, PromotionPage, Provenance
+from agentclaw.community.core.bot_genome.models import (
+    BotRef,
+    Promotion,
+    PromotionPage,
+    Provenance,
+)
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ManualPromotionAuthorization(BaseModel):
+    """Trusted control-plane authorization, not a verification verdict.
+
+    Backend rechecks exact provenance, active CAS and live drift. Only built-in
+    human ADMIN ingress can supply this capability; strategies cannot obtain it.
+    The immutable JSON is retained on the promotion for settlement and auditing.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    basis: Literal["human"] = "human"
+    candidate_id: str = Field(min_length=1, max_length=200)
+    run_id: str = Field(min_length=1, max_length=64)
+    revision_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    parent_revision_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    strategy: str = Field(min_length=1, max_length=256)
+    user_id: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=1000)
+    authorized_at: str = Field(min_length=1, max_length=64)
+
+    @field_validator("reason")
+    @classmethod
+    def nonblank_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("human authorization requires a reason")
+        return value
 
 
 @runtime_checkable
@@ -29,7 +63,19 @@ class GenomePromotionServiceProtocol(Protocol):
         (automated actors only), ``NotAppliable`` / ``PromotionUnsupported``
         from the seam's preflight (before any ref moves), ``RefConflict``.
         A failed delivery start is recorded as ``apply_failed`` on the
-        promotion with the refs moved.
+        promotion without moving refs.
+        """
+        ...
+
+    @abstractmethod
+    async def promote_manual(self, bot: BotRef, authorization: ManualPromotionAuthorization) -> Promotion:
+        """Apply exactly this human-authorized candidate through the platform seam.
+
+        Idempotent by authorization.id, including response loss and concurrent
+        requests. A previously claimed promotion is returned, never restarted.
+        Explicit authorization does not change a verdict or mark a candidate
+        accepted. Drift, stale parent and provenance mismatches always refuse.
+        Pending after process loss is unknown, not permission to replay delivery.
         """
         ...
 

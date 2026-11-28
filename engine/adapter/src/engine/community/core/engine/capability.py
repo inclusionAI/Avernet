@@ -134,6 +134,7 @@ class Capability(Enum):
     CRON_HISTORY = "cron.history"
 
     # ── Model ──
+    MODEL_COMPLETE = "models.complete"
     MODEL_DEFAULT_GET = "models.default.get"
     MODEL_LIST = "model.list"
     MODEL_SWITCH = "model.switch"

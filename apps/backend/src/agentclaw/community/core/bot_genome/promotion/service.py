@@ -24,7 +24,9 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.genome_registry_protocol import GenomeRegistryProtocol
+from agentclaw.community.core.bot_genome.genome_registry_protocol import (
+    GenomeRegistryProtocol,
+)
 from agentclaw.community.core.bot_genome.models import (
     BotRef,
     Promotion,
@@ -37,6 +39,7 @@ from agentclaw.community.core.bot_genome.models import (
 from agentclaw.community.core.bot_genome.promotion.applier import RevisionApplier
 from agentclaw.community.core.bot_genome.promotion.promotion_service_protocol import (
     GenomePromotionServiceProtocol,
+    ManualPromotionAuthorization,
 )
 from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
 from agentclaw.community.core.repository.protocols.bot.genome import (
@@ -128,6 +131,44 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 created_at=now,
             )
         )
+        return self._start(bot, row, actor=actor, now=now)
+
+    async def promote_manual(self, bot: BotRef, authorization: ManualPromotionAuthorization) -> Promotion:
+        auth = authorization
+        previous = self._promotions.get(**self._axes(bot), promotion_id=auth.id)
+        encoded = auth.model_dump_json()
+        if previous is not None:
+            if previous.authorization != encoded:
+                raise NotPromotable("authorization ID is already bound to another promotion")
+            return _promotion(previous)
+        target = self._registry.get_revision(bot, auth.revision_id).revision
+        if (target.status is not RevisionStatus.CANDIDATE or target.parent != auth.parent_revision_id
+                or target.created_by.kind is not ProvenanceKind.STRATEGY_RUN
+                or target.created_by.run_id != auth.run_id or target.created_by.actor != auth.strategy
+                or target.patch_digest != auth.candidate_id):
+            raise NotPromotable("manual authorization does not match the immutable candidate provenance")
+        state = self._registry.compile(bot, auth.revision_id)
+        drift = await self._registry.drift(bot)
+        if drift is not None:
+            raise Drifted(active=drift.active, observed=drift.observed)
+        self._applier.preflight(bot, state)
+        current = self._refs.get(**self._axes(bot), name="active")
+        if current is None or current.revision_id != auth.parent_revision_id:
+            raise RefConflict("active", expected=auth.parent_revision_id,
+                              current=current.revision_id if current else None)
+        actor = Provenance(ProvenanceKind.USER, auth.user_id)
+        now = _now()
+        row, claimed = self._promotions.insert_once(GenomePromotionRow(
+            **self._axes(bot), promotion_id=auth.id, ref="active", revision_id=auth.revision_id,
+            from_revision_id=auth.parent_revision_id, actor_kind=actor.kind.value,
+            actor_id=actor.audit, reason=auth.reason, authorization=encoded,
+            status=PromotionStatus.PENDING.value, created_at=now,
+        ))
+        if row.authorization != encoded:
+            raise NotPromotable("authorization ID is already bound to another promotion")
+        return self._start(bot, row, actor=actor, now=now) if claimed else _promotion(row)
+
+    def _start(self, bot: BotRef, row: GenomePromotionRow, *, actor: Provenance, now: datetime) -> Promotion:
         # An automated actor's apply runs with the bot owner as its principal; the record names the actor.
         principal = actor.checked_as if actor.kind is ProvenanceKind.USER else bot.owner_id
         try:

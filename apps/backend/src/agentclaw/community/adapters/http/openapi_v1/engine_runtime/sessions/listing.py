@@ -21,6 +21,7 @@ from agentclaw.community.utils.runtime_list_timing import mark
 
 from .backend import resolve_session_backend
 from .schemas import SessionPage
+from .operator_reads import list_operator_sessions
 from .schemas_helpers import _as_list, _map_session, _page, _window
 
 def _raise_expert_error(error: Exception) -> None:
@@ -102,11 +103,6 @@ async def list_sessions(
         mapped = [_map_session(d) for d in _as_list(friend_result)]
         total, items = _page(mapped, page, reported=friend_result.get("total"))
         return page_envelope(total, items, request)
-    result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
-        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
-        method="GET", path="/api/sessions", params=params,
+    return await list_operator_sessions(
+        request, relay, bot_id, owner_id, facts, stage, page, params, device_uuid,
     )
-    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
-    total, items = _page(mapped, page, reported=result.total)
-    return page_envelope(total, items, request)

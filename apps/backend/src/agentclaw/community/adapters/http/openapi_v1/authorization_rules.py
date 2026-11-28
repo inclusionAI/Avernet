@@ -2,6 +2,7 @@
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from .authorization_rules_bot_mcp import BOT_MCP_AUTHORIZATION
+from .authorization_rules_evolution import AUTHORIZATION as EVOLUTION_AUTHORIZATION
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -988,6 +989,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     **RETIRING_AUTHORIZATION,
     **TASK_BBS_AUTHORIZATION,
     **GENOME_AUTHORIZATION,
+    **EVOLUTION_AUTHORIZATION,
 }
 
 # The table asserts its own shape while it imports (Instruction #2551): a

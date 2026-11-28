@@ -49,12 +49,3 @@ class HarnessRollbackRequest(BaseModel):
     patch_id: int = Field(..., description="Patch ID from ac_harness_patch")
     file_type: str | None = Field(default=None, description="Target file type")
     bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
-
-
-from agentclaw.community.adapters.http.harness.schemas import (
-    DiagnoseStartResponse,
-    PreviewResponse,
-    ApplyResponse,
-    DimReportResponse,
-    DimHistoryResponse,
-)

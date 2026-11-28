@@ -116,3 +116,5 @@ openspec
 
 scripts/undercover-game.sh
 scripts/.dependencies
+apps/evolution_prototype
+apps/backend/docs/bot-evolution/ocb.code-workspace

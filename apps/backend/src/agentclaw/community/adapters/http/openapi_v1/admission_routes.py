@@ -1,5 +1,6 @@
 """Public operation admission table; re-exported by admission."""
 
+from .authorization_rules_evolution import ADMISSION as EVOLUTION_ADMISSION
 from .admission_modes import AdmissionMode
 from .admission_account_routes import ACCOUNT_ADMISSION
 from .admission_genome_routes import GENOME_ADMISSION
@@ -990,4 +991,5 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.USER_GATED,
     **ACCOUNT_ADMISSION,
     **GENOME_ADMISSION,
+    **EVOLUTION_ADMISSION,
 }

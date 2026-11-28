@@ -3,7 +3,8 @@
 ``diff_specs(a, b)`` reports every gene that ``b`` (the revision) has
 added, removed or modified against ``a``, with a unified diff for a modified
 UTF-8 text file (persona files, file resources, members of a directory or a
-local skill, memory items, an MCP override, the script). Its tier is the
+local skill, memory items, an MCP override, the script). Added and removed
+local Skill packages also expose member-level text diffs for review. Its tier is the
 tier a patch making the same changes would get (README §6.3): each change
 is judged as the op that makes it, the rewrite measure runs on each modified
 text file, and the policy's overrides lift by overlap. Changes no patch can
@@ -13,11 +14,9 @@ human-only by construction.
 
 from __future__ import annotations
 
-import difflib
 import json
 from typing import Any
 
-from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.bot_genome import contract, gene_paths
 from agentclaw.community.core.bot_genome.canonical import loads_strict
 from agentclaw.community.core.bot_genome.limits import MAX_DIFF_BYTES
@@ -32,46 +31,11 @@ from agentclaw.community.core.bot_genome.patch.risk import (
 )
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, LocalSkill, MemorySpec
 from agentclaw.community.core.bot_genome.text_edits import description_only
+from agentclaw.community.core.content_store import decode_tree_bytes
 
 __all__ = ["diff_specs", "unified_diff"]
 
-_NO_NEWLINE = "\\ No newline at end of file"
-_SENTINEL = "\n"  # a line from _split never contains one, so the suffix is unambiguous
-
-
-def unified_diff(before: str, after: str) -> str:
-    """The hunks of ``before`` → ``after`` as the contract's ``diff`` kind spells them (README §6.2).
-
-    No ``---``/``+++`` header lines; ``\\ No newline at end of file`` where
-    the last line of either side lacks one, so the text applies back
-    through ``text_edits.apply_unified_diff``.
-    """
-    old, old_nl = _split(before)
-    new, new_nl = _split(after)
-    # A missing final newline is part of the last line's identity (README §6.3 "lines"): marking it
-    # makes difflib treat a flip of that state as a changed line instead of an unchanged one, and the
-    # marker comes out as the contract's "\ No newline at end of file" line.
-    old_marked = old[:-1] + [old[-1] + _SENTINEL] if old and not old_nl else list(old)
-    new_marked = new[:-1] + [new[-1] + _SENTINEL] if new and not new_nl else list(new)
-    out: list[str] = []
-    for line in list(difflib.unified_diff(old_marked, new_marked, lineterm="", n=3))[2:]:
-        if line.endswith(_SENTINEL) and not line.startswith("@@"):
-            out.append(line[: -len(_SENTINEL)])
-            out.append(_NO_NEWLINE)
-        else:
-            out.append(line)
-    return "\n".join(out) + "\n" if out else ""
-
-
-def _split(text: str) -> tuple[list[str], bool]:
-    if text == "":
-        return [], True
-    lines = text.split("\n")
-    if lines[-1] == "":
-        lines.pop()
-        return lines, True
-    return lines, False
-
+from avernet_genome.text_diff import unified_diff
 
 # ---------------------------------------------------------------------------------------------
 
@@ -93,7 +57,9 @@ class _Differ:
         return text if len(text.encode("utf-8")) <= MAX_DIFF_BYTES else None
 
     def _json_diff(self, before: Any, after: Any) -> str:
-        dump = lambda value: json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"  # noqa: E731
+        dump = lambda value: (
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        )
         return unified_diff(dump(before), dump(after))
 
     def _file(self, gene: str, before: bytes, after: bytes) -> None:
@@ -146,9 +112,13 @@ class _Differ:
             if name not in old:
                 self.changes.append(GeneChange(gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("skill.add", gene))
+                if isinstance(new[name], LocalSkill):
+                    self._skill_package_members(name, new[name], ChangeKind.ADDED)
             elif name not in new:
                 self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("skill.remove", gene))
+                if isinstance(old[name], LocalSkill):
+                    self._skill_package_members(name, old[name], ChangeKind.REMOVED)
             elif old[name] != new[name]:
                 self.changes.append(GeneChange(gene, ChangeKind.MODIFIED))
                 before, after = old[name], new[name]
@@ -165,6 +135,22 @@ class _Differ:
                 else:
                     self.files[gene] = FileChange(None, None, text=False)  # a change of kind: a replacement
                     self.touched.append(OpTouch("skill.update", gene, (gene,)))
+
+    def _skill_package_members(
+        self, name: str, skill: LocalSkill, kind: ChangeKind
+    ) -> None:
+        members = decode_tree_bytes(self.content.read(skill.digest)) or []
+        for path, content in sorted(members):
+            before, after = (
+                (b"", content) if kind == ChangeKind.ADDED else (content, b"")
+            )
+            self.changes.append(
+                GeneChange(
+                    gene_paths.skill_path(name, path),
+                    kind,
+                    self._text_diff(before, after),
+                )
+            )
 
     def resources(self) -> None:
         old = {gene_paths.resource_path(e.path): e for e in self.a.resources}

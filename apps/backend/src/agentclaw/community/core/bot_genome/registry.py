@@ -15,17 +15,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from agentclaw.community.core.content_store import (
-    DIGEST_RE,
-    ContentScope,
-    ContentStoreError,
-    ContentStoreProtocol,
-    decode_tree_bytes,
-)
-from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
+from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.capture import BotStateReader, capture_spec
 from agentclaw.community.core.bot_genome.compile import compile_spec
@@ -46,9 +39,9 @@ from agentclaw.community.core.bot_genome.limits import MAX_ENTRIES_PER_CATEGORY,
 from agentclaw.community.core.bot_genome.models import (
     FIXED_REFS,
     BotRef,
-    Drift,
     ContentReader,
     ContentReceipt,
+    Drift,
     GenomeDiff,
     GenomeRef,
     GenomeRevision,
@@ -79,6 +72,13 @@ from agentclaw.community.core.bot_genome.repository.models import (
 )
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, ResourceEntry
+from agentclaw.community.core.content_store import (
+    DIGEST_RE,
+    ContentScope,
+    ContentStoreError,
+    ContentStoreProtocol,
+    decode_tree_bytes,
+)
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -88,8 +88,9 @@ from agentclaw.community.core.repository.protocols.bot.genome import (
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from avernet_genome.mutation_scope import mutation_problems
 
-__all__ = ["DEFAULT_POLICY", "GenomeRegistryService", "MOVERS"]
+__all__ = ["DEFAULT_POLICY", "MOVERS", "GenomeRegistryService"]
 
 logger = get_logger()
 
@@ -111,7 +112,7 @@ _SEQ_REF = re.compile(r"^r([1-9][0-9]*)$")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 #: The producer whose provenance rows make a digest the registry's: captured, patch-written or uploaded bytes.
@@ -424,10 +425,22 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             raise RevisionNotFound(patch.base)
         base = self._revision(base_row)
         reasons = evidence_reasons(patch) + policy_reasons(
-            patch.ops, base.policy, allowed_genes=run.allowed_genes if run is not None else None
+            patch.ops,
+            base.policy,
+            allowed_genes=run.allowed_genes if run is not None else None,
+            member_updates=run is not None and run.mutation_scope is not None,
         )
         if reasons:
             raise PatchRejected(reasons)
+        if run is not None and run.mutation_scope is not None:
+            scope_reasons = mutation_problems(patch, run.mutation_scope, base.spec)
+            if scope_reasons:
+                raise PatchRejected(
+                    [
+                        Reason("mutation_scope", "/ops", message)
+                        for message in scope_reasons
+                    ]
+                )
         stored = self._reader(bot)
         outcome = apply_patch(base.spec, patch.ops, stored)
         for category in ("persona", "skills", "resources"):
