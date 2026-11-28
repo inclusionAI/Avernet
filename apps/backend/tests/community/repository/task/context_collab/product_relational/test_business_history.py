@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -61,9 +62,9 @@ def test_create_chain_atomic_physical_ids_and_pure_consistent_reads(online):
             audit.primitive_type
             is audit.parent_event
             is audit.context_version_after
-            is audit.task_ref
             is None
         )
+        assert "__task_subject" not in json.loads(audit.payload)
     statements = []
 
     def capture(_conn, _cursor, statement, *_):

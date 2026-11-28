@@ -138,10 +138,12 @@ class ContextCollabEventModel(Base):
     references an existing event in the same context; acceptance order is the
     auto-increment ``id``. ``actor_ref`` / ``visibility`` / ``payload`` /
     ``context_version_after`` are nullable so out-of-band writers may record
-    partial rows; the P1 append path always writes them. ``gmt_modified``
-    follows the shared axis pattern: the append path writes it equal to
-    ``gmt_create`` and the DDL keeps the ON UPDATE default for any future
-    out-of-band rewrite.
+    partial rows; the P1 append path always writes them. Work subject and
+    revision have no physical columns: they are stored in the reserved
+    ``payload.__task_subject`` envelope by :mod:`event_payload_codec`.
+    ``gmt_modified`` follows the shared axis pattern: the append path writes it
+    equal to ``gmt_create`` and the DDL keeps the ON UPDATE default for any
+    future out-of-band rewrite.
     """
 
     __tablename__ = "ac_context_collab_event"
@@ -156,8 +158,6 @@ class ContextCollabEventModel(Base):
     event_id = Column(String(128), nullable=False)
     collet_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
     collet_stage_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
-    task_ref = Column(String(128), nullable=True)
-    task_version_after = Column(BigInteger, nullable=True)
     parent_event = Column(String(128), nullable=True)
     event_kind = Column(String(128), nullable=False)
     # 可空(spec 作者裁决):允许外部写入的部分行;P1 追加路径仍必写白名单值。

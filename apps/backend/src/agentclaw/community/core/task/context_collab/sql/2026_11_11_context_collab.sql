@@ -32,7 +32,7 @@ CREATE TABLE `ac_context_collab_event` (
   `primitive_type` varchar(64) DEFAULT NULL COMMENT 'L4 primitive (Message/Task/Activity); nullable for partial rows',
   `actor_ref` varchar(2048) DEFAULT NULL COMMENT 'JSON actor reference; nullable for partial rows',
   `visibility` varchar(32) DEFAULT NULL,
-  `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; nullable for partial rows',
+  `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; Work subject/revision uses reserved payload.__task_subject; nullable for partial rows',
   `context_version_after` bigint(20) DEFAULT NULL,
   `occurred_at` timestamp NOT NULL,
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

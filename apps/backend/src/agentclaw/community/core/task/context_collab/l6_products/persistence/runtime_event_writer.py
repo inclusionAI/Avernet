@@ -55,8 +55,6 @@ def append_creation_event(session, axes: dict, collet, rollout, context) -> None
             ),
             primitive_type=None,
             parent_event=None,
-            task_ref=None,
-            task_version_after=None,
             context_version_after=None,
             occurred_at=now,
             gmt_create=now,
