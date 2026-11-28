@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/callback-compensation.test.ts
+  h_bb3ca6fb13c5df 130,185-186,189-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b1c230f47569dc98faa5b5e546d80e5c7ce949ca",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/bcs/docs/observability/request-operation-logging.md
+  s_155a3db811967d::t_7cd6bf7f7367a3 192-198
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  s_155a3db811967d::t_7b7e1a5983c6ff 8,198-224,238-240,249,255,257-259,272,285-286,288,295,604,616-637
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a9065cb86e606ace02a39ee56b57e1a0a424f061",
+  "prompts": {},
+  "sessions": {
+    "s_155a3db811967d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a216a8-a18f-7290-a635-da819381e74a",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
