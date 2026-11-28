@@ -1,11 +1,11 @@
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import { callbackCompensationReason } from '@/domain/taskEscortParity/callbackCompensationErrors';
-import type { CallbackCompensationCapabilities } from '@/domain/taskEscortParity/callbackCompensationTypes';
-import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
-import type { CallbackCompensationState } from '@/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation';
-import { BellRing } from 'lucide-react';
+import { Badge } from './primitives';
+import { Button } from './primitives';
+import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from './primitives';
+import { callbackCompensationReason } from '../../models/callbackCompensationErrors';
+import type { CallbackCompensationCapabilities } from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationContext } from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationState } from '../../hooks/callback-compensation/useCallbackCompensation';
+import { BellRing } from './primitives';
 import { CallbackCompensationBatch } from './CallbackCompensationBatch';
 import { CallbackCompensationConfirm } from './CallbackCompensationConfirm';
 import { CallbackCompensationPreview } from './CallbackCompensationPreview';
@@ -17,7 +17,7 @@ export function CallbackCompensationDialog({
   capabilities,
 }: {
   state: CallbackCompensationState;
-  context: TaskEscortParityContext;
+  context: CallbackCompensationContext;
   capabilities: CallbackCompensationCapabilities;
 }) {
   const stage = state.batch.batchId || state.pending ? 2 : state.preview ? 1 : 0;
@@ -35,7 +35,7 @@ export function CallbackCompensationDialog({
             <Badge tone="primary">{capabilities.environment}</Badge>
           </div>
           <ModalDescription className="break-all leading-6">
-            {context.workflow?.title ?? context.workflowId} · {context.workflowId} ·
+            {context.title ?? context.workflowId} · {context.workflowId} ·
             真实服务端预览与审计，通知补偿不重跑任务
           </ModalDescription>
           <ol className="!mt-5 flex gap-3" aria-label="补偿步骤">

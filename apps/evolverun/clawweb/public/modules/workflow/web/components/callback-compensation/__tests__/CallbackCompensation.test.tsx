@@ -1,11 +1,9 @@
-/** @jest-environment jsdom */
-import type { CallbackCompensationBatch } from '@/domain/taskEscortParity/callbackCompensationTypes';
-import { callbackCompensationStorageKey } from '@/domain/taskEscortParity/callbackCompensation';
-import { useCallbackCompensation } from '@/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation';
-import { CallbackCompensation } from '@/pages/TaskEscort/parity/overview/callbackCompensation/CallbackCompensation';
-import { callbackCompensationService } from '@/services/taskEscortParity/callbackCompensationService';
-import { useExternalAuthStore } from '@/stores/externalAuthStore';
-import '@testing-library/jest-dom';
+import type { CallbackCompensationBatch } from '../../../models/callbackCompensationTypes';
+import { callbackCompensationStorageKey } from '../../../models/callbackCompensation';
+import { useCallbackCompensation } from '../../../hooks/callback-compensation/useCallbackCompensation';
+import { CallbackCompensation } from '../CallbackCompensation';
+import { callbackCompensationService } from '../../../api/callback-compensation';
+import { vi, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import {
   callbackCompensationContext as baseContext,
@@ -13,28 +11,29 @@ import {
   callbackCompensationCapabilities as capabilities,
   callbackCompensationDeferred as deferred,
   callbackCompensationPreview as preview,
-} from './callbackCompensationFixtures';
+} from './fixtures';
 
-jest.mock('@/capabilities', () => ({
-  getCapabilities: () => ({ getRuntimeEnvironment: () => ({ status: 'available', value: 'PRE' }) }),
+const identity = vi.hoisted(() => ({ value: { actorId: 'alice', scopeKey: 'space-a', generation: 1 } as { actorId: string; scopeKey: string; generation: number } | null }));
+vi.mock('../../../hooks/callback-compensation/useCallbackCompensationIdentity', () => ({
+  useCallbackCompensationIdentity: () => identity.value,
 }));
-jest.mock('@/services/taskEscortParity/callbackCompensationService', () => ({
+vi.mock('../../../api/callback-compensation', () => ({
   callbackCompensationService: {
-    capabilities: jest.fn(),
-    preview: jest.fn(),
-    create: jest.fn(),
-    batch: jest.fn(),
-    stop: jest.fn(),
+    capabilities: vi.fn(),
+    preview: vi.fn(),
+    create: vi.fn(),
+    batch: vi.fn(),
+    stop: vi.fn(),
   },
 }));
-const service = callbackCompensationService as jest.Mocked<typeof callbackCompensationService>;
+const service = callbackCompensationService as import('vitest').Mocked<typeof callbackCompensationService>;
 let serial = 0;
 let context = baseContext;
 beforeEach(() => {
-  jest.resetAllMocks();
-  useExternalAuthStore.getState().reset();
+  vi.resetAllMocks();
   sessionStorage.clear();
   context = { ...baseContext, scopeKey: `space-${++serial}` };
+  identity.value = { actorId: context.userId, scopeKey: context.scopeKey, generation: serial };
   service.capabilities.mockResolvedValue(capabilities);
   service.preview.mockResolvedValue(preview);
   service.create.mockResolvedValue(batch);
@@ -46,7 +45,7 @@ beforeEach(() => {
     counts: { skipped: 1 },
   });
 });
-afterEach(() => jest.useRealTimers());
+afterEach(() => vi.useRealTimers());
 async function open() {
   fireEvent.click(await screen.findByRole('button', { name: '成功回调补偿' }));
   return screen.findByRole('dialog', { name: '成功回调补偿' });
@@ -68,21 +67,21 @@ async function confirm() {
 
 it('checks real capabilities before exposing the entry; 403 hides details, 503 is unavailable, no selected workflow makes no request', async () => {
   service.capabilities.mockRejectedValueOnce(Object.assign(new Error('do-not-leak-secret'), { status: 403 }));
-  const view = render(<CallbackCompensation context={context} />);
+  const view = render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await waitFor(() => expect(service.capabilities).toHaveBeenCalledTimes(1));
   expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument();
   expect(screen.queryByText(/do-not-leak-secret/)).not.toBeInTheDocument();
   service.capabilities.mockRejectedValueOnce(Object.assign(new Error('do-not-leak-secret'), { status: 503 }));
-  view.rerender(<CallbackCompensation context={{ ...context, workflowId: 'other' }} />);
+  view.rerender(<CallbackCompensation workflowId="other" />);
   expect(await screen.findByText('补偿服务不可用')).toBeInTheDocument();
   expect(screen.queryByText(/do-not-leak-secret/)).not.toBeInTheDocument();
-  view.rerender(<CallbackCompensation context={{ ...context, workflowId: '', workflow: null }} />);
+  view.rerender(<CallbackCompensation workflowId="" />);
   expect(screen.queryByText('补偿服务不可用')).not.toBeInTheDocument();
   expect(service.capabilities).toHaveBeenCalledTimes(2);
 });
 
 it('defaults to an absolute local 24h range with explicit timezone; displays only sanitized server preview and eligible selection', async () => {
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await scan();
   expect(service.preview).toHaveBeenCalledWith(
     { workflowId: 'wf/a', environment: 'PRE' },
@@ -106,7 +105,7 @@ it('defaults to an absolute local 24h range with explicit timezone; displays onl
 it('clears preview when changing range, validates 100 run IDs and rejects duplicate in-flight previews', async () => {
   const pending = deferred<typeof preview>();
   service.preview.mockReturnValueOnce(pending.promise);
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   fireEvent.click(screen.getByRole('button', { name: '按运行 ID' }));
   fireEvent.change(screen.getByRole('textbox', { name: '运行 IDs（可选）' }), {
@@ -134,7 +133,7 @@ it('allows preview but cannot select or execute while server execution/idempoten
     executionEnabled: false,
     blockedReasons: ['TRUSTED_EVIDENCE_PROVIDER_MISSING'],
   });
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await scan();
   expect(screen.getByText('未配置可信幂等证据提供方')).toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: '选择 run-eligible' })).toBeDisabled();
@@ -143,7 +142,7 @@ it('allows preview but cannot select or execute while server execution/idempoten
 });
 
 it('requires a second explicit confirmation of environment/workflow/receiver/count, valid reason and notice-only acknowledgement', async () => {
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await scan();
   fireEvent.click(screen.getByRole('checkbox', { name: '选择 run-eligible' }));
   fireEvent.click(screen.getByRole('button', { name: '下一步：确认补偿' }));
@@ -177,7 +176,7 @@ it('requires a second explicit confirmation of environment/workflow/receiver/cou
 
 it('preserves unknown create outcome and frozen requestKey/body through close/reopen and retry, without re-previewing', async () => {
   service.create.mockRejectedValueOnce(new TypeError('timeout-sensitive-detail'));
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText(/创建结果尚未确认/);
@@ -196,7 +195,7 @@ it('preserves unknown create outcome and frozen requestKey/body through close/re
 it('reopens/restores only a scoped saved batch after real capability and batch authorization, never posts another create', async () => {
   const key = callbackCompensationStorageKey({ ...context, environment: 'PRE' });
   sessionStorage.setItem(key, 'batch/a');
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   await screen.findByText('batch/a');
   expect(service.batch).toHaveBeenCalledWith(
@@ -217,13 +216,14 @@ it.each(['workflowId', 'userId', 'scopeKey'] as const)(
   async (field) => {
     const late = deferred<typeof preview>();
     service.preview.mockReturnValueOnce(late.promise);
-    const view = render(<CallbackCompensation context={context} />);
+    const view = render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
     await open();
     fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
     const signal = service.preview.mock.calls[0][2]!;
     const changed = { ...context, [field]: 'other' };
+    identity.value = { actorId: changed.userId, scopeKey: changed.scopeKey, generation: serial + 1 };
     service.capabilities.mockResolvedValue({ ...capabilities, workflowId: changed.workflowId });
-    view.rerender(<CallbackCompensation context={changed} />);
+    view.rerender(<CallbackCompensation workflowId={changed.workflowId} />);
     expect(signal.aborted).toBe(true);
     await act(async () => late.resolve(preview));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -233,17 +233,18 @@ it.each(['workflowId', 'userId', 'scopeKey'] as const)(
   },
 );
 
-it('clears current state when authentication generation changes even for the same user', async () => {
-  render(<CallbackCompensation context={context} />);
+it('clears current state when the native identity generation changes even for the same actor', async () => {
+  const view = render(<CallbackCompensation workflowId={context.workflowId} />);
   await scan();
-  act(() => useExternalAuthStore.getState().bumpAuthEpoch());
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  identity.value = { ...identity.value!, generation: serial + 1 };
+  view.rerender(<CallbackCompensation workflowId={context.workflowId} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   await open();
   expect(screen.queryByText('run-eligible')).not.toBeInTheDocument();
 });
 
 it('polls and stops only queued work; received means HTTP receipt, unknown has no resend action', async () => {
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText('batch/a');
@@ -270,7 +271,7 @@ it('polls actual terminal results and exposes audit pending without claiming bus
     counts: { received: 1, unknown: 1 },
   };
   service.batch.mockResolvedValue(completed);
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText('batch/a');
@@ -290,9 +291,9 @@ it('polls after the interval and stops polling a settled batch', async () => {
     counts: { received: 1 },
   };
   service.batch.mockResolvedValue(settled);
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await act(async () => {
     await Promise.resolve();
@@ -300,24 +301,30 @@ it('polls after the interval and stops polling a settled batch', async () => {
   expect(screen.getByText('batch/a')).toBeInTheDocument();
   expect(service.batch).not.toHaveBeenCalled();
   await act(async () => {
-    jest.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(2500);
   });
   expect(service.batch).toHaveBeenCalledTimes(1);
   expect(screen.getByText('HTTP 已接收')).toBeInTheDocument();
   await act(async () => {
-    jest.advanceTimersByTime(15000);
+    vi.advanceTimersByTime(15000);
   });
   expect(service.batch).toHaveBeenCalledTimes(1);
 });
 
 it('expires a preview in confirmation without sending a create', async () => {
   service.preview.mockResolvedValue({ ...preview, expiresAt: new Date(Date.now() + 60000).toISOString() });
-  render(<CallbackCompensation context={context} />);
-  jest.useFakeTimers();
-  await confirm();
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
+  await open();
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
+  await act(async () => { await Promise.resolve(); });
+  fireEvent.click(screen.getByRole('checkbox', { name: '选择 run-eligible' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一步：确认补偿' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '补偿原因' }), { target: { value: '人工核实后只补发通知消息' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /只补发通知/ }));
   expect(screen.getByRole('button', { name: '确认创建补偿批次' })).toBeEnabled();
   await act(async () => {
-    jest.advanceTimersByTime(61000);
+    vi.advanceTimersByTime(61000);
   });
   expect(screen.getByRole('button', { name: '确认创建补偿批次' })).toBeDisabled();
   expect(screen.getByRole('alert')).toHaveTextContent('预览已过期');
@@ -327,7 +334,7 @@ it('expires a preview in confirmation without sending a create', async () => {
 it('rejects a saved batch on 403 without revealing backend details or relying on sessionStorage as authorization', async () => {
   sessionStorage.setItem(callbackCompensationStorageKey({ ...context, environment: 'PRE' }), 'batch/a');
   service.batch.mockRejectedValueOnce(Object.assign(new Error('do-not-leak-batch-secret'), { status: 403 }));
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   await waitFor(() => expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument());
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -340,9 +347,10 @@ it('aborts a late capabilities response and never reveals the old receiver to a 
   service.capabilities
     .mockReturnValueOnce(late.promise)
     .mockRejectedValueOnce(Object.assign(new Error('forbidden'), { status: 403 }));
-  const view = render(<CallbackCompensation context={context} />);
+  const view = render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   const signal = service.capabilities.mock.calls[0][1]!;
-  view.rerender(<CallbackCompensation context={{ ...context, userId: 'other' }} />);
+  identity.value = { actorId: 'other', scopeKey: context.scopeKey, generation: serial + 1 };
+  view.rerender(<CallbackCompensation workflowId={context.workflowId} />);
   expect(signal.aborted).toBe(true);
   await act(async () => late.resolve(capabilities));
   expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument();
@@ -352,20 +360,20 @@ it('aborts a late capabilities response and never reveals the old receiver to a 
 it('ignores a late create after switching workflow; switching back retries the same frozen request without requalification', async () => {
   const late = deferred<typeof batch>();
   service.create.mockReturnValueOnce(late.promise);
-  const view = render(<CallbackCompensation context={context} />);
+  const view = render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   const input = service.create.mock.calls[0][1];
   const signal = service.create.mock.calls[0][2]!;
   service.capabilities.mockResolvedValueOnce({ ...capabilities, workflowId: 'other' });
-  view.rerender(<CallbackCompensation context={{ ...context, workflowId: 'other' }} />);
+  view.rerender(<CallbackCompensation workflowId="other" />);
   expect(signal.aborted).toBe(true);
   await act(async () => late.resolve(batch));
   expect(sessionStorage.length).toBe(0);
   await open();
   expect(screen.queryByText('batch/a')).not.toBeInTheDocument();
   expect(screen.queryByText('run-eligible')).not.toBeInTheDocument();
-  view.rerender(<CallbackCompensation context={context} />);
+  view.rerender(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   expect(screen.getByText('创建结果尚未确认')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '使用同一请求重试' }));
@@ -376,7 +384,7 @@ it('ignores a late create after switching workflow; switching back retries the s
 
 it('does not let a stale poll undo stop or leak a batch after identity switch', async () => {
   const late = deferred<typeof batch>();
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText('batch/a');
@@ -395,7 +403,7 @@ it('scans flow IDs only with no time range, and maps a service code without rend
   service.preview.mockRejectedValueOnce(
     Object.assign(new Error('secret=never'), { data: { code: 'INVALID_FLOW_SELECTION', message: 'secret=never' } }),
   );
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   fireEvent.click(screen.getByRole('button', { name: '按运行 ID' }));
   expect(screen.getByLabelText('开始时间')).toBeDisabled();
@@ -410,11 +418,12 @@ it('scans flow IDs only with no time range, and maps a service code without rend
   expect(screen.queryByText(/绝对范围：/)).not.toBeInTheDocument();
 });
 
-it('clears sensitive dialog state on logout immediately without rechecking capabilities for a signed-out actor', async () => {
-  render(<CallbackCompensation context={context} />);
+it('clears sensitive dialog state when native identity becomes unavailable, without rechecking capabilities', async () => {
+  const view = render(<CallbackCompensation workflowId={context.workflowId} />);
   await scan();
   const requests = service.capabilities.mock.calls.length;
-  act(() => useExternalAuthStore.getState().setUnauthenticated());
+  identity.value = null;
+  view.rerender(<CallbackCompensation workflowId={context.workflowId} />);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument();
   expect(service.capabilities).toHaveBeenCalledTimes(requests);
@@ -423,7 +432,7 @@ it('clears sensitive dialog state on logout immediately without rechecking capab
 it('blocks preview reentrancy before React commits the busy render', async () => {
   const pending = deferred<typeof preview>();
   service.preview.mockReturnValue(pending.promise);
-  const { result } = renderHook(() => useCallbackCompensation(context, capabilities, jest.fn()));
+  const { result } = renderHook(() => useCallbackCompensation(context, capabilities, vi.fn()));
   act(() => {
     result.current.generatePreview();
     result.current.generatePreview();
@@ -445,11 +454,11 @@ it('keeps polling already-sending items after a stop until their actual receipt/
     items: [{ ...batch.items[0], state: 'received' as const, httpStatus: 202 }],
     counts: { received: 1 },
   });
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText('batch/a');
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   fireEvent.click(screen.getByRole('button', { name: '停止未发送项' }));
   await act(async () => {
     await Promise.resolve();
@@ -457,7 +466,7 @@ it('keeps polling already-sending items after a stop until their actual receipt/
   expect(screen.getByText('已停止')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '停止未发送项' })).toBeDisabled();
   await act(async () => {
-    jest.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(2500);
   });
   expect(service.batch).toHaveBeenCalledTimes(1);
   expect(screen.getByText('HTTP 已接收')).toBeInTheDocument();
@@ -473,7 +482,7 @@ it('keeps completed A until an explicit new compensation, then previews and conf
   service.create.mockResolvedValueOnce(completed).mockResolvedValueOnce({ ...batch, batchId: 'batch/b' });
   service.batch.mockResolvedValue(completed);
   const key = callbackCompensationStorageKey({ ...context, environment: 'PRE' });
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await confirm();
   fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
   await screen.findByText('batch/a');
@@ -515,7 +524,7 @@ it('lets a page-refresh restoration of terminal A explicitly begin a new real pr
   const key = callbackCompensationStorageKey({ ...context, environment: 'PRE' });
   sessionStorage.setItem(key, 'batch/a');
   service.batch.mockReturnValueOnce(restored.promise);
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   expect(screen.getByRole('button', { name: '新建补偿' })).toBeDisabled();
   await act(async () => restored.resolve({
@@ -538,7 +547,7 @@ it('lets a page-refresh restoration of terminal A explicitly begin a new real pr
 it('does not reset a batch with queued/sending work or pending audit, or while a refresh is in flight', async () => {
   const key = callbackCompensationStorageKey({ ...context, environment: 'PRE' });
   sessionStorage.setItem(key, 'batch/a');
-  render(<CallbackCompensation context={context} />);
+  render(<CallbackCompensation workflowId={context.workflowId} title={context.title} />);
   await open();
   await waitFor(() => expect(screen.getByRole('button', { name: '刷新批次' })).toBeEnabled());
   expect(screen.getByRole('button', { name: '新建补偿' })).toBeDisabled();
@@ -568,7 +577,7 @@ it('does not reset a batch with queued/sending work or pending audit, or while a
 
 it('refuses a new-compensation reset of an unknown create and keeps its frozen body and key', async () => {
   service.create.mockRejectedValueOnce(new TypeError('timeout'));
-  const { result } = renderHook(() => useCallbackCompensation(context, capabilities, jest.fn()));
+  const { result } = renderHook(() => useCallbackCompensation(context, capabilities, vi.fn()));
   await act(async () => result.current.generatePreview());
   act(() => result.current.select('eligible', true));
   act(() => result.current.confirm());
@@ -589,4 +598,66 @@ it('refuses a new-compensation reset of an unknown create and keeps its frozen b
   expect(service.preview).toHaveBeenCalledTimes(1);
   await act(async () => result.current.execute());
   expect(service.create.mock.calls[1][1]).toEqual(frozen);
+});
+
+it('periodically revokes capabilities and closes sensitive state without leaking an error body', async () => {
+  const view = render(<CallbackCompensation workflowId={context.workflowId} />);
+  await scan();
+  fireEvent.click(screen.getByRole('button', { name: '关闭补偿窗口' }));
+  view.unmount();
+  vi.useFakeTimers();
+  const fresh = render(<CallbackCompensation workflowId={context.workflowId} />);
+  await act(async () => { await Promise.resolve(); });
+  fireEvent.click(screen.getByRole('button', { name: '成功回调补偿' }));
+  service.capabilities.mockRejectedValue(Object.assign(new Error('secret-capability'), { status: 403 }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/secret-capability/)).not.toBeInTheDocument();
+  fresh.unmount();
+});
+
+it('remounts on a capabilities environment change and ignores a late old-environment create', async () => {
+  const late = deferred<typeof batch>();
+  service.create.mockReturnValueOnce(late.promise);
+  render(<CallbackCompensation workflowId={context.workflowId} />);
+  await confirm();
+  fireEvent.click(screen.getByRole('button', { name: '确认创建补偿批次' }));
+  const signal = service.create.mock.calls[0][2]!;
+  // The capability poll is a native server-bound check, not a browser environment flag.
+  service.capabilities.mockResolvedValue({ ...capabilities, environment: 'PROD' });
+  await waitFor(() => expect(signal.aborted).toBe(true), { timeout: 6500 });
+  await act(async () => late.resolve(batch));
+  expect(sessionStorage.length).toBe(0);
+  await open();
+  expect(screen.queryByText('batch/a')).not.toBeInTheDocument();
+  expect(screen.queryByText('创建结果尚未确认')).not.toBeInTheDocument();
+  expect(screen.getByText('选择补偿范围')).toBeInTheDocument();
+});
+
+it('denies revoked preview permission without leaving any prior receiver/payload visible', async () => {
+  service.preview.mockRejectedValueOnce(Object.assign(new Error('secret-revocation'), { status: 403 }));
+  render(<CallbackCompensation workflowId={context.workflowId} />);
+  await open();
+  fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.queryByText(/通知接收者|secret-revocation/)).not.toBeInTheDocument();
+});
+
+it('fences an in-flight capability read when a later mutation revokes permission', async () => {
+  const late = deferred<typeof capabilities>();
+  render(<CallbackCompensation workflowId={context.workflowId} />);
+  await open();
+  service.capabilities.mockReturnValueOnce(late.promise);
+  vi.useFakeTimers();
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  const signal = service.capabilities.mock.calls.at(-1)![1]!;
+  service.preview.mockRejectedValueOnce(Object.assign(new Error('private-revoked-body'), { status: 403 }));
+  fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(signal.aborted).toBe(true);
+  await act(async () => late.resolve(capabilities));
+  expect(screen.queryByRole('button', { name: '成功回调补偿' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText('通知接收者')).not.toBeInTheDocument();
 });

@@ -1,14 +1,17 @@
 # Workflow success callback compensation
 
-Status: implemented API and workbench entry; **delivery is denied by default**.
+Status: implemented API and ClawWeb entry; **delivery is denied by default**.
 This is notification recovery, not workflow recovery. It never invokes an engine,
 retries a workflow, changes a run/node terminal state, or replays business actions.
 It is separate from the normal sender's completion/phase serialization fixes.
 
 ## Operator flow
 
-In Task Escort's workflow-scoped run overview, an independently authenticated
-administrator can open **成功回调补偿** beside Refresh on the Runs tab.
+In ClawWeb's workflow workspace (`/workflows/workspace?workflowId=…`), an
+independently authenticated administrator can open **成功回调补偿** beside Refresh
+on the run overview's Runs tab. The UI belongs to the workflow module under
+`apps/evolverun/clawweb/public/modules/workflow/web`, alongside the native run
+list; it does not depend on or change `apps/frontend-nextgen`.
 Select an explicit workflow-level callback configuration, a completion-time range
 (default last 24 hours, with timezone shown) or up to 100 run IDs. Scan is not
 limited to the current run-list page. A range containing more than 100 runs must

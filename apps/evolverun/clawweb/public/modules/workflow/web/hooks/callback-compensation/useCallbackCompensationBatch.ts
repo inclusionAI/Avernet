@@ -1,16 +1,16 @@
 import {
   callbackCompensationBatchResolved,
   callbackCompensationStorageKey,
-} from '@/domain/taskEscortParity/callbackCompensation';
+} from '../../models/callbackCompensation';
 import {
   callbackCompensationErrorMessage,
   callbackCompensationErrorStatus,
-} from '@/domain/taskEscortParity/callbackCompensationErrors';
+} from '../../models/callbackCompensationErrors';
 import type {
   CallbackCompensationBatch,
   CallbackCompensationScope,
-} from '@/domain/taskEscortParity/callbackCompensationTypes';
-import { callbackCompensationService as service } from '@/services/taskEscortParity/callbackCompensationService';
+} from '../../models/callbackCompensationTypes';
+import { callbackCompensationService as service } from '../../api/callback-compensation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useCallbackCompensationBatch(
@@ -86,7 +86,7 @@ export function useCallbackCompensationBatch(
         if (valid()) accept(value);
       } catch (failure) {
         if (!valid()) return;
-        if (callbackCompensationErrorStatus(failure) === 403) onDenied();
+        if ([401, 403].includes(Number(callbackCompensationErrorStatus(failure)))) onDenied();
         else
           setError(
             callbackCompensationErrorMessage(

@@ -1,6 +1,6 @@
-import { Button } from '@/components/ui/Button';
-import { Textarea } from '@/components/ui/Textarea';
-import type { CallbackCompensationState } from '@/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation';
+import { Button } from './primitives';
+import { Textarea } from './primitives';
+import type { CallbackCompensationState } from '../../hooks/callback-compensation/useCallbackCompensation';
 
 export function CallbackCompensationConfirm({ state }: { state: CallbackCompensationState }) {
   const preview = state.preview!;

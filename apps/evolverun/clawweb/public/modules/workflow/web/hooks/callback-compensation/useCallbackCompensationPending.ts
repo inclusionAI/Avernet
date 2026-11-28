@@ -1,6 +1,6 @@
-import { callbackCompensationStorageKey } from '@/domain/taskEscortParity/callbackCompensation';
-import type { CallbackCompensationCreate } from '@/domain/taskEscortParity/callbackCompensationTypes';
-import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
+import { callbackCompensationStorageKey } from '../../models/callbackCompensation';
+import type { CallbackCompensationCreate } from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationContext } from '../../models/callbackCompensationTypes';
 import { useRef, useState } from 'react';
 
 // In-memory only: keep an ambiguous create frozen across route remounts. Never persist reasons/payloads/keys.
@@ -18,7 +18,7 @@ function requestKey() {
 
 /** The caller's keyed boundary remounts this hook when its actor or scope changes. */
 export function useCallbackCompensationPending(
-  context: Pick<TaskEscortParityContext, 'workflowId' | 'scopeKey' | 'userId'>,
+  context: Pick<CallbackCompensationContext, 'workflowId' | 'scopeKey' | 'userId'>,
   environment: string,
 ) {
   const key = callbackCompensationStorageKey({

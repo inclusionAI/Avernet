@@ -1,8 +1,8 @@
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { callbackCompensationReason } from '@/domain/taskEscortParity/callbackCompensationErrors';
-import type { CallbackCompensationEligibility } from '@/domain/taskEscortParity/callbackCompensationTypes';
-import type { CallbackCompensationState } from '@/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation';
+import { Badge } from './primitives';
+import { Button } from './primitives';
+import { callbackCompensationReason } from '../../models/callbackCompensationErrors';
+import type { CallbackCompensationEligibility } from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationState } from '../../hooks/callback-compensation/useCallbackCompensation';
 import { useState } from 'react';
 import { CallbackCompensationTime } from './CallbackCompensationScope';
 

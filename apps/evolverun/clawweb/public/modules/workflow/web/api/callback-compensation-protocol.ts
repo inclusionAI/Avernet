@@ -6,7 +6,7 @@ import type {
   CallbackCompensationPreview,
   CallbackCompensationReceiver,
   CallbackCompensationScope,
-} from '@/domain/taskEscortParity/callbackCompensationTypes';
+} from '../models/callbackCompensationTypes';
 
 function invalid(): never {
   throw new Error('补偿服务响应与当前工作流契约不一致');

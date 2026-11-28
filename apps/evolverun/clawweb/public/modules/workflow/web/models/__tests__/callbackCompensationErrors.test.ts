@@ -1,7 +1,8 @@
+import { expect, it } from 'vitest';
 import {
   callbackCompensationErrorMessage,
   callbackCompensationReason,
-} from '@/domain/taskEscortParity/callbackCompensationErrors';
+} from '../callbackCompensationErrors';
 
 it('maps only allowlisted service codes to safe Chinese, never exception messages or response bodies', () => {
   expect(

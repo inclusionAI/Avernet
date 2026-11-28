@@ -10,7 +10,6 @@ import { OverviewRuns } from './OverviewRuns';
 import { Button, Empty, OverviewTabs } from './OverviewShared';
 import { OverviewTrends } from './OverviewTrends';
 import { RunDetail } from './RunDetail';
-import { CallbackCompensation } from './callbackCompensation/CallbackCompensation';
 import './overview.css';
 
 function OverviewContent({ context }: { context: TaskEscortParityContext }) {
@@ -125,17 +124,14 @@ function OverviewContent({ context }: { context: TaskEscortParityContext }) {
                 ]}
                 onChange={setTab}
               />
-              <div className="flex flex-wrap items-center gap-2">
-                <CallbackCompensation context={context} visible={tab === 'runs'} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={state.runs.loading || state.metrics.loading}
-                  onClick={state.refresh}
-                >
-                  刷新
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={state.runs.loading || state.metrics.loading}
+                onClick={state.refresh}
+              >
+                刷新
+              </Button>
             </div>
             {tab === 'runs' ? (
               <OverviewRuns

@@ -57,3 +57,11 @@ export interface CallbackCompensationBatch extends CallbackCompensationScope {
   items: CallbackCompensationBatchItem[];
   counts: Record<string, number>;
 }
+
+/** Native workspace identity partitions UI state only; server capabilities authorize every operation. */
+export interface CallbackCompensationContext {
+  workflowId: string;
+  userId: string;
+  scopeKey: string;
+  title?: string;
+}

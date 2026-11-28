@@ -1,10 +1,10 @@
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
-import type { CallbackCompensationCapabilities } from '@/domain/taskEscortParity/callbackCompensationTypes';
-import type { CallbackCompensationState } from '@/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation';
-import { BellRing, ShieldCheck } from 'lucide-react';
+import { Badge } from './primitives';
+import { Button } from './primitives';
+import { Input } from './primitives';
+import { Textarea } from './primitives';
+import type { CallbackCompensationCapabilities } from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationState } from '../../hooks/callback-compensation/useCallbackCompensation';
+import { BellRing, ShieldCheck } from './primitives';
 
 export function CallbackCompensationTime({ from, to }: { from: string; to: string }) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;

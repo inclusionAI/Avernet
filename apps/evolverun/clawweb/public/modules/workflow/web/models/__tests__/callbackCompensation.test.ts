@@ -1,14 +1,16 @@
+import { expect, it } from 'vitest';
 import {
   callbackCompensationBatchResolved,
   callbackCompensationCanExecute,
+  callbackCompensationDefaultRange,
   callbackCompensationRange,
   callbackCompensationStorageKey,
-} from '@/domain/taskEscortParity/callbackCompensation';
+} from '../callbackCompensation';
 import {
   callbackCompensationBatch as batch,
   callbackCompensationCapabilities as capabilities,
   callbackCompensationPreview as preview,
-} from './callbackCompensationFixtures';
+} from '../../components/callback-compensation/__tests__/fixtures';
 
 it('validates absolute date ranges and at most 100 unique run IDs', () => {
   expect(callbackCompensationRange('cfg', '2026-11-27T08:00', '2026-11-28T08:00', 'a, b\na')).toEqual(
@@ -99,4 +101,14 @@ it('permits a new compensation only when a verified terminal batch has no work o
   expect(
     callbackCompensationBatchResolved({ ...resolved, items: [{ ...resolved.items[0], auditPending: true }] }),
   ).toBe(false);
+});
+
+it('defaults to the previous 24 hours at minute precision with local absolute date inputs', () => {
+  const now = Date.parse('2026-11-28T08:10:59.456Z');
+  const range = callbackCompensationDefaultRange(now);
+  expect(new Date(range.to).getTime()).toBe(Date.parse('2026-11-28T08:10:00Z'));
+  expect(new Date(range.to).getTime() - new Date(range.from).getTime()).toBe(86_400_000);
+  expect(callbackCompensationRange('cfg', range.from, range.to, '')).toEqual({
+    configId: 'cfg', from: '2026-11-27T08:10:00.000Z', to: '2026-11-28T08:10:00.000Z',
+  });
 });

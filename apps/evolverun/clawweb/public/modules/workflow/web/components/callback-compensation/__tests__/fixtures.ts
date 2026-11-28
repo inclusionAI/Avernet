@@ -1,14 +1,10 @@
-import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
+import type { CallbackCompensationContext } from '../../../models/callbackCompensationTypes';
 
-export const callbackCompensationContext: TaskEscortParityContext = {
+export const callbackCompensationContext: CallbackCompensationContext = {
   scopeKey: 'space-a:alice',
   userId: 'alice',
   workflowId: 'wf/a',
-  ready: true,
-  workflow: { id: 'wf/a', title: '真实工作流', runCount: 1, lastStatus: 'succeeded', ownerId: null },
-  query: {},
-  navigate: jest.fn(),
-  refreshWorkflows: jest.fn(),
+  title: '真实工作流',
 };
 export const callbackCompensationCapabilities = {
   workflowId: 'wf/a',

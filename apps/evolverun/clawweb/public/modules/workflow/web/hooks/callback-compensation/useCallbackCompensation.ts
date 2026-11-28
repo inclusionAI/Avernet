@@ -3,24 +3,24 @@ import {
   callbackCompensationDefaultRange,
   callbackCompensationExecutionReady,
   callbackCompensationRange,
-} from '@/domain/taskEscortParity/callbackCompensation';
+} from '../../models/callbackCompensation';
 import {
   callbackCompensationErrorMessage,
   callbackCompensationErrorStatus,
-} from '@/domain/taskEscortParity/callbackCompensationErrors';
+} from '../../models/callbackCompensationErrors';
 import type {
   CallbackCompensationCapabilities,
   CallbackCompensationPreview,
   CallbackCompensationRange,
-} from '@/domain/taskEscortParity/callbackCompensationTypes';
-import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
-import { callbackCompensationService as service } from '@/services/taskEscortParity/callbackCompensationService';
+} from '../../models/callbackCompensationTypes';
+import type { CallbackCompensationContext } from '../../models/callbackCompensationTypes';
+import { callbackCompensationService as service } from '../../api/callback-compensation';
 import { useEffect, useRef, useState } from 'react';
 import { useCallbackCompensationBatch } from './useCallbackCompensationBatch';
 import { useCallbackCompensationPending } from './useCallbackCompensationPending';
 
 export function useCallbackCompensation(
-  context: TaskEscortParityContext,
+  context: CallbackCompensationContext,
   capabilities: CallbackCompensationCapabilities,
   onDenied: () => void,
 ) {
@@ -129,7 +129,7 @@ export function useCallbackCompensation(
       setNow(Date.now());
     } catch (failure) {
       if (!alive.current || request.signal.aborted) return;
-      if (callbackCompensationErrorStatus(failure) === 403) onDenied();
+      if ([401, 403].includes(Number(callbackCompensationErrorStatus(failure)))) onDenied();
       else setError(callbackCompensationErrorMessage(failure, '预览暂时不可用，请稍后重试；不会使用模拟数据。'));
     } finally {
       if (alive.current && !request.signal.aborted) {
@@ -177,7 +177,7 @@ export function useCallbackCompensation(
       resolvePending();
     } catch (failure) {
       if (!alive.current || request.signal.aborted) return;
-      if (callbackCompensationErrorStatus(failure) === 403) onDenied();
+      if ([401, 403].includes(Number(callbackCompensationErrorStatus(failure)))) onDenied();
       else
         setError(
           `创建结果尚未确认。${callbackCompensationErrorMessage(

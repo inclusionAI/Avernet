@@ -2,29 +2,49 @@ import type {
   CallbackCompensationCreate,
   CallbackCompensationRange,
   CallbackCompensationScope,
-} from '@/domain/taskEscortParity/callbackCompensationTypes';
-import { backendRequest } from '@/services/backendApi/httpClient';
+} from '../models/callbackCompensationTypes';
+import { fetchJson } from '@avernet/clawweb-shared/web/api/client';
 import {
   parseCallbackCompensationBatch,
   parseCallbackCompensationCapabilities,
   parseCallbackCompensationPreview,
-} from './callbackCompensationProtocol';
+} from './callback-compensation-protocol';
 
 const path = (workflowId: string) =>
-  `/openapi/v1/harnessflow/api/workflows/${encodeURIComponent(workflowId)}/callback-compensations`;
-function request(workflowId: string, suffix: string, method: 'GET' | 'POST', data: unknown, signal?: AbortSignal) {
-  return backendRequest<unknown>(`${path(workflowId)}${suffix}`, {
-    method,
-    signal,
-    injectUserId: false,
-    retryOnTransient: false,
-    suppressErrorNotification: true,
-    ...(method === 'POST'
-      ? { data, headers: { 'Content-Type': 'application/json', 'X-Callback-Compensation-CSRF': '1' } }
-      : {}),
-  });
+  `/api/workflows/${encodeURIComponent(workflowId)}/callback-compensations`;
+/** Native transport: cookies and shared auth headers follow fetchJson; display headers never grant access.
+ * No retry, especially after an ambiguous POST. Strip raw gateway/error bodies before they reach UI state. */
+async function request(workflowId: string, suffix: string, method: 'GET' | 'POST', data: unknown, signal?: AbortSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    return await fetchJson<unknown>(`${path(workflowId)}${suffix}`, {
+      method, signal: controller.signal, credentials: 'include',
+      ...(method === 'POST' ? {
+        body: JSON.stringify(data),
+        headers: { 'Content-Type': 'application/json', 'X-Callback-Compensation-CSRF': '1' },
+      } : {}),
+    });
+  } catch (failure) {
+    const source = failure as { status?: unknown; body?: unknown } | null;
+    let code: string | undefined;
+    try {
+      const body = typeof source?.body === 'string' ? JSON.parse(source.body) : null;
+      if (typeof body?.code === 'string' && /^[A-Z_]{3,64}$/.test(body.code)) code = body.code;
+    } catch { /* Non-JSON gateway responses are intentionally not exposed. */ }
+    throw Object.assign(new Error('补偿请求未完成'), {
+      ...(typeof source?.status === 'number' ? { status: source.status } : {}),
+      data: code ? { code } : {},
+    });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
 }
-/** Session cookies/auth gates remain in backendRequest; a user_id is not authorization. */
+/** Authorization is exclusively enforced by the native callback-compensation adapter. */
 export const callbackCompensationService = {
   async capabilities(workflowId: string, signal?: AbortSignal) {
     return parseCallbackCompensationCapabilities(
