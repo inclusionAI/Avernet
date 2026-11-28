@@ -129,15 +129,16 @@ describe("route console format strings treat request-derived values as data", ()
 
   it("retains bounded, redacted observer diagnostics for fail-if-running", async () => {
     const flowId = `${id}?sig=fixture-signature`;
-    const error = originalFailure(`${message} token=fixture-token`);
+    const error = originalFailure(`${message} token=test-token`);
+    const expectedRedactedMessage = `${message} token=[REDACTED]`;
     const onTerminal = vi.fn().mockRejectedValue(error);
     const base = await listen(createInternalRunsRouter({ markFailedIfRunning: async () => true } as never, null, undefined, { onTerminal }));
     const response = await send(`${base}/${encodeURIComponent(flowId)}/fail-if-running`, "PUT", { reason: "fixture" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, data: { claimed: true } });
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalledExactlyOnceWith(
-      "[internal-runs] terminal observer failed for %s: %s", `${id}?sig=[REDACTED]`, `${message} token=[REDACTED]`,
-      `Error: ${message} token=[REDACTED]\r\n    at originalFailure (%s-%d-%j-%%.ts:7:3)\r\n`,
+      "[internal-runs] terminal observer failed for %s: %s", `${id}?sig=[REDACTED]`, expectedRedactedMessage,
+      `Error: ${expectedRedactedMessage}\r\n    at originalFailure (%s-%d-%j-%%.ts:7:3)\r\n`,
     ));
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId, status: "failed" });
   });
