@@ -310,3 +310,17 @@ def test_resolver_builds_teclaw_fs_over_the_cloud_baas_transport():
     assert transport._baas_service is baas
     # A fresh transport (and so a fresh http_info cache) per dispatch.
     assert resolver(ctx, _map)._transport is not transport
+# ── delete_file 404 stays a warning, not error/absence swallow ────────
+
+@pytest.mark.asyncio
+async def test_delete_file_404_returns_false_with_warning_log(caplog):
+    """A Teclaw `delete_file` 404 still stays a no-op (``False``), but is
+    recorded as a warning instead of a CDO-visible ``ERROR``."""
+    fs, baas = _fs()
+    baas.invoke_http.return_value = _FakeResponse(status_code=404)
+
+    assert await fs.delete_file(_DEVICE_PATH) is False
+    assert any(
+        "delete_file" in record.message and record.levelname == "WARNING"
+        for record in caplog.records
+    ), [record.levelname for record in caplog.records]
