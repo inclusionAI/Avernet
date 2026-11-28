@@ -3249,6 +3249,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 continue
 
             image_config_ready = False
+            previous_status = getattr(
+                device_record, "status", DeviceStatus.ACTIVE.value
+            )
             try:
                 logger.info(
                     f"Setting device {device_record.id} (uuid={device_record.device_uuid}, "
@@ -3260,6 +3263,76 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     env=env,
                     status=DeviceStatus.UPDATING.value,
                 )
+
+                drain_error: Exception | None = None
+                try:
+                    drain_result = await self._drain_device(
+                        tenant=tenant,
+                        device_id=device_record.id,
+                        timeout_seconds=drain_timeout,
+                    )
+                except Exception as exc:  # noqa: BLE001 - surfaced as a failed attempt below
+                    drain_error = exc
+                    drain_result = None
+
+                if drain_error is not None or not drain_result.success:
+                    # Do not destroy a device that still has live sessions. The
+                    # update would kill those sessions and strand their queued
+                    # work; fail this device attempt and restore its previous
+                    # status so the running sessions can finish. A later publish
+                    # attempt can retry once the device is idle.
+                    if drain_error is not None:
+                        logger.error(
+                            f"Device {device_record.id} drain check failed; "
+                            "leaving the device available and failing the publish attempt",
+                            exc_info=drain_error,
+                        )
+                        failure_reason = "Update deferred: drain state unavailable"
+                    elif drain_result.timeout_reached:
+                        logger.warning(
+                            f"Device {device_record.id} drain timed out with "
+                            f"{drain_result.sessions_remaining} active sessions; "
+                            "leaving the device available and failing the publish attempt"
+                        )
+                        failure_reason = (
+                            "Update deferred: "
+                            f"{drain_result.sessions_remaining} active sessions "
+                            f"remained after {drain_timeout}s drain timeout"
+                        )
+                    else:
+                        logger.warning(
+                            f"Device {device_record.id} drain state unavailable; "
+                            "leaving the device available and failing the publish attempt"
+                        )
+                        failure_reason = "Update deferred: drain state unavailable"
+                    try:
+                        device_repo.update_status_by_device_uuid(
+                            device_uuid=device_record.device_uuid,
+                            tenant=tenant,
+                            env=env,
+                            status=previous_status,
+                        )
+                    except Exception:  # noqa: BLE001 - do not turn a deferred update into a retry/destroy
+                        logger.exception(
+                            "Failed to restore device %s status after deferred update",
+                            device_record.id,
+                        )
+                    try:
+                        record_repo.update_result(
+                            record_id=record.id,
+                            tenant=tenant,
+                            env=env,
+                            result_status=PublishRecordResult.FAILED.value,
+                            result_message=failure_reason,
+                            modifier=operator,
+                        )
+                    except Exception:  # noqa: BLE001 - the batch still fails closed below
+                        logger.exception(
+                            "Failed to mark record %s FAILED after deferred update",
+                            record.id,
+                        )
+                    failed += 1
+                    continue
 
                 new_device_extra_config = DeviceConfig(
                     template_uuid=target_bot_record.template_uuid
@@ -3293,18 +3366,6 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 logger.info(
                     f"Device {device_record.id} config updated to new BotConfig"
                 )
-
-                drain_result = await self._drain_device(
-                    tenant=tenant,
-                    device_id=device_record.id,
-                    timeout_seconds=drain_timeout,
-                )
-
-                if not drain_result.success:
-                    logger.warning(
-                        f"Device {device_record.id} drain timed out with "
-                        f"{drain_result.sessions_remaining} sessions remaining"
-                    )
 
                 logger.info(f"Updating device {device_record.device_uuid} in-place")
                 update_result = await self._device_service.update_device(
@@ -4231,10 +4292,24 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
 
         while True:
-            # Check for active sessions on this device
+            # Check for active sessions on this device. An unavailable
+            # observation is not evidence that the device is idle: fail closed
+            # so an update cannot destroy work whose liveness we cannot prove.
             active_sessions = await self._get_active_sessions(
                 tenant=tenant, device_id=device_id
             )
+            if active_sessions is None:
+                duration = (datetime.now() - start_time).total_seconds()
+                logger.warning(
+                    "Device %s session state unavailable; refusing to drain",
+                    device_id,
+                )
+                return DrainResult(
+                    success=False,
+                    sessions_remaining=0,
+                    duration_seconds=duration,
+                    timeout_reached=False,
+                )
 
             if active_sessions == 0:
                 duration = (datetime.now() - start_time).total_seconds()
@@ -4266,11 +4341,13 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             check_count += 1
             await asyncio.sleep(check_interval)
 
-    async def _get_active_sessions(self, tenant: str, device_id: int) -> int:
+    async def _get_active_sessions(self, tenant: str, device_id: int) -> int | None:
         """Get count of active sessions (PENDING, RUNNING) on a device.
 
         Queries the bot session repository for sessions in PENDING or RUNNING
-        status associated with the given device.
+        status associated with the given device. Returns ``None`` when the
+        device or session store cannot be read; callers must treat that as
+        unknown and fail closed rather than assuming the device is idle.
 
         Args:
             tenant: Tenant name for multi-tenant isolation
@@ -4289,10 +4366,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
             if device is None:
                 logger.warning(
-                    f"[get_active_sessions] Device {device_id} not found, "
-                    "assuming no active sessions"
+                    f"[get_active_sessions] Device {device_id} not found; "
+                    "session state is unknown"
                 )
-                return 0
+                return None
 
             # Count active sessions by device_uuid
             session_repo = self._session_repo
@@ -4304,15 +4381,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 f"[get_active_sessions] device_id={device_id}, "
                 f"device_uuid={device.device_uuid}, active_sessions={count}"
             )
-            return count
+            return int(count)
 
         except Exception as e:
             logger.warning(
                 f"[get_active_sessions] Error querying sessions for device {device_id}: {e}"
             )
-            # Graceful degradation: return 0 to allow drain to proceed
-            # This matches the original placeholder behavior on error
-            return 0
+            # Do not let an unreadable session store authorize a destructive
+            # update. The caller turns this into a failed drain.
+            return None
 
     async def handle_device_callback(
         self,

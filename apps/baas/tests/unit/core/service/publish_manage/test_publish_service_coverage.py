@@ -2311,6 +2311,122 @@ class TestExecuteUpdateBatch:
                 assert result.processed_count == 1
 
     @pytest.mark.asyncio
+    async def test_update_batch_drain_timeout_keeps_device_available(self):
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        svc = _make_service()
+        pub = _make_publish_record(extra_config={"target_bot_id": 2})
+        bot = _make_bot_record()
+        target_bot = _make_bot_record(id=2, extra_config={})
+        svc._bot_repo.get_by_id.return_value = target_bot
+
+        batch = _make_batch_record()
+        device = _make_device(id=10, status=DeviceStatus.ACTIVE.value)
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+
+        drain_result = DrainResult(
+            success=False,
+            sessions_remaining=2,
+            duration_seconds=30.0,
+            timeout_reached=True,
+        )
+        with patch.object(
+            svc, "_drain_device", new_callable=AsyncMock, return_value=drain_result
+        ):
+            svc._device_service.update_device = AsyncMock()
+            with patch(
+                "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+                return_value="test",
+            ):
+                result = await svc._execute_update_batch(
+                    "t",
+                    1,
+                    batch,
+                    30,
+                    "op",
+                    publish_record=pub,
+                    bot_record=bot,
+                )
+
+        assert result.success is False
+        assert result.failed_count == 1
+        svc._device_service.update_device.assert_not_awaited()
+        svc._device_repo.update_device.assert_not_called()
+        statuses = [
+            call.kwargs["status"]
+            for call in svc._device_repo.update_status_by_device_uuid.call_args_list
+        ]
+        assert statuses == [
+            DeviceStatus.UPDATING.value,
+            DeviceStatus.ACTIVE.value,
+        ]
+        svc._publish_record_repo.update_result.assert_called_once()
+        failed_call = svc._publish_record_repo.update_result.call_args.kwargs
+        assert failed_call["result_status"] == "FAILED"
+        assert "2 active sessions" in failed_call["result_message"]
+
+    @pytest.mark.asyncio
+    async def test_update_batch_drain_exception_keeps_device_available(self):
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        pub = _make_publish_record(extra_config={"target_bot_id": 2})
+        bot = _make_bot_record()
+        target_bot = _make_bot_record(id=2, extra_config={})
+        svc._bot_repo.get_by_id.return_value = target_bot
+
+        batch = _make_batch_record()
+        device = _make_device(id=10, status=DeviceStatus.ACTIVE.value)
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+
+        with patch.object(
+            svc,
+            "_drain_device",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("session store unavailable"),
+        ):
+            svc._device_service.update_device = AsyncMock()
+            with patch(
+                "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+                return_value="test",
+            ):
+                result = await svc._execute_update_batch(
+                    "t",
+                    1,
+                    batch,
+                    30,
+                    "op",
+                    publish_record=pub,
+                    bot_record=bot,
+                )
+
+        assert result.success is False
+        assert result.failed_count == 1
+        svc._device_service.update_device.assert_not_awaited()
+        svc._device_repo.update_device.assert_not_called()
+        svc._drive_record_attempt.assert_not_awaited()
+        statuses = [
+            call.kwargs["status"]
+            for call in svc._device_repo.update_status_by_device_uuid.call_args_list
+        ]
+        assert statuses == [
+            DeviceStatus.UPDATING.value,
+            DeviceStatus.ACTIVE.value,
+        ]
+        failed_call = svc._publish_record_repo.update_result.call_args.kwargs
+        assert failed_call["result_status"] == "FAILED"
+        assert "drain state unavailable" in failed_call["result_message"]
+
+    @pytest.mark.asyncio
     async def test_update_device_failed_status(self):
         from secbaas.community.api.device_manage import DeviceStatus
 
@@ -5287,7 +5403,11 @@ class TestBatchRetryPaths:
         record.device_id = 10
         svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
         svc._device_repo.get_by_ids.return_value = {10: device}
-        svc._drain_device = AsyncMock(return_value=None)
+        svc._drain_device = AsyncMock(
+            return_value=DrainResult(
+                success=True, sessions_remaining=0, duration_seconds=0.0
+            )
+        )
         svc._device_service.update_device = AsyncMock(
             side_effect=RuntimeError("update kaboom")
         )
