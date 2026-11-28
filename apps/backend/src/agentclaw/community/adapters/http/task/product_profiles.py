@@ -1,9 +1,9 @@
-"""Thin authenticated HTTP delivery of the five-method product Service API."""
+"""Thin authenticated HTTP delivery of the six-method product Service API."""
 
 from dataclasses import asdict
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 from fastapi import APIRouter, Depends, Request, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
@@ -22,8 +22,12 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
+    ProductProfileStatus,
+)
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     encode_profile,
+    encode_profile_response,
 )
 from agentclaw.community.adapters.http.task.product_body_limits import (
     ProductBodyLimitRoute,
@@ -66,13 +70,46 @@ class ProfileCreate(ProductRequest):
     name: str = Field(
         min_length=1,
         max_length=256,
-        description="Immutable product configuration name.",
+        description="ProductProfile configuration name.",
     )
     stages: str = Field(
         min_length=1,
         max_length=262144,
         description="Static Swarm workflow YAML; creation installs human-feedback MultiRollout.",
     )
+
+
+class ProfileUpdate(ProductRequest):
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description="Optional new ProductProfile name.",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Optional new ProductProfile description; empty string is valid.",
+    )
+    stages: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=262144,
+        description="Optional static Swarm workflow YAML; only DRAFT Profiles accept this change.",
+    )
+    status: Literal["ONLINE", "OFFLINE"] | None = Field(
+        default=None,
+        description="Lifecycle transition to request; DRAFT must be sent only by create.",
+    )
+
+    @model_validator(mode="after")
+    def require_at_least_one_change(self):
+        if all(
+            value is None
+            for value in (self.name, self.description, self.stages, self.status)
+        ):
+            raise ValueError("profile update requires at least one field")
+        return self
 
 
 class ColletCreate(ProductRequest):
@@ -116,6 +153,35 @@ async def create_profile(
         private_body.stages,
     )
     return envelope(encode_profile(result), request)
+
+
+@router.patch("/profiles/{profile_id}", response_model=Envelope[dict])
+@envelope_errors
+async def update_profile(
+    profile_id: int,
+    private_body: ProfileUpdate,
+    request: Request,
+    service: ProductProfileServiceProtocol = Injected(ProductProfileServiceProtocol),
+) -> Envelope[dict]:
+    logger.info(
+        "product_profile.http.update.start path=%r request_id=%r caller_request_id=%r profile_id=%d fields=%r stage_bytes=%d",
+        request.url.path,
+        trace_id(request),
+        request.headers.get("X-Request-ID", ""),
+        profile_id,
+        sorted(private_body.model_fields_set),
+        _payload_size(private_body.stages or ""),
+    )
+    result = await service.update_product_profile(
+        profile_id,
+        name=private_body.name,
+        description=private_body.description,
+        stages=private_body.stages,
+        status=ProductProfileStatus(private_body.status)
+        if private_body.status is not None
+        else None,
+    )
+    return envelope(encode_profile_response(result), request)
 
 
 @router.post("/collets", response_model=Envelope[dict])

@@ -14,7 +14,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.collet_rollout impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
+    ProductProfileStatus,
     YAML,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
 )
 
 
@@ -40,7 +44,9 @@ class ProductProfileServiceProtocol(Protocol):
     """No context/request_id parameters; trusted entrypoints bind the G1 actor scope.
 
     Profile creation accepts only name/stages and installs interactive
-    MultiRollout NEST Swarm over the static YAML workflow. Confirmed execution
+    MultiRollout NEST Swarm over the static YAML workflow. Profile update is a
+    restricted owner-checked edit/lifecycle transition that never accepts a
+    composition or runtime capability grant. Confirmed execution
     or acceptance failure waits for human feedback before the strategy Agent
     may propose another rollout.
 
@@ -55,6 +61,16 @@ class ProductProfileServiceProtocol(Protocol):
         name: str,
         stages: YAML,
     ) -> ProductProfile: ...
+    @abstractmethod
+    async def update_product_profile(
+        self,
+        profile_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: YAML | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord: ...
     @abstractmethod
     async def create_product_collet(self, profile_id: int, content: str) -> Collet: ...
     @abstractmethod

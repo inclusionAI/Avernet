@@ -59,8 +59,11 @@ response `request_id`, the caller `X-Request-ID` and bounded metadata/byte sizes
 The original `POST /api/v1/collaboration/task/products/profiles` and
 `POST /api/v1/collaboration/task/products/collets` paths remain supported. Both
 path pairs use the same handlers, schemas, authentication scope and body limits.
-The original context create/event/status routes are unchanged. There are no new
-public `/openapi/v1` routes, Service API methods or DI bindings.
+The original context create/event/status routes are unchanged. The canonical
+product adapter also exposes `PATCH /products/profiles/{profile_id}` for
+Profile updates; it is not duplicated under this alias in this phase. There are
+no new public `/openapi/v1` routes, but the Service API now includes the
+restricted `update_product_profile` method and uses the same DI bindings.
 
 These routes call the currently bound ProductProfileService. They do not switch
 its persistence to the relational-storage foundation or start a worker. The

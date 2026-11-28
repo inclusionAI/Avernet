@@ -15,6 +15,10 @@ from ...l5_methods.multi_rollout_contracts import MultiRolloutSetup
 
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
+    ProductProfileStatus,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodCompositionTemplate,
@@ -32,6 +36,17 @@ class ProductProfileRepository(RolloutRepository, Protocol):
         context: ActorContext,
         request_id: str,
     ) -> ProductProfile: ...
+    def update_profile(
+        self,
+        profile_id: int,
+        composition: MethodCompositionTemplate,
+        context: ActorContext,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: str | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord: ...
     def create_collet(
         self,
         profile: ProductProfile,

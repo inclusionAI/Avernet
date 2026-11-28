@@ -1,7 +1,7 @@
 # Product configuration and durable rollouts
 
-Owner: Backend `context_collab` L6. The [Service API](contracts.py) has exactly
-five async methods, implemented by [ProductProfileService](service.py). Canonical
+Owner: Backend `context_collab` L6. The [Service API](contracts.py) has six async
+methods, implemented by [ProductProfileService](service.py). Canonical
 [ProductProfile](../product_profile.py) contains only `id/name/composition/stages`.
 `composition` records exact L5 Method contracts/policies; public creation takes
 only `name` and strict [YAML](stages_yaml.py) `stages`, installing the product-owned
@@ -12,10 +12,11 @@ selected, optional Methods are validated and retained but never implicitly activ
 ## Context Boundary
 
 ```yaml
-purpose: Authorized immutable product configuration and durable iteration orchestration.
+purpose: Authorized product configuration, restricted Profile lifecycle edits, and durable rollout orchestration.
 provides:
   - ProductProfileServiceProtocol
   - ProductProfileService
+  - ProductProfileRecord
   - InteractiveResult
   - StageRolloutDetails
   - ProductProfileRepository
@@ -44,7 +45,7 @@ Legacy v1 shapes have explicit names and cannot mutate v2 runtime tables.
 
 ### Caller scope and invocation identity
 
-The five methods do not accept `context` or `request_id`. HTTP delivery uses a
+The six methods do not accept `context` or `request_id`. HTTP delivery uses a
 shared authenticated dependency to bind the task-local G1
 [`actor_context_scope`](../../g1_secure_govern/actor_context.py); library callers
 must establish the same trusted scope around calls. An unbound caller is denied,
@@ -94,6 +95,19 @@ unchanged.
   and notification capabilities are not required until a Collet is created.
   Callers cannot supply or override a composition; the stored/returned
   ProductProfile still includes it.
+- The HTTP input `stages` remains a YAML string. New five-table writes use
+  `product-profile/config@2`, whose `stages` field is a readable structured YAML
+  list. Reads reconstruct the `ProductProfile.stages` YAML string from that list;
+  caller indentation, comments and line wrapping are therefore not durable data.
+  Existing `product-profile/config@1` string-stages rows remain readable.
+- `update_product_profile(profile_id, ...)` is a restricted edit/lifecycle method.
+  The currently recorded Profile owner is authorized first. DRAFT Profiles may
+  change `name`, `description` and `stages`, and may transition to `ONLINE`.
+  `ONLINE` Profiles may transition only to `OFFLINE`; content edits are then
+  rejected. `DRAFT -> OFFLINE`, `OFFLINE -> ONLINE` and same-status-only no-op
+  patches are not accepted. An update re-validates stage YAML and rewrites the
+  closed `config@2` document without accepting a caller composition. It updates
+  only `modifer` and never rewrites `creator`.
 - `create_product_collet` validates that the persisted Profile can be executed
   with the installed runtime and evidence capabilities, then commits the Collet,
   independent first rollout/stage IDs, actual MethodBinding/relations, owner,
@@ -122,8 +136,9 @@ authorization, MultiRollout setup, and persistence. Failures log the failed step
 exception type/message, and stack; raw stages/content are not logged, only bounded
 byte sizes.
 HTTP base: `/api/v1/collaboration/task/products`. Routes are `POST /profiles`,
-`POST /collets`, `GET /collets/{id}/rollouts`, `POST /rollouts/{id}/interactive`,
-and `GET /stages/{id}/messages`. Auth context and tenant/environment are not body
+`PATCH /profiles/{profile_id}`, `POST /collets`,
+`GET /collets/{id}/rollouts`, `POST /rollouts/{id}/interactive`, and
+`GET /stages/{id}/messages`. Auth context and tenant/environment are not body
 fields. Inline configuration and feedback bodies are redacted in error logs.
 
 The [internal context-collab adapter](../../../../../adapters/http/task/context_collab/README.md)
@@ -266,8 +281,9 @@ The change's actual commands/results and remaining migration work belong in its
 The [L5 runtime contract](../../l5_methods/MULTI-ROLLOUT.md) owns execution,
 state, bounded strategies, isolation, unknown outcomes and recovery. New public
 Profiles always select exactly `MultiRollout@1.0 NEST Swarm@0.2` through the
-[product-owned default](configuration.py). The five-method Service API is otherwise
-unchanged; existing persisted serial, parallel or autonomous Profiles are not
+[product-owned default](configuration.py). The original five execution/query
+interfaces remain unchanged; the added update interface changes only Profile
+lifecycle/persistence semantics and no runtime execution contract. existing persisted serial, parallel or autonomous Profiles are not
 rewritten or silently reconfigured.
 
 ```python

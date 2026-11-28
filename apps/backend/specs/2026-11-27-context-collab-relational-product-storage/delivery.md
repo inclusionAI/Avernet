@@ -216,3 +216,59 @@ DEPLOY_PROFILE=test uv run --no-sync pytest -q \
 ```
 
 结果：**501 passed**。以上为 SQLite 单测、HTTP 协议替身和架构门禁结果；未执行目标 MySQL/OceanBase 迁移、生产部署、真实 Bot/provider 或 runtime worker 验证。
+
+
+## 后续调整：结构化 Profile stages YAML（2026-11-28）
+
+- 按“存储内 stages 也要求 YAML 格式、config 总体更可读”的要求，将新写入的 Profile schema 升级为 `product-profile/config@2`。`stages` 现在是结构化 YAML 列表，不再是带 `\n` 转义和续行反斜杠的字符串。
+- API 输入仍然接收 `stages: str`。写入前先执行既有 `compile_stages` 严格校验，再规范化为存储原生 stage/candidates/depends_on/acceptance 图；用户缩进、注释和折行不再作为配置权威字节保留。
+- 读取兼容旧 `product-profile/config@1` 字符串 stages 格式，因此部署前已创建的 Profile 不会失效；新写入只使用 `config@2`。
+- 服务对外 `ProductProfile.stages` 类型仍为 YAML 字符串。新写 Profile 读回时返回规范化的 YAML 字符串，而不是调用方的原始文本。
+- 更新编码/解码测试：验证新 YAML 列表、schema 校验、重复/别名/未知字段拒绝、旧字符串格式兼容、以及 MySQL TEXT 65535 UTF-8 字节边界。
+
+验证：
+
+```bash
+cd apps/backend
+DEPLOY_PROFILE=test uv run --no-sync pytest \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/repository/task/context_collab/product_relational -q
+```
+
+结果：**246 passed**。包括 HTTP 与架构后的组合回归：
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/repository/task/context_collab/product_relational \
+  tests/community/adapters/http/task/test_context_collab_products.py \
+  tests/community/architecture
+```
+
+结果：**747 passed**。本次不需要新增数据库列或执行 DDL；不迁移已有 `config@1` 行，也尚未执行目标库部署。
+
+
+## 后续调整：受限 ProductProfile 更新接口（2026-11-28）
+
+- 新增 `ProductProfileServiceProtocol.update_product_profile`，Repository seam 同步提供 `update_profile`，并由 `ProductBusinessRepositoryAdapter` 直接写入 `ac_context_collab_product_profile`。更新在 Profile 行锁事务中校验 tenant/env、生命周期、YAML 和完整 config 65535 字节边界。
+- 生命周期规则：DRAFT 可修改 `name`、`description`、`stages`，也可在同一次请求中 `DRAFT -> ONLINE`；ONLINE 只允许 `ONLINE -> OFFLINE`。`DRAFT -> OFFLINE`、`OFFLINE -> ONLINE` 和仅重复当前状态的 no-op 拒绝。ONLINE/OFFLINE 配置内容禁止修改，避免历史 Collet/rollout/stage 与上线时配置失配。
+- 更新不开放 composition 参数，服务固定重新使用默认 MultiRollout NEST Swarm。修改 stages 时先重新编译校验，再写 `product-profile/config@2` 结构化 YAML。运行能力仍不在 Profile 更新链路中检查。
+- 服务先通过记录的 Profile owner 做现有 runtime authorization，再调用仓储；`creator` 保持不变，`modifer` 写入可信调用者，响应通过 `ProductProfileRecord` 返回 description/status/creator/modifer。
+- 新增 HTTP：`PATCH /api/v1/collaboration/task/products/profiles/{profile_id}`。请求字段全部可选但至少一个，`status` 仅接受 `ONLINE`/`OFFLINE`，strict schema 拒绝未知字段/DRAFT，入口日志只记录字段名和字节数，不打印 stages/description 原文。本阶段不新增外部 `/openapi/v1` 路由。
+
+验证：
+
+```bash
+cd apps/backend
+DEPLOY_PROFILE=test uv run --no-sync pytest -q   tests/community/core/task/context_collab/product_profile_service \
+  tests/community/repository/task/context_collab/product_relational
+```
+
+结果：**257 passed，19 warnings**。
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q   tests/community/adapters/http/task/test_context_collab_products.py \
+  tests/community/architecture
+```
+
+结果：**504 passed，45 warnings**。本次不改变 DDL、不新增表列、不迁移历史 `config@1` 行，也未执行目标 MySQL/OceanBase、生产部署或真实 Bot/provider 验证。

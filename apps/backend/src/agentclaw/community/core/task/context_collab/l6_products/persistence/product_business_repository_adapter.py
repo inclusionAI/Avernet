@@ -31,6 +31,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.rollout_contracts i
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
+    ProductProfileStatus,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     compile_configuration,
@@ -53,6 +57,27 @@ class ProductBusinessRepositoryAdapter:
         return self.business.create_profile(
             name, composition, stages, context
         ).definition
+
+    def update_profile(
+        self,
+        profile_id,
+        composition,
+        context,
+        *,
+        name=None,
+        description=None,
+        stages=None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord:
+        return self.business.update_profile(
+            profile_id,
+            composition,
+            context,
+            name=name,
+            description=description,
+            stages=stages,
+            status=status,
+        )
 
     def get_profile(self, profile_id: int) -> tuple[ProductProfile, PrincipalRef]:
         record = self.business.get_profile(profile_id)

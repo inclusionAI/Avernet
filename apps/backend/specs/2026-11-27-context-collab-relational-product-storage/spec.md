@@ -147,7 +147,7 @@ CREATE TABLE ac_context_collab_product_profile (
 
 `config` 使用 `TEXT`（不是 MEDIUMTEXT），非唯一索引名为 `idx_cc_profile_scope_name`，索引列与顺序仍为 `(avernet_tenant, env, name)`。迁移 SQL 中所有新增及建表字段均携带明确的 MySQL `COMMENT`，不把字段含义只写在文档里。已有上一版五表结构不能靠更新建表 SQL 自动升级：停写并核验所有 `OCTET_LENGTH(config) <= 65535` 后，再将列改为 TEXT 并重命名旧索引；超限记录停止升级并人工评审，不截断配置。
 
-name 不唯一；同名 create 仍是独立调用。name/description/执行 config 及创建归属不可原地修改，定义变更新建 ID；status 是独立生命周期元数据，不受执行配置不可变限制。本版不新增 Profile 更新接口，仍保留现有五个服务方法，状态管理入口另行评审。
+name 不唯一；同名 create 仍是独立调用。新建 Profile 为 DRAFT，DRAFT 阶段可通过受限更新接口修改 name/description/stages；一旦 ONLINE 则冻结 name/description/stages，不允许原地改执行 config，定义变更须在上线前的 DRAFT 阶段完成。status 是独立生命周期元数据；已新增受限 `update_product_profile` 服务方法和 HTTP PATCH，支持 DRAFT→ONLINE、ONLINE→OFFLINE。DRAFT→OFFLINE、OFFLINE→ONLINE 以及仅重复提交当前状态的 no-op 均拒绝。不提供 VersionTable 或历史配置版本。
 
 Profile 状态约定：
 
@@ -158,8 +158,8 @@ Profile 状态约定：
 | `OFFLINE` | 已下线，不再接受新建使用 | 不允许 |
 
 - status 为非空、大小写精确的闭合字符串，代码定义独立的 `ProductProfileStatus` 类型，仅接受上述三个值；不复用执行 `StatusEnum`，新增取值须显式演进合同。未知值、空串、null 拒绝，不在读取时默认为 DRAFT 或 ONLINE 掩盖坏数据。
-- 当前 create 方法不增加 status 参数或 HTTP 请求字段，由服务显式写入 DRAFT；数据库默认值与 ORM/领域默认值均为 DRAFT，响应返回实际存储值。status 只存该列，不写入 config YAML。创建 Profile 不等于上线；经授权的状态管理入口完成 DRAFT→ONLINE 前，不能创建新 Collet，服务不自动上线。
-- 受控状态变更须核验可信 tenant/env 和独立配置管理/发布授权，在同一事务更新 status、modifer、gmt_modified，creator 保持不变；不允许借状态切换原地改写执行配置。本版只规定配套修改方向，不新增上下线 API，也不实施状态变更。
+- 当前 create 方法不增加 status 参数或 HTTP 请求字段，由服务显式写入 DRAFT；数据库默认值与 ORM/领域默认值均为 DRAFT，响应返回实际存储值。status 只存该列，不写入 config YAML。创建 Profile 不等于上线。更新方法由服务先加载记录的 Profile owner 并通过现有 runtime authorization 校验调用者，在 DRAFT→ONLINE 完成前不能创建新 Collet，服务不自动上线。update 可选 HTTP 字段为 name/description/stages/status，其中 status 只允许 ONLINE/OFFLINE，不通过 HTTP 接受 DRAFT。
+- 受控状态变更须核验可信 tenant/env 与记录的 Profile owner 授权，在同一事务锁定 Profile 并更新 status、modifer、gmt_modified，creator 保持不变；不允许借状态切换原地改写已上线执行配置。服务已提供受限更新入口，但不提供 OFFLINE→ONLINE 或配置版本回滚。
 - 仅 ONLINE 可以创建新 Collet，且 ONLINE 本身不授予任何权限；该检查须在 Collet 创建事务中锁定并重读 Profile，与状态变更写入采用同一 Profile 行锁协调，避免先检查后下线的竞态。此创建路径按 Profile→Collet→rollout→stage 顺序加锁；已有 Collet 的业务写不反向获取 Profile 锁。
 - DRAFT/OFFLINE 不删除既有 Profile/Collet，不自动停止或取消已经创建的运行，也不阻止其按原授权查询、反馈和既有运行内的后继 rollout；既有运行读取其配置时仍按原 ID 加载，不把 ONLINE 作为仓储通用读取过滤条件。原有停止/预算/恢复合同适配门槛不变。
 
@@ -167,7 +167,7 @@ Profile 状态约定：
 
 - `creator` 表示创建人，`modifer` 表示最后修改人，均为普通字符串，不存 PrincipalRef JSON、权限快照或配置摘要。按用户指定保留 `modifer` 拼写，ORM/领域元数据/响应字段统一使用该名称。
 - 新建时由服务从可信 `ActorContext.actor` 生成 `principal_type:principal_id` 稳定标识，同时写入两列；不使用展示名，也不接受请求体传入或覆盖。编码校验类型段不含冒号，按第一个冒号分隔，原 principal_id 保留；整体不得超过 1024 字符，超限明确拒绝，不截断。
-- 两列 nullable 仅用于诚实表达历史来源未知；新创建路径必须非空。`creator` 写入后不覆盖，`modifer` 只代表实际写入者；新建时两者相同，后续经授权的状态变更须同步更新 modifer/gmt_modified，不能覆盖 creator。状态管理入口另行评审，仍不能原地改执行配置。
+- 两列 nullable 仅用于诚实表达历史来源未知；新创建路径必须非空。`creator` 写入后不覆盖，`modifer` 只代表实际写入者；新建时两者相同，后续经授权的内容编辑或状态变更须同步更新 modifer/gmt_modified，不能覆盖 creator。ONLINE 后仍不能原地改执行配置；具体服务实现已通过受限 update 接口管理生命周期。
 - 迁移仅在来源能证明时转换历史创建人/最后修改人，无法证明的一列保留 NULL；不以迁移操作人、当前调用者或 creator 猜填未知 modifer。
 - 两列仅为审计归属，不自动授予配置使用或运行控制权限；Profile 使用授权见第 5.4 节，运行 owner 仍来自 Collet.actor_ref。
 
@@ -349,20 +349,19 @@ Event 不保存通用 create/replay 结果，不增加通用 operation-receipt A
 config 只保存一份完整执行定义，闭合结构为 schema/composition/stages；composition 是内部生成的完整现有 codec 输出，示意空对象不能直接运行：
 
 ```yaml
-schema: product-profile/config@1
+schema: product-profile/config@2
 composition: {}  # 服务填入真实 MultiRollout NEST Swarm 编码
-stages: |
-  stages:
-    - name: implement
-      candidates:
-        - type: bot
-          uuid: example-bot
-      depends_on: []
-      acceptance:
-        - condition: tests pass
+stages:
+- name: implement
+  candidates:
+  - type: bot
+    uuid: example-bot
+  depends_on: []
+  acceptance:
+  - condition: tests pass
 ```
 
-- 禁止重复键、别名/循环、不支持 tag、未知字段和过深/超限配置。stages 保留原 YAML 字符串，外层 dump/load 不改写其字节。
+- 禁止重复键、别名/循环、不支持 tag、未知字段和过深/超限配置。`config@2` 新写入把已校验的 stages 规范化为结构化 YAML 列表，提高数据库可读性；读取 `config@1` 旧字符串格式，避免已有 Profile 不可读。API 输入仍是 stages YAML 字符串，后续 Profile 读出的 stages 字符串是规范化值，不承诺保留调用缩进、注释或原始折行。
 - 不再生成、持久化或校验独立的 config_digest；仍执行完整的 YAML/schema/精确版本及大小校验。完整 config 序列化后的 UTF-8 编码上限为 65535 字节，与 `TEXT` 容量对齐；原 stages 仍保留 256 KiB 输入上限，但必须同时满足完整 config 的更小容量约束，超限拒绝且不截断；description 最多 2048 字符，显式 null/超限拒绝。
 - 读取确切存储的版本/策略，不调用今天的 default_composition 或 latest 回填。不存在能力/版本时 fail closed。
 - 创建方法可新增 keyword-only `description: str = ""`，仍只要求 name/stages，不恢复 composition 参数。creator/modifer 由可信上下文自动填充，不新增为方法参数或 HTTP 请求字段；HTTP 严格拒绝调用者伪填审计字段。
@@ -378,7 +377,7 @@ stages: |
 | revision、stopped、bindings、relations、multi | 不能直接按当前 RuntimeSnapshot 完整重建，缺口见第 4.1 节；不伪造默认值或旧兼容响应 |
 | rollouts | rollout 按其 ordinal 排序；stage 以 name 对应确切 Profile 原 YAML 节点顺序，不读取 stage.ordinal；collet_id 即 Collet.id |
 | records | 仅 stage.id→stage_id、业务 session_id 有直接来源；StageRecord 的 attempt/lease_until/dispatch_state/reused_from/route 及取消事实无完整目标映射，见第 4.1 节，不按旧 codec 默认值补齐 |
-| specs | 从该不可变 Profile 的原 stages 字符串 compile_stages |
+| specs | 从 Profile `config` 的结构化 stages YAML（或旧 `config@1` 字符串）重新 compile |
 | execution_ref、acceptance_ref、overall_acceptance | 从精确已存 SwarmStagesPolicy 派生，迁移时与源逐项核验 |
 | parents | rollout.predecessor_id 的显式关系，无前驱不生成条目 |
 
@@ -422,7 +421,7 @@ COMMIT
 
 - 当前 `ports.py.get_profile` 返回 `(ProductProfile, PrincipalRef)`，`service.py.create_product_collet` 再调用运行授权的 `check("create", context, owner)`。删列后不能留下该依赖，也不能把 owner 替换成当前调用者、modifer 或凭空构造的 PrincipalRef。
 - 计划将 `get_profile` 改为返回含 description/status/creator/modifer 的 Profile，取消配置 owner 元组；读取始终受可信 tenant/env 隔离。新增配置使用的 G1 授权合同 `ProductProfileUseAuthorizer.check_use(profile_id, context)`，由服务在创建 Collet 前调用，具体宿主策略经 DI 注入，依据资源 ID 和可信 scope/actor 判定；无策略或授权失败时拒绝，不退化为同租户任意使用。
-- `creator`/`modifer` 不充当 ACL 或运行 owner；不把审计字段改动解释为转移权限。原发布授权 `ProductProfilePublicationAuthorizer.check_publish` 保留，发布权也不等于运行权；新授权合同及其宿主策略必须一起评审，未明确配置使用规则前不开放新写，不隐式扩大原发布者限定的使用范围。此调整不新增授权数据库表。Profile.status=ONLINE 只是新建使用的业务前提，不能替代该权限检查；状态管理权限与运行 owner 控制权限也不混用。
+- `creator`/`modifer` 不充当通用 ACL，也不把 `modifer` 的改动解释为转移权限。已交付的受限 `update_product_profile` 仍通过加载时确认的 Profile owner 进行 owner authorization；该授权事实来自记录的 creator 投影，而不是直接信任请求体中的 creator/modifer，也不能因编辑审计字段改变运行 owner。原发布授权 `ProductProfilePublicationAuthorizer.check_publish` 保留，发布权不等于运行权；Profile 使用授权继续独立注入。Profile.status=ONLINE 只是新建使用的业务前提，不能替代该权限检查；Profile 更新权限与 Collet 运行控制权限也不混用。
 - 已创建 Collet 的查询、反馈、停止和消息读取仍按 Collet.actor_ref 的运行 owner 及现有候选/资源授权校验；不因 Profile 审计缺失、修改或跨用户使用而改写运行 owner。
 
 ## 6. 代码改造清单（部分实施，实际状态见 delivery.md）
@@ -434,7 +433,7 @@ COMMIT
 | `core/task/context_collab/l6_products/persistence/profile_models.py`、`profile_repository.py` | legacy 模型指向 `_legacy_v1`，保留旧字符串版本、canonical JSON/摘要/权限；与目标 YAML 模型分离。 |
 | 新增 `core/task/context_collab/l6_products/persistence/product_relational_models.py` | 仅定义目标 Profile/rollout/stage；Profile.config 使用 Text，scope/name 索引名为 idx_cc_profile_scope_name；Profile 无 config_digest/owner_json，新增非空 status（默认 DRAFT）及 nullable creator/modifer（新建审计必须非空）；Stage 移除七列（含 attempt）/阶段顺序与复用来源索引/复用 FK/两个业务唯一键，acceptances 用 String(8192)、error_msg 用 Text（MySQL TEXT 而非 MEDIUMTEXT）；各表真实自增、普通索引/tenant guard，不定义物理外键，新普通索引统一使用 idx 前缀。**不新增五张技术表模型。** |
 | `core/task/context_collab/l4_context_primitives/persistence/models.py` | Collet 新增四列：content/status/product_profile_id/current_rollout_id；不新增 runtime_collet_id/revision/execution_state 及专属索引。Event 仅新增 collet_rollout_id/collet_stage_rollout_id 两列，复用既有 event_id/唯一索引，不新增反馈专用键；物理 unsigned/SQLite 整数变体正确。共享 metadata，由 L6 注册关联索引而非字符串 FK，不让 L4 导入 L6 实现。 |
-| `core/task/context_collab/l6_products/product_profile.py`、`product_profile_service/contracts.py`、`ports.py`、`service.py` | description/status/creator/modifer 元数据与响应，独立 ProductProfileStatus 校验；create 默认 DRAFT 并从可信 actor 写审计，get_profile 不再返回配置 owner，创建 Collet 调用独立配置使用授权并在事务内检查 ONLINE，状态变更的受控写入同步审计、管理入口另评审；去掉内部 create 的通用回执 UUID/参数；interactive 专用反馈查重/重放，保持默认 human-gated workflow。 |
+| `core/task/context_collab/l6_products/product_profile.py`、`product_profile_service/contracts.py`、`ports.py`、`service.py` | description/status/creator/modifer 元数据与响应，独立 ProductProfileStatus 校验；create 默认 DRAFT 并从可信 actor 写审计，创建 Collet 调用独立配置使用授权并在事务内检查 ONLINE；update 以记录的 Profile owner 授权，在 DRAFT 阶段支持内容编辑和 DRAFT→ONLINE，ONLINE 仅支持下线，并同步 modifer/creator 不变；去掉内部 create 的通用回执 UUID/参数；interactive 专用反馈查重/重放，保持默认 human-gated workflow。 |
 | `core/task/context_collab/g1_secure_govern/` 授权合同/实现及配置绑定 | 增加 ProductProfileUseAuthorizer 与 fail-closed 宿主策略，不依赖已移除的配置 owner；保留发布授权和基于 Collet.actor_ref 的运行授权，不以 creator/modifer 自动放权。 |
 | `core/task/context_collab/l6_products/product_profile_service/configuration.py`、新增 `profile_config_yaml.py` | 闭合 YAML、精确版本、四字段执行摘要与独立响应编码；不引入独立 config_digest，status/description/审计元数据均不进入执行编码或执行 YAML。 |
 | `core/task/context_collab/l6_products/persistence/rollout_repository.py` | 全部改为五表 UoW；Collet.id 直接定位，删除别名映射/版本列/控制 JSON 依赖；业务写入根行锁、一致读与基于确定性 event_id 的反馈查重，跨 context 唯一范围缺口先评审；不再读旧 snapshot 或写 receipt/intent/slot。运行态缺失不得伪造。 |
@@ -446,16 +445,17 @@ COMMIT
 | `core/task/context_collab/l5_methods/openapi_rollout_execution.py`、执行能力适配、`adapters/http/task/product_progress.py` 及签名进度调用方 | 配套移除 attempt 参数/DTO 字段与 `product_stage_attempt` metadata 依赖，解除 `message_id=attempt` 耦合；provider 请求关联/幂等、旧请求兼容与晚到回调的可信校验单独评审，不宣称仅有 stage.id/session_id 就保留原防重复/防陈旧保障。 |
 | `core/task/context_collab/l4_context_primitives/event_envelope.py`、`persistence/row_codec.py` | 本地记录只新增两个关联，复用原 event_id，不增加 interactive_key；ACCS EventEnvelope 不暗增产品控制字段；区分产品审计和 L4 接受事件。 |
 | L4 `persistence/repository.py`、`task_storage.py`，G3 `observation.py` 及 legacy 产品安装入口 | 产品运行行拒绝旧 Work/Method writer；产品审计不驱动 L4 Task/context_version/current-event/计数，普通旧 L4 行行为不变。 |
-| `adapters/http/task/product_profiles.py`、`di/modules/task/product_profile_runtime.py`、隔离/通知适配及数据库事务边界 | 薄 DTO 响应补 description/status/creator/modifer，当前 create 请求不开放 status 或审计字段；同一五表仓储及配置使用授权绑定、一致读合同、状态扫描宿主入口；不安装五张配套表/旧六表，不把私有实现导入公共路径。 |
+| `adapters/http/task/product_profiles.py`、`di/modules/task/product_profile_runtime.py`、隔离/通知适配及数据库事务边界 | 薄 DTO 响应补 description/status/creator/modifer，create 请求不开放 status 或审计字段；PATCH update 请求开放 name/description/stages/status，其中 status 只接受 ONLINE/OFFLINE 且至少一个字段；同一五表仓储及配置使用授权绑定、一致读合同、状态迁移仍不启动宿主调度；不安装五张配套表/旧六表，不把私有实现导入公共路径。 |
 | `core/task/context_collab/l6_products/persistence/rollout_models.py`、安装清单、迁移工具、owning README/ADR/测试 | 旧六表模型退出正常 metadata/create_all/DI，仅迁移源显式加载；新增五表 SQL 及控制/恢复合同变更，历史 SQL 和源证据保留。 |
 
-### 6.1 五个服务方法对应关系
+### 6.1 六个服务方法对应关系
 
 本表描述服务入口所触发的业务范围，不限定 SQL 必须由该方法直接执行，也不表示运行全过程在接口返回前完成；后续调度、进度与验收链路的自动持久化责任见第 6.2 节。
 
 | 方法 | 目标依赖 |
 | --- | --- |
 | create_product_profile | 发布授权后一次事务写 name/description/config/status=DRAFT/creator/modifer，无独立配置/回执表 |
+| update_product_profile | 记录的 Profile owner 授权后一次 Profile 行锁事务更新 DRAFT 内容或执行 DRAFT→ONLINE/ONLINE→OFFLINE；重新编译并保存 config@2，保留 creator，只更新 modifer，不要求运行能力，不写运行 Event |
 | create_product_collet | 独立 Profile 使用授权 + 事务内 Profile.status=ONLINE 检查 + Profile/Collet/rollout/stage/Event，记录本次 actor 为运行 owner，完整初始化后提交 |
 | query_collet_rollout | 五表业务行一致读；授权后按 current_rollout_id/all_rollout 返回。现有 revision/stopped 响应兼容待合同评审，不伪造缺失控制字段 |
 | interactive | rollout→Collet + 确定性 event_id 定位已接受反馈 Event 查重；Agent 事务外，业务结果事务内根行锁提交；新策略决策需先解决第 4.1 节的防陈旧/控制事实及第 4.3 节跨 context 仲裁缺口 |
@@ -481,6 +481,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 | 链路节点 / 触发条件 | 业务责任方 | 自动新增或更新的业务记录 | 提交与事实边界 |
 | --- | --- | --- | --- |
 | 创建 Profile | ProductProfileService 配置创建链路 | 新增 product_profile 的 name/description/config/status=DRAFT/creator/modifer | 一个配置创建事务；不因创建成功自动上线，不虚构没有运行 context 的产品运行 Event |
+| 更新 Profile 并变更生命周期 | ProductProfileService update 链路 | DRAFT 原地更新 name/description/config 且保留 status；DRAFT→ONLINE、ONLINE→OFFLINE 时更新 status 与 modifer，creator 不变 | 在 Profile 行锁事务内重验 tenant/env、owner、旧 status、目标 transition 与 YAML/config；不检查运行能力，不回滚历史，不创建运行 Event |
 | 创建 Collet 并初始化静态 workflow | 产品创建编排、L5 初始化、仓储 | 新增 collet、初始 collet_rollout、各 stage_rollout、创建 event；设置 current_rollout_id | 第 5.3 节统一事务；只读取/校验 Profile，不将配置写成运行快照；返回成功表示初始化已提交，不表示远端执行已完成 |
 | DAG 条件满足且已完成执行者授权，准备派发 | L5 执行引擎与宿主调度链路 | 按真实分配更新 stage_rollout.assignee_type/assignee_uuid/input，追加相应业务审计 | 本地已受理事实先提交，外部派发在事务外；这些字段不证明投递成功，无 attempt/投递/租约列时须先完成第 4.1 节的调度合同适配 |
 | 执行端返回可信真实会话 | 执行适配器返回、L5 核验与仓储提交链路 | 更新对应 stage_rollout.session_id，并记录已确认的业务事实 | 重新核验归属及受理有效性后提交；只绑定真实会话，不能仅因 start 返回就把状态改成 RUNNING/RUN_FINISHED；晚到或归属不符不得覆盖当前记录 |
@@ -490,7 +491,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 | human 调用 interactive，Agent 返回提议并经核验受理 | ProductProfileService、MultiRolloutController 与仓储 | 保存确定性 event_id 的受理 event；按决策更新业务记录；RE_DO/OPTIMIZE 需要后继时新增 collet_rollout/stage_rollout，设置 predecessor_id/current_rollout_id | Agent 在事务外调用；重加锁核验后将受理事实、业务变化及后继原子提交。DO_NOTHING 不新增 rollout；SHUTDOWN 不虚构业务 STOPPED 状态或取消成功；重复反馈只重放原结果 |
 | query_collet_rollout / query_stage_rollout_details | 只读查询链路及会话读取能力 | 读取既有五表业务记录，必要时在完整可信路由与授权具备时读取 provider 消息 | 查询不更新状态、不补写审计、不修复缺行、不触发重跑；完整路由缺失时不返回伪造空消息 |
 
-**事务边界与实施门槛：** 自动持久化按每次已受理业务转换提交，而不是把 HTTP 请求、多个阶段、human 等待和外部调用包进一个事务。外部调用前后的本地业务提交分开，后一次提交必须有已评审的防陈旧与权限依据；业务行、同次父级汇总和 Event 不能分开成功。数据库提交成功不等于 provider 已执行，也不能保证无 Outbox 时提交后一定被唤醒。第 4.1 节的运行控制/路由/异步关联缺口及第 4.3 节的跨 context 反馈仲裁仍是放行门槛，本节不能替代这些合同或宣称重启恢复已完成。Profile 上下线仍走另行评审的管理入口，不借执行链路自动将 DRAFT 改成 ONLINE。
+**事务边界与实施门槛：** 自动持久化按每次已受理业务转换提交，而不是把 HTTP 请求、多个阶段、human 等待和外部调用包进一个事务。外部调用前后的本地业务提交分开，后一次提交必须有已评审的防陈旧与权限依据；业务行、同次父级汇总和 Event 不能分开成功。数据库提交成功不等于 provider 已执行，也不能保证无 Outbox 时提交后一定被唤醒。第 4.1 节的运行控制/路由/异步关联缺口及第 4.3 节的跨 context 反馈仲裁仍是放行门槛，本节不能替代这些合同或宣称重启恢复已完成。Profile 上下线只通过本轮受限 update 接口并要求 Profile owner 授权；执行链路不会因创建 Collet 成功自动将 DRAFT 改成 ONLINE，也不会将 OFFLINE 自动恢复为 ONLINE。
 
 ## 7. Event 与 L4 边界
 
@@ -550,8 +551,8 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 - 全部原始需求字段、status 枚举、闭合 JSON/YAML、description、旧四字段执行摘要/plan digest 正确；独立 config_digest/owner_json 不在目标 Profile ORM/DDL/读写中，审计元数据不影响执行摘要；未知 schema/缺状态 fail closed。
 - Profile.config 的 DDL/ORM 均为 TEXT；非唯一索引为 idx_cc_profile_scope_name，列顺序保持 avernet_tenant/env/name；完整 YAML 序列化后 UTF-8 65535 字节可往返，65536 字节创建/读取拒绝且不截断，失败创建不遗留记录；ASCII 与中文均覆盖。
 - Profile.status 的 DDL/ORM/领域默认均为 DRAFT，新建服务显式写入 DRAFT、响应为草稿且不自动上线，三个枚举值与响应往返正确；未知/空/null/错误大小写拒绝，旧 v2 无状态按显式兼容规则迁为 DRAFT，可信已有生命周期状态保留，不虚构上线事件。status 不进入 config/执行摘要，状态变化不改变原四字段 plan.profile_digest。
-- DRAFT/OFFLINE 不能创建新 Collet，ONLINE 仍须使用授权；Profile 行锁协调并发下线/新建，失败不留下 Collet/子行/审计。后续状态受控写入须授权、更新 modifer/时间且保留 creator，不自动停止既有运行或阻止其原授权操作；不擅自新增上下线 API。
-- 新建 creator=modifer 且来自可信 actor，伪填审计字段被拒绝，标识长度/类型校验、事务回滚、历史未知 NULL/真实来源转换及响应拼写一致；不存在擅自新增的 Profile 更新接口。
+- DRAFT/OFFLINE 不能创建新 Collet，ONLINE 仍须使用授权；Profile 行锁协调并发下线/新建，失败不留下 Collet/子行/审计。更新接口须授权，更新 modifer/时间且保留 creator，不自动停止既有运行或阻止其原授权操作；DRAFT/OFFLINE 不能通过内容编辑绕过状态机。
+- 新建 creator=modifer 且来自可信 actor，伪填审计字段被拒绝，标识长度/类型校验、事务回滚、历史未知 NULL/真实来源转换及响应拼写一致。受限 update 接口已随本方案更新：记录的 Profile owner 授权后，DRAFT 可修改内容并上线，ONLINE 仅可下线，OFFLINE 不能重新上线，所有转移与内容修改都在 Profile 行锁事务内校验。
 - 配置发布权/使用权/运行控制权分离：使用授权 hook 确实被调用，拒绝和未配置不落库，不凭同租户/creator/modifer 自动放行，跨 tenant/env 拒绝；Collet owner 始终为本次创建 actor，原运行授权不回退到 Profile 审计字段。
 - Collet 新增列恰为 content/status/product_profile_id/current_rollout_id，目标 DDL/ORM 无 runtime_collet_id/revision/execution_state 或同义控制快照；content/status 读写、普通 L4 行 NULL 兼容正确。
 - Stage DDL/ORM 不含七项排除字段（含 attempt）、阶段顺序/复用来源索引、复用来源 FK，以及 uk_cc_stage_name/uk_cc_stage_parent_id；acceptances=VARCHAR(8192)、error_msg=TEXT、artifacts=MEDIUMTEXT；Event 关联阶段不定义复合 FK，Stage 只保留 idx 前缀的普通关联索引，rollout.ordinal 不被误删；重复阶段名须由应用读取校验拒绝。
@@ -582,5 +583,5 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 - 已对照当前 Event ORM 的 AST 核验 event_id=VARCHAR(128) NOT NULL 及既有四列唯一索引声明，并检查反馈 ID 示意编码的确定性、84 ASCII 字符长度及 axes/actor/opaque UUID 区分；这不是仓储实现或数据库并发测试，跨 context 仲裁仍未解决。
 - Profile 默认值已按用户确认统一为 `DRAFT`：目标 DDL、计划中的 ORM/领域默认、新建服务写入、无源状态迁移及测试要求一致；可信已有生命周期状态仍保留，仅 ONLINE 可创建新 Collet。此前按先前 ONLINE 约定检查而出现的默认值告警已解决，本轮重新执行静态检查通过；这不代表代码或数据库已改造。
 - **尚未执行**目标 DDL、代码改造、业务测试、迁移/回滚、目标库隔离/外键测试或 host/provider 集成；本机无 MySQL/Docker 执行环境。
-- 待实施确认：目标数据库版本/分区与 FK 能力、allocator 高水位/历史 Collet ID 重号、无版本列的进度协议与异步防陈旧、无执行状态列的完整运行/恢复合同、历史审计身份的可信来源和配置使用授权策略、Profile 状态管理入口及管理授权、历史 session 长度及移除 attempt 后的执行/进度关联、复用 event_id 后原反馈 UUID 的跨 context 并发仲裁与源回执映射、验收 8192 字符/错误 TEXT 缩容与阶段顺序可表达性、无路由/租约/投递/取消/复用列的 SessionRoute/StageRecord 适配、源反馈回执和未完成副作用的可转换性、宿主状态扫描及幂等/对账能力。
+- 待实施确认：目标数据库版本/分区与 FK 能力、allocator 高水位/历史 Collet ID 重号、无版本列的进度协议与异步防陈旧、无执行状态列的完整运行/恢复合同、历史审计身份的可信来源和配置使用授权策略、Profile 更新授权之外的共享/管理员策略、历史 session 长度及移除 attempt 后的执行/进度关联、复用 event_id 后原反馈 UUID 的跨 context 并发仲裁与源回执映射、验收 8192 字符/错误 TEXT 缩容与阶段顺序可表达性、无路由/租约/投递/取消/复用列的 SessionRoute/StageRecord 适配、源反馈回执和未完成副作用的可转换性、宿主状态扫描及幂等/对账能力。
 - 现有 owning README 继续描述当前实现。后续采纳本版时须明确更新 receipt/Outbox/租户配额和恢复边界合同，不能仅删表或改导航就声称完成统一。

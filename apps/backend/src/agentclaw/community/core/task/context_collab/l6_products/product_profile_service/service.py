@@ -1,4 +1,4 @@
-"""Authorized five-method product orchestration. All blocking SQL is offloaded."""
+"""Authorized six-method product orchestration. All blocking SQL is offloaded."""
 
 import asyncio
 from dataclasses import asdict
@@ -40,7 +40,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.rollout_lifecycle i
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
     ProductProfile,
+    ProductProfileStatus,
     YAML,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.contracts import (
     ProductProfileServiceProtocol,
@@ -73,7 +77,6 @@ def _payload_size(value) -> int:
         return len(value.encode("utf-8"))
     except Exception:
         return 0
-
 
 
 class ProductProfileService(ProductProfileServiceProtocol):
@@ -151,7 +154,128 @@ class ProductProfileService(ProductProfileServiceProtocol):
             )
             return profile
         except Exception as exc:
-            self._log_creation_failure("product_profile.create", operation_id, step, exc)
+            self._log_operation_failure(
+                "product_profile.create", operation_id, step, exc
+            )
+            raise
+
+    async def update_product_profile(
+        self,
+        profile_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: YAML | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord:
+        context = current_actor_context()
+        operation_id = uuid4().hex
+        logger.info(
+            "product_profile.update.start operation_id=%s profile_id=%d name=%s description=%s stage_bytes=%s status=%s actor=%r/%r",
+            operation_id,
+            profile_id,
+            "change" if name is not None else "unchanged",
+            "change" if description is not None else "unchanged",
+            _payload_size(stages) if stages is not None else "unchanged",
+            status.value if type(status) is ProductProfileStatus else None,
+            context.actor.principal_type,
+            context.actor.principal_id,
+        )
+        step = "input-validation"
+        try:
+            positive_id(profile_id)
+            if name is not None:
+                text(name, maximum=256)
+            if description is not None and (
+                type(description) is not str or len(description) > 2048
+            ):
+                raise Invalid("description exceeds 2048 characters")
+            if status is not None and type(status) is not ProductProfileStatus:
+                raise Invalid("invalid Profile lifecycle status")
+            if all(value is None for value in (name, description, stages, status)):
+                raise Invalid("a Profile update requires at least one field")
+
+            step = "repository-load-profile"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile_id,
+                step,
+            )
+            profile, owner = await asyncio.to_thread(
+                self._repository.get_profile, profile_id
+            )
+            logger.info(
+                "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s owner=%r/%r status=%s",
+                operation_id,
+                profile.id,
+                step,
+                owner.principal_type,
+                owner.principal_id,
+                status.value if status is not None else "unchanged",
+            )
+            step = "profile-authorization"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            self._authorization.check("update", context, owner)
+            logger.info(
+                "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            if stages is not None:
+                step = "configuration-validation"
+                logger.info(
+                    "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                    operation_id,
+                    profile.id,
+                    step,
+                )
+                specs, execution_policy = await asyncio.to_thread(
+                    compile_configuration, default_composition(), stages
+                )
+                logger.info(
+                    "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                    operation_id,
+                    profile.id,
+                    step,
+                    len(specs),
+                    execution_policy.execution_ref,
+                    execution_policy.acceptance_ref,
+                )
+            step = "repository-persistence"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            record = await asyncio.to_thread(
+                self._repository.update_profile,
+                profile.id,
+                default_composition(),
+                context,
+                name=name,
+                description=description,
+                stages=stages,
+                status=status,
+            )
+            logger.info(
+                "product_profile.update.complete operation_id=%s profile_id=%d status=%s",
+                operation_id,
+                record.id,
+                record.status.value,
+            )
+            return record
+        except Exception as exc:
+            self._log_operation_failure(
+                "product_profile.update", operation_id, step, exc
+            )
             raise
 
     async def create_product_collet(self, profile_id: int, content: str) -> Collet:
@@ -253,7 +377,7 @@ class ProductProfileService(ProductProfileServiceProtocol):
                 content,
                 context,
                 operation_id,
-                **kwargs
+                **kwargs,
             )
             logger.info(
                 "product_collet.create.complete operation_id=%s profile_id=%d collet_id=%d rollout_id=%d stage_count=%d",
@@ -265,11 +389,13 @@ class ProductProfileService(ProductProfileServiceProtocol):
             )
             return snapshot.collet
         except Exception as exc:
-            self._log_creation_failure("product_collet.create", operation_id, step, exc)
+            self._log_operation_failure(
+                "product_collet.create", operation_id, step, exc
+            )
             raise
 
     @staticmethod
-    def _log_creation_failure(operation_name, operation_id, step, exc):
+    def _log_operation_failure(operation_name, operation_id, step, exc):
         if isinstance(exc, (Invalid, Conflict, Missing, Forbidden)):
             logger.warning(
                 "%s.error operation_id=%s step=%s error_type=%s error=%s",
