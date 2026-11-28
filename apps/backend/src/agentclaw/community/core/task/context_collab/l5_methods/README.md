@@ -1,5 +1,26 @@
 # L5 Method contracts and operations
 
+## MultiRollout local extension
+
+[MultiRollout@1.0](MULTI-ROLLOUT.md) nests one durable Swarm body through explicit
+MethodCompositionTemplate relations. It supports bounded parallel best-of-N and
+human/autonomous feedback iteration, with candidate-scoped execution, SQL tenant
+admission, trusted scoring, immutable stage plans and fenced strategy operations.
+New Profile creation selects interactive MultiRollout over a static YAML Swarm
+workflow; execution remains unavailable without governed host capabilities. The
+existing four ACCS core profile versions and legacy MethodStore path are unchanged.
+
+## Durable product rollout path
+
+[RolloutEngine](rollout_engine.py) owns candidate-scoped product-stage transitions (serial for legacy profiles) and the
+independent [ProgressEvent Service API](rollout_progress_protocol.py). [Runtime contracts](rollout_contracts.py)
+and the bounded [intent worker](rollout_worker.py) use durable allocation,
+attempt/lease, actual runtime session and revision facts. They do not import L6
+or use the legacy process-local Swarm Plan as a second write authority.
+[Product runtime integration](../l6_products/product_profile_service/README.md)
+owns assembly, graph-free SwarmStagesPolicy, SQL boundaries and compatibility.
+The existing Method controls below remain the legacy v1 path.
+
 Owner: Backend `core/task/context_collab/l5_methods`. L5 composes L4 primitives
 into Methods and owns their profiles, bindings, composition, publication and
 admission constraints. [L6](../l6_products/README.md) selects these contracts to
@@ -12,6 +33,9 @@ This is the local implementation boundary, not a new ACCS wire operation.
 purpose: Method contracts and operations over L4 primitives, independent of product composition.
 provides:
   - MethodProfile
+  - MultiRolloutMethodPolicy
+  - MultiRolloutController
+  - MethodRunPort
   - MethodBinding
   - MethodPolicy
   - OpenMethodPolicy
@@ -30,6 +54,9 @@ provides:
   - SwarmExecutionControl
   - SwarmExecutionOperations
 consumes:
+  - MultiRolloutStrategyPort
+  - MultiRolloutIsolationPort
+  - MultiRolloutNotificationPort
   - MethodStoreProtocol
   - CollaborationReader
   - EventWriter
@@ -50,6 +77,8 @@ internal_dependencies:
   - agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine
   - agentclaw.community.core.task.context_collab.persistence.method_store
   - agentclaw.community.core.task.context_collab.swarm_planning
+  - agentclaw.community.core.errors
+  - agentclaw.community.core.task.task_runner.client
   - agentclaw.community.utils
 ```
 

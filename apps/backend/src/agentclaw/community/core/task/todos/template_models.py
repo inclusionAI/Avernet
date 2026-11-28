@@ -123,6 +123,8 @@ class TodoStageDefinition:
     executor_ref: TodoParticipantReference
     owner_ref: TodoParticipantReference | None = None
     completion_gate: TodoCompletionGate = field(default_factory=TodoCompletionGate)
+    executor_candidates: tuple[TodoParticipantReference, ...] = field(default_factory=tuple)
+    completion_condition: str = ""
 
 
 @dataclass(frozen=True)

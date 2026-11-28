@@ -135,7 +135,7 @@ separately, then create/start root Work only at `l4_context_operate.start`. Mult
 journey's scope. For this product, each
 independent commission has one instance, one Collet and one independent root
 Task (potentially with L4 subtasks). This is not a universal protocol 1:1 rule.
-Before start, each instance persists `root_task_ref=None`; after start the query
+Before start, each instance persists `context_spec.creation_facts.product_instance.root_task_ref=None`; after start the query
 projection resolves the root from L4 without rewriting selection. It pins exact
 Profile/Method/Task-contract versions, binding/role refs, governance, negotiation and creation evidence.
 It does not copy runtime Open/Single objects or the Task status. Historical

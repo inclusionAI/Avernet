@@ -1,5 +1,15 @@
 # L6 product contracts
 
+## Current product API and retained legacy contracts
+
+Use [ProductProfileService](product_profile_service/README.md) for new immutable
+ProductProfiles, product Collets, durable rollout queries/interactions and real
+session messages. It retains MethodCompositionTemplate and stages YAML together.
+The sections below describe the explicitly named `LegacyProductConfiguration`
+compatibility path, not the new four-field ProductProfile or six-method service.
+Legacy compatibility review/removal is due 2026-12-31; see the linked migration
+and storage boundaries before moving any existing product or execution history.
+
 Owner: Backend `core/task/context_collab`. This layer defines versioned product
 composition; it is not another Task engine, identity registry or permission
 system. It owns internal, transport-free domain contracts and composition
@@ -19,8 +29,9 @@ itself; the L4 service/repository do not acquire a dependency on L6.
 | CollaborationCreateCommand / ContextCollabServiceProtocol | [service_api.py](service_api.py), [implementation](operations/collaboration_creation.py) | Legacy combined Method/product creation extension over L4; root API is an identity reexport. |
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
-| ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
+| LegacyProductConfiguration | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
 | MethodTemplate / MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional `MethodTemplate(profile, policy=None)` declarations co-locate exact L5 `MethodProfile` contracts with their own typed policies; instantiation binds the new or existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
+| MethodRelationTemplate | [contracts.py](contracts.py) | Directed `source_method` → `target_method` endpoints; `relation` defines semantics, not an assumed parent/child hierarchy. For `NEST`, the source contains the target. |
 | ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
 | ScenarioRole | [binding.py](binding.py) | Maps initial identities or deferred Open admission to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | ProductOpenEnrollmentServiceProtocol | [open_enrollment.py](open_enrollment.py), [implementation](operations/open_enrollment.py) | One-time pre-Work enrollment from correlated, currently ADMITTED Open evidence; appends runtime participation without rewriting ProductInstance creation refs. |
@@ -49,7 +60,7 @@ provide MethodStore restart continuation.
 ## Create a product profile
 
 [`create_product_profile(command)`](operations/product_profile.py) is the L6
-library operation for authoring a `ProductProfileDefinition`. Its typed input is
+library operation for authoring a `LegacyProductConfiguration`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
 composition, plus optional scenario-role authoring, governance/compatibility
 requirements, domain, workflow and Task contract selection. L5-owned Method policies
@@ -110,7 +121,7 @@ Omitted `governance` resolves to `g1.structural/1`, `g2.optimistic-version/1`,
 requires ACCS `0.2`, layers L2–L5, `reject_missing_required` and
 `new_instances_only`, with no extra extension/Profile requirements. These are
 fixed authoring defaults, not disabled guards or runtime version negotiation.
-`ProductProfileDefinition` still contains explicit resolved contracts, and
+`LegacyProductConfiguration` still contains explicit resolved contracts, and
 capability negotiation still rejects missing required layers/governance.
 Explicit `None` for any of these three fields is invalid.
 
@@ -158,7 +169,7 @@ only selects and composes them. L5 validates role mappings through its structura
 receive their existing commands and do not resolve product profiles.
 
 **Python compatibility:** the former top-level `publication` field on both
-`ProductProfileCreateCommand` and `ProductProfileDefinition`, and
+`ProductProfileCreateCommand` and `LegacyProductConfiguration`, and
 `profile.require_publication()`, are removed. Migrate authoring/copying code to
 `MethodTemplate(get_profile("Open", "0.2"), OpenMethodPolicy(publication=...))`
 and consumers to the accessor above. The former composition-wide `policies`
@@ -198,7 +209,7 @@ Shared G4 enforcement lives in
 
 ## Participant eligibility and runtime authorization
 
-`ProductProfileCreateCommand` and `ProductProfileDefinition` accept a typed,
+`ProductProfileCreateCommand` and `LegacyProductConfiguration` accept a typed,
 immutable `participant_scope`. This is a **local Profile contract**, not a new
 ACCS Participation operation or MethodProfile. Omission retains `OPEN` for
 existing authored profiles:
@@ -275,7 +286,7 @@ instances retain their old JSON shape (no new Task-contract field). Strict
 loading checks the exact selection against the installed definition; missing or
 mismatched references fail closed. Historical reads and Method recovery do not
 renegotiate capabilities or choose a newer contract. These references use the
-existing `creation_facts` JSON storage; no new table or backfill is needed.
+the existing `context_spec.creation_facts` JSON envelope; no additional physical Collet column or backfill is needed.
 
 Do not mutate an installed product version to remove its old references. Author
 and explicitly install a **new product version** for new instances; preserve old
@@ -560,7 +571,7 @@ the pure L4 command:
    initial Event and ProductInstance metadata. Task has its own ID/revision;
    `current_snapshot` is a derived G3 response, not persisted Work authority.
    The instance occupies the reserved `product_instance` member of the existing
-   `creation_facts` JSON column. L6 owns selection decoding; L4 Collet/Task do not
+   `context_spec.creation_facts` envelope. L6 owns selection decoding; L4 Collet/Task do not
    depend on that decoder or own product configuration.
 4. L5 projection creates the selected Method topology: independent bindings and
    declared edges for explicit relations, or the historical single-binding shape
@@ -689,7 +700,7 @@ mismatched binding references rather than silently moving admission/selection
 history to newly invented partitions.
 
 `root_task_ref` is a local reference, not a universal ACCS field or a Collet ID
-alias. Taskless installation persists `None` in `creation_facts`; no placeholder
+alias. Taskless installation persists `None` in `context_spec.creation_facts.product_instance`; no placeholder
 Task is created. Once explicit L4 create_task or Work.start creates the
 authoritative root, reads resolve the live reference from the same L4 snapshot without rewriting immutable L6
 selection or renegotiating capabilities. Other pinned references and creation

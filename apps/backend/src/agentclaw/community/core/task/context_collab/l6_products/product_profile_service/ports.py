@@ -1,0 +1,58 @@
+"""Narrow Profile storage seam; execution consumes only the lower RolloutRepository."""
+
+from typing import Protocol, runtime_checkable
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.rollout_contracts import (
+    RolloutRepository,
+    RuntimeSnapshot,
+)
+from ...l5_methods.multi_rollout_contracts import MultiRolloutSetup
+
+from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
+    ProductProfile,
+    ProductProfileStatus,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodCompositionTemplate,
+)
+
+
+@runtime_checkable
+class ProductProfileRepository(RolloutRepository, Protocol):
+    def get_profile(self, profile_id: int) -> tuple[ProductProfile, PrincipalRef]: ...
+    def create_profile(
+        self,
+        name: str,
+        composition: MethodCompositionTemplate,
+        stages: str,
+        context: ActorContext,
+        request_id: str,
+    ) -> ProductProfile: ...
+    def update_profile(
+        self,
+        profile_id: int,
+        composition: MethodCompositionTemplate,
+        context: ActorContext,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: str | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord: ...
+    def create_collet(
+        self,
+        profile: ProductProfile,
+        content: str,
+        context: ActorContext,
+        request_id: str,
+        *,
+        multi_setup: MultiRolloutSetup | None = None,
+    ) -> RuntimeSnapshot: ...

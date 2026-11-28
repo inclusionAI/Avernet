@@ -1,7 +1,7 @@
 """L5 MethodProfile:代码内版本化声明式合同(ACCS-105 §3.1)。
 
 代码即合同来源,不建持久化注册表、不建外部注册中心;四个核心
-Profile 剧本(ACCS-301 Single / 302 Group / 303 Swarm / 304 Open)随包
+Profile 剧本与本地 MultiRollout@1.0 扩展(ACCS-301 Single / 302 Group / 303 Swarm / 304 Open)随包
 声明,供 inspection capabilities 与 Task 3 组合矩阵对齐自检消费。
 """
 
@@ -65,6 +65,28 @@ class MethodProfile:
 # 顶层产品显式声明 Single / Open / Open + Group / Open + Single;
 # Group/Open/Swarm 裸值经嵌套 bind 进入,此处四者均为核心方法剧本。
 METHOD_PROFILE_REGISTRY: dict[str, MethodProfile] = {
+    # Local extension; existing ACCS core contracts remain pinned to @0.2.
+    "MultiRollout": MethodProfile(
+        method_kind="MultiRollout",
+        profile_version="1.0",
+        capabilities=(
+            "multi_rollout.run.start",
+            "multi_rollout.run.stop",
+            "multi_rollout.candidate.observe",
+            "multi_rollout.selection.select",
+            "multi_rollout.adjustment.propose",
+        ),
+        primitives_used=(
+            "Task",
+            "Message",
+            "Artifact",
+            "Decision",
+            "Activity",
+            "Query",
+        ),
+        participation_model="body",
+        composable_relations=("nest",),
+    ),
     # ACCS-301 Single:选中者执行;escalate 至 Group/Swarm 纳入可组合关系。
     "Single": MethodProfile(
         method_kind="Single",

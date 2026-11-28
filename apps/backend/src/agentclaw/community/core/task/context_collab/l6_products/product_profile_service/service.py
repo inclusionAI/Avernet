@@ -1,0 +1,626 @@
+"""Authorized six-method product orchestration. All blocking SQL is offloaded."""
+
+import asyncio
+from dataclasses import asdict
+from copy import deepcopy
+from uuid import uuid4
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError as Invalid,
+    ContextCollabVersionConflict as Conflict,
+    ContextCollabNotFoundError as Missing,
+)
+from agentclaw.community.core.errors import Forbidden
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    current_actor_context,
+)
+from agentclaw.community.log import get_logger
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.product_values import (
+    positive_id,
+    text,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.product_status import (
+    AdjustTypeEnum as A,
+    StatusEnum,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.collet_rollout import (
+    ColletRollout,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.rollout_contracts import (
+    ProductRuntimeAuthorization,
+    RolloutExecutionPort,
+    RolloutInteractionPort,
+    StageSessionMessagesPort,
+    Adjustment,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.rollout_lifecycle import (
+    affected_stages,
+)
+from agentclaw.community.core.task.context_collab.l6_products.product_profile import (
+    ProductProfile,
+    ProductProfileStatus,
+    YAML,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_record import (
+    ProductProfileRecord,
+)
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.contracts import (
+    ProductProfileServiceProtocol,
+    InteractiveResult,
+    StageRolloutDetails,
+    RolloutList,
+)
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
+    compile_configuration,
+    validate_configuration,
+    default_composition,
+    multi_policy,
+)
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.ports import (
+    ProductProfileRepository,
+)
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.snapshot_codec import (
+    canonical,
+)
+
+
+from ...l5_methods.multi_rollout_projection import control_metadata
+from ...l5_methods.multi_rollout_controller import MultiRolloutController
+
+logger = get_logger()
+
+
+def _payload_size(value) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except Exception:
+        return 0
+
+
+class ProductProfileService(ProductProfileServiceProtocol):
+    def __init__(
+        self,
+        repository: ProductProfileRepository,
+        authorization: ProductRuntimeAuthorization,
+        execution: RolloutExecutionPort,
+        interaction: RolloutInteractionPort,
+        messages: StageSessionMessagesPort,
+        multi_rollout: MultiRolloutController | None = None,
+    ) -> None:
+        self._repository = repository
+        self._authorization = authorization
+        self._execution = execution
+        self._interaction = interaction
+        self._messages = messages
+        self._multi_rollout = multi_rollout
+
+    async def create_product_profile(
+        self,
+        name: str,
+        stages: YAML,
+    ) -> ProductProfile:
+        context = current_actor_context()
+        operation_id = uuid4().hex
+        logger.info(
+            "product_profile.create.start operation_id=%s name=%r stage_bytes=%d actor=%r/%r",
+            operation_id,
+            name,
+            _payload_size(stages),
+            context.actor.principal_type,
+            context.actor.principal_id,
+        )
+        step = "input-validation"
+        try:
+            text(name, maximum=256)
+            step = "configuration-validation"
+            logger.info(
+                "product_profile.create.step.start operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            composition = default_composition()
+            specs, execution_policy = await asyncio.to_thread(
+                compile_configuration, composition, stages
+            )
+            logger.info(
+                "product_profile.create.step.complete operation_id=%s step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                operation_id,
+                step,
+                len(specs),
+                execution_policy.execution_ref,
+                execution_policy.acceptance_ref,
+            )
+            step = "repository-persistence"
+            logger.info(
+                "product_profile.create.step.start operation_id=%s step=%s",
+                operation_id,
+                step,
+            )
+            profile = await asyncio.to_thread(
+                self._repository.create_profile,
+                name,
+                composition,
+                stages,
+                context,
+                operation_id,
+            )
+            logger.info(
+                "product_profile.create.complete operation_id=%s profile_id=%d stage_count=%d",
+                operation_id,
+                profile.id,
+                len(specs),
+            )
+            return profile
+        except Exception as exc:
+            self._log_operation_failure(
+                "product_profile.create", operation_id, step, exc
+            )
+            raise
+
+    async def update_product_profile(
+        self,
+        profile_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: YAML | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord:
+        context = current_actor_context()
+        operation_id = uuid4().hex
+        logger.info(
+            "product_profile.update.start operation_id=%s profile_id=%d name=%s description=%s stage_bytes=%s status=%s actor=%r/%r",
+            operation_id,
+            profile_id,
+            "change" if name is not None else "unchanged",
+            "change" if description is not None else "unchanged",
+            _payload_size(stages) if stages is not None else "unchanged",
+            status.value if type(status) is ProductProfileStatus else None,
+            context.actor.principal_type,
+            context.actor.principal_id,
+        )
+        step = "input-validation"
+        try:
+            positive_id(profile_id)
+            if name is not None:
+                text(name, maximum=256)
+            if description is not None and (
+                type(description) is not str or len(description) > 2048
+            ):
+                raise Invalid("description exceeds 2048 characters")
+            if status is not None and type(status) is not ProductProfileStatus:
+                raise Invalid("invalid Profile lifecycle status")
+            if all(value is None for value in (name, description, stages, status)):
+                raise Invalid("a Profile update requires at least one field")
+
+            step = "repository-load-profile"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile_id,
+                step,
+            )
+            profile, owner = await asyncio.to_thread(
+                self._repository.get_profile, profile_id
+            )
+            logger.info(
+                "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s owner=%r/%r status=%s",
+                operation_id,
+                profile.id,
+                step,
+                owner.principal_type,
+                owner.principal_id,
+                status.value if status is not None else "unchanged",
+            )
+            step = "profile-authorization"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            self._authorization.check("update", context, owner)
+            logger.info(
+                "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            if stages is not None:
+                step = "configuration-validation"
+                logger.info(
+                    "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                    operation_id,
+                    profile.id,
+                    step,
+                )
+                specs, execution_policy = await asyncio.to_thread(
+                    compile_configuration, default_composition(), stages
+                )
+                logger.info(
+                    "product_profile.update.step.complete operation_id=%s profile_id=%d step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                    operation_id,
+                    profile.id,
+                    step,
+                    len(specs),
+                    execution_policy.execution_ref,
+                    execution_policy.acceptance_ref,
+                )
+            step = "repository-persistence"
+            logger.info(
+                "product_profile.update.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            record = await asyncio.to_thread(
+                self._repository.update_profile,
+                profile.id,
+                default_composition(),
+                context,
+                name=name,
+                description=description,
+                stages=stages,
+                status=status,
+            )
+            logger.info(
+                "product_profile.update.complete operation_id=%s profile_id=%d status=%s",
+                operation_id,
+                record.id,
+                record.status.value,
+            )
+            return record
+        except Exception as exc:
+            self._log_operation_failure(
+                "product_profile.update", operation_id, step, exc
+            )
+            raise
+
+    async def create_product_collet(self, profile_id: int, content: str) -> Collet:
+        context = current_actor_context()
+        operation_id = uuid4().hex
+        logger.info(
+            "product_collet.create.start operation_id=%s profile_id=%d content_bytes=%d actor=%r/%r",
+            operation_id,
+            profile_id,
+            _payload_size(content),
+            context.actor.principal_type,
+            context.actor.principal_id,
+        )
+        step = "input-validation"
+        try:
+            positive_id(profile_id)
+            text(content)
+            step = "repository-load-profile"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile_id,
+                step,
+            )
+            profile, owner = await asyncio.to_thread(
+                self._repository.get_profile, profile_id
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s owner=%r/%r",
+                operation_id,
+                profile.id,
+                step,
+                owner.principal_type,
+                owner.principal_id,
+            )
+            step = "runtime-authorization"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            self._authorization.check("create", context, owner)
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            step = "configuration-validation"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            specs, execution_policy = await asyncio.to_thread(
+                validate_configuration,
+                profile.composition,
+                profile.stages,
+                self._execution,
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s stage_count=%d execution_ref=%s acceptance_ref=%s",
+                operation_id,
+                profile.id,
+                step,
+                len(specs),
+                execution_policy.execution_ref,
+                execution_policy.acceptance_ref,
+            )
+            step = "multi-rollout-setup"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            setup = await self._multi_setup(
+                profile.composition, specs, execution_policy, context
+            )
+            logger.info(
+                "product_collet.create.step.complete operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            kwargs = {"multi_setup": setup} if setup else {}
+            step = "repository-persistence"
+            logger.info(
+                "product_collet.create.step.start operation_id=%s profile_id=%d step=%s",
+                operation_id,
+                profile.id,
+                step,
+            )
+            snapshot = await asyncio.to_thread(
+                self._repository.create_collet,
+                profile,
+                content,
+                context,
+                operation_id,
+                **kwargs,
+            )
+            logger.info(
+                "product_collet.create.complete operation_id=%s profile_id=%d collet_id=%d rollout_id=%d stage_count=%d",
+                operation_id,
+                profile.id,
+                snapshot.collet.id,
+                snapshot.current_rollout_id,
+                len(snapshot.current().stages),
+            )
+            return snapshot.collet
+        except Exception as exc:
+            self._log_operation_failure(
+                "product_collet.create", operation_id, step, exc
+            )
+            raise
+
+    @staticmethod
+    def _log_operation_failure(operation_name, operation_id, step, exc):
+        if isinstance(exc, (Invalid, Conflict, Missing, Forbidden)):
+            logger.warning(
+                "%s.error operation_id=%s step=%s error_type=%s error=%s",
+                operation_name,
+                operation_id,
+                step,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
+        else:
+            logger.error(
+                "%s.error operation_id=%s step=%s error_type=%s error=%s",
+                operation_name,
+                operation_id,
+                step,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
+
+    async def _multi_setup(self, composition, specs, execution_policy, context):
+        policy = multi_policy(composition)
+        if policy is None:
+            return None
+        if self._multi_rollout is None:
+            raise Invalid("MultiRollout host capabilities are not configured")
+        return await asyncio.to_thread(
+            self._multi_rollout.configure,
+            policy,
+            specs,
+            execution_policy.execution_ref,
+            context,
+        )
+
+    async def query_collet_rollout(
+        self, collet_id: int, all_rollout: bool = True
+    ) -> list[ColletRollout]:
+        context = current_actor_context()
+        positive_id(collet_id)
+        if type(all_rollout) is not bool:
+            raise Invalid("all_rollout must be a boolean")
+        snapshot = await asyncio.to_thread(self._repository.get_collet, collet_id)
+        self._authorization.check("read", context, snapshot.owner)
+        values = (
+            snapshot.rollouts
+            if all_rollout or not snapshot.rollouts
+            else [snapshot.current()]
+        )
+        return RolloutList(
+            values,
+            snapshot.revision,
+            snapshot.current_rollout_id,
+            snapshot.stopped,
+            multi_rollout_control=control_metadata(snapshot),
+        )
+
+    async def interactive(
+        self,
+        collet_rollout_id: int,
+        interactive_uuid: str,
+        interactive_context: str,
+    ) -> InteractiveResult:
+        context = current_actor_context()
+        positive_id(collet_rollout_id)
+        text(interactive_uuid, maximum=128)
+        text(interactive_context)
+        snapshot = await asyncio.to_thread(
+            self._repository.locate, collet_rollout_id, "rollout"
+        )
+        self._authorization.check("interactive", context, snapshot.owner)
+        payload = {
+            "rollout_id": collet_rollout_id,
+            "content": interactive_context,
+        }
+        replay = await asyncio.to_thread(
+            self._repository.replay, interactive_uuid, "interactive", payload, context
+        )
+        if replay is not None:
+            return InteractiveResult(A(replay["type"]), replay["message"])
+        if snapshot.current_rollout_id != collet_rollout_id:
+            raise Conflict("stale rollout")
+        if snapshot.multi:
+            if self._multi_rollout is None:
+                raise Invalid("MultiRollout controller is not installed")
+            try:
+                result = await self._multi_rollout.interactive(
+                    snapshot, interactive_uuid, interactive_context, context
+                )
+            except Conflict:
+                result = await asyncio.to_thread(
+                    self._repository.replay,
+                    interactive_uuid,
+                    "interactive",
+                    payload,
+                    context,
+                )
+                if result is None:
+                    raise
+            return InteractiveResult(A(result["type"]), result["message"])
+        revision = snapshot.revision
+        adjustment = await self._interaction.propose(
+            deepcopy(snapshot), interactive_context, context
+        )
+        if (
+            type(adjustment) is not Adjustment
+            or type(adjustment.type) is not A
+            or type(adjustment.stages) is not tuple
+        ):
+            raise Invalid("invalid interaction proposal")
+        text(adjustment.message)
+        text(adjustment.instruction, empty=True)
+        if any(type(name) is not str for name in adjustment.stages):
+            raise Invalid("adjusted stages must be names")
+        intents, successor = [], None
+        if adjustment.type in {A.OPTIMIZE, A.RE_DO}:
+            affected = affected_stages(snapshot, adjustment.stages)
+            # Preserve complete iteration context; the instruction cannot edit
+            # the frozen candidate/DAG/acceptance configuration.
+            content = canonical(
+                {
+                    "previous_context": snapshot.current().content,
+                    "feedback": interactive_context,
+                    "instruction": adjustment.instruction,
+                }
+            )
+            text(content)
+            successor = (content, affected)
+        elif adjustment.type is A.SHUTDOWN:
+            if adjustment.stages or adjustment.instruction:
+                raise Invalid("shutdown cannot edit stages")
+            snapshot.stopped = True
+        elif adjustment.stages or adjustment.instruction:
+            raise Invalid("no-op cannot edit stages")
+        if adjustment.type is not A.DO_NOTHING:
+            live_stage_ids = {
+                s.stage_rollout_id
+                for s in snapshot.current().stages
+                if s.status
+                not in {
+                    StatusEnum.RUN_FAILED,
+                    StatusEnum.ACCEPTANCE_FAILED,
+                    StatusEnum.ACCEPTANCE_SUCCEED,
+                }
+            }
+            for record in snapshot.records:
+                if (
+                    record.stage_id in live_stage_ids
+                    and record.attempt
+                    and record.dispatch_state
+                    not in {
+                        "revoked",
+                        "reused",
+                    }
+                ):
+                    record.dispatch_state = "revoked"
+                    record.lease_until = 0
+                    if record.route:
+                        intents.append(
+                            {
+                                "kind": "cancel",
+                                "stage_id": record.stage_id,
+                                "route": asdict(record.route),
+                            }
+                        )
+        result = {"type": adjustment.type.value, "message": adjustment.message}
+        if successor or (
+            adjustment.type is A.DO_NOTHING
+            and not snapshot.stopped
+            and snapshot.current().status
+            not in {
+                StatusEnum.RUN_FAILED,
+                StatusEnum.ACCEPTANCE_FAILED,
+                StatusEnum.ACCEPTANCE_SUCCEED,
+            }
+        ):
+            intents.append({"kind": "advance"})
+        try:
+            committed = await asyncio.to_thread(
+                self._repository.save,
+                snapshot,
+                revision,
+                receipt=(interactive_uuid, "interactive", payload, context, result),
+                intents=tuple(intents),
+                successor=successor,
+            )
+        except Conflict:
+            # A duplicate may have committed after save's receipt read but before
+            # its CAS. Re-read in a new transaction; never retry a stale proposal.
+            committed = await asyncio.to_thread(
+                self._repository.replay,
+                interactive_uuid,
+                "interactive",
+                payload,
+                context,
+            )
+            if committed is None:
+                raise
+        return InteractiveResult(A(committed["type"]), committed["message"])
+
+    async def query_stage_rollout_details(
+        self, stage_rollout_id: int, *, limit: int = 50
+    ) -> StageRolloutDetails:
+        context = current_actor_context()
+        positive_id(stage_rollout_id)
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise Invalid("message limit must be an integer in 1..200")
+        snapshot = await asyncio.to_thread(
+            self._repository.locate, stage_rollout_id, "stage"
+        )
+        self._authorization.check("read_session", context, snapshot.owner)
+        stage = next(
+            s
+            for r in snapshot.rollouts
+            for s in r.stages
+            if s.stage_rollout_id == stage_rollout_id
+        )
+        record = next(r for r in snapshot.records if r.stage_id == stage_rollout_id)
+        if not stage.session_id:
+            return StageRolloutDetails(stage_rollout_id, "", [], False, limit)
+        if record.route is None or record.route.session_id != stage.session_id:
+            raise Invalid("stage has no trustworthy persisted session route")
+        messages = await self._messages.read(record.route, limit)
+        if type(messages) is not list or len(messages) > limit:
+            raise Invalid("message provider violated the bounded list contract")
+        return StageRolloutDetails(
+            stage_rollout_id, stage.session_id, messages, True, limit
+        )

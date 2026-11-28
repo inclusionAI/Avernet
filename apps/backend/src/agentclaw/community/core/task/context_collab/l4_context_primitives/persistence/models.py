@@ -1,8 +1,8 @@
 """ORM storage for Collet, independent Task authority and append-only Events.
 
-Fresh installations apply the baseline SQL plus the Task migration; existing
-installations also need the additive Collet metadata migration. See the domain
-README's database cutover instructions. Tests build these models on SQLite.
+Models mirror the currently deployed schema exactly. New writes serialize L4
+scope/audit/resources/creation facts and the root-Task pointer into the real
+``context_spec`` column. Tests build these models on SQLite.
 ``current_snapshot`` is retained only for explicit legacy decoding; new writes
 persist Task and derive response views.
 """
@@ -29,6 +29,11 @@ from sqlalchemy.sql import func
 from sqlalchemy.sql import text as sql_text
 
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
+UnsignedAutoIncrementBigInteger = (
+    BigInteger()
+    .with_variant(mysql.BIGINT(unsigned=True), "mysql")
+    .with_variant(Integer, "sqlite")
+)
 
 
 def _medium_text():
@@ -56,39 +61,45 @@ def _base_axes():
 
 
 class ContextCollabColletModel(Base):
-    """Bounded context and composition metadata, not Task lifecycle authority.
+    """One context collaboration row matching the deployed physical schema.
 
-    ``root_task_ref`` selects independent Task storage. ``creation_facts`` retains
-    plain creation facts and the optional L6 ProductInstance; it is not mutable
-    Task or Method state. ``scope`` anchors L3 governance, not a permission union.
-    ``collet_metadata`` stores the description and audit separately
-    from composition facts and shared SQL row timestamps.
-    Every accepted event advances ``context_version``; only Work advances Task.
+    ``context_spec`` is the only JSON storage envelope for L4 scope, audit
+    metadata, resource bindings, creation facts and the root-Task pointer.
+    The legacy ``scope``, ``collet_metadata``, ``resources``,
+    ``creation_facts`` and ``root_task_ref`` columns are deliberately absent:
+    the deployed table never received that migration. ``current_snapshot``
+    remains a real legacy compatibility column and is nullable.
     """
 
     __tablename__ = "ac_context_collab_collet"
 
     id = Column(
-        AutoIncrementBigInteger,
+        UnsignedAutoIncrementBigInteger,
         primary_key=True,
         autoincrement=True,
         nullable=False,
     )
     collab_context_id = Column(String(128), nullable=False)
+    # Product-only facts. NULL preserves independent L4 rows. The owning L6
+    # schema module attaches indexes without introducing an L4 -> L6 import;
+    # product relationships are validated by the business repository, not FKs.
+    content = Column(_medium_text(), nullable=True)
+    status = Column(
+        String(32).with_variant(mysql.VARCHAR(32, collation="utf8mb4_bin"), "mysql"),
+        nullable=True,
+    )
+    product_profile_id = Column(AutoIncrementBigInteger, nullable=True)
+    current_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
     # 创建主体引用(与初始 task.created 事件的 actor_ref 同值);可空:
     # 外部部分行可以没有;P1 创建路径恒写。
     actor_ref = Column(String(2048), nullable=True)
-    scope = Column(_medium_text(), nullable=False)
-    # Complete L4 description/audit facts for new writes; NULL means legacy
-    # unknown history, never a license to synthesize timestamps or actors.
-    collet_metadata = Column(_medium_text(), nullable=True)
-    # Typed L4 ResourceBinding list; legacy NULL decodes as an empty tuple.
-    resources = Column(_medium_text(), nullable=True)
-    creation_facts = Column(_medium_text(), nullable=False)
-    # Legacy-only compatibility column. New rows write NULL; a non-null root
-    # Task reference always wins, even if an old snapshot is still present.
+    # Complete storage envelope; see ``context_spec_codec.py`` for its typed
+    # decoder. It is the physical replacement for the never-applied split
+    # columns, rather than a compatibility projection.
+    context_spec = Column(_medium_text(), nullable=False)
+    # Legacy-only compatibility column. New rows write NULL; taskful rows keep
+    # their typed state in ac_context_collab_task and derive response views.
     current_snapshot = Column(_medium_text(), nullable=True)
-    root_task_ref = Column(String(128), nullable=True)
     # Deprecated SQL compatibility column; not read/written by the domain.
     # The current event is derived from accepted Event order at query time.
     current_event_id = Column(String(128), nullable=True)
@@ -127,10 +138,12 @@ class ContextCollabEventModel(Base):
     references an existing event in the same context; acceptance order is the
     auto-increment ``id``. ``actor_ref`` / ``visibility`` / ``payload`` /
     ``context_version_after`` are nullable so out-of-band writers may record
-    partial rows; the P1 append path always writes them. ``gmt_modified``
-    follows the shared axis pattern: the append path writes it equal to
-    ``gmt_create`` and the DDL keeps the ON UPDATE default for any future
-    out-of-band rewrite.
+    partial rows; the P1 append path always writes them. Work subject and
+    revision have no physical columns: they are stored in the reserved
+    ``payload.__task_subject`` envelope by :mod:`event_payload_codec`.
+    ``gmt_modified`` follows the shared axis pattern: the append path writes it
+    equal to ``gmt_create`` and the DDL keeps the ON UPDATE default for any
+    future out-of-band rewrite.
     """
 
     __tablename__ = "ac_context_collab_event"
@@ -143,8 +156,8 @@ class ContextCollabEventModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     event_id = Column(String(128), nullable=False)
-    task_ref = Column(String(128), nullable=True)
-    task_version_after = Column(BigInteger, nullable=True)
+    collet_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
+    collet_stage_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
     parent_event = Column(String(128), nullable=True)
     event_kind = Column(String(128), nullable=False)
     # 可空(spec 作者裁决):允许外部写入的部分行;P1 追加路径仍必写白名单值。

@@ -44,9 +44,14 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.profil
     SqlProductProfileRepository,
 )
 
+from agentclaw.community.di.modules.task.product_profile_runtime import (
+    ProductProfileRuntimeModule,
+)
+
 
 class ContextCollabRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.install(ProductProfileRuntimeModule())
         binder.bind(
             ProductInstantiationServiceProtocol,
             to=ProductInstantiationService,

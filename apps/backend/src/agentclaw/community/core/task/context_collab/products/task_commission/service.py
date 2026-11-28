@@ -78,7 +78,7 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
     resolve_event_contract,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
+    LegacyProductProfileKey,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -189,7 +189,7 @@ class TaskCommissionService:
         assignee = _required_content(command.assignee_agent_id, "assignee")
         if (
             command.product_profile_ref.profile_id
-            != ProductProfile.TASK_COMMISSION.value
+            != LegacyProductProfileKey.TASK_COMMISSION.value
         ):
             raise ContextCollabValidationError(
                 "commission requires a task_commission profile"
@@ -433,7 +433,7 @@ class TaskCommissionService:
             )
         if (
             creation_product_kind(record.creation_facts)
-            != ProductProfile.TASK_COMMISSION.value
+            != LegacyProductProfileKey.TASK_COMMISSION.value
         ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} is not "
@@ -639,7 +639,7 @@ class TaskCommissionService:
 
     def list_tasks(self) -> list[TaskCommissionSummaryView]:
         """Query.search/filter:按 product profile 列任务,gmt_create 倒序。"""
-        rows = self._repo.list_collets_by_product(ProductProfile.TASK_COMMISSION.value)
+        rows = self._repo.list_collets_by_product(LegacyProductProfileKey.TASK_COMMISSION.value)
         counts = self._repo.count_message_events(
             [collet.collet_id for collet, _, _ in rows]
         )
@@ -668,7 +668,7 @@ class TaskCommissionService:
             )
         if (
             creation_product_kind(record.creation_facts)
-            != ProductProfile.TASK_COMMISSION.value
+            != LegacyProductProfileKey.TASK_COMMISSION.value
         ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} is not a task commission"

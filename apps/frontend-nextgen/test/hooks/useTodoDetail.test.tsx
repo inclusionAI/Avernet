@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoArtifact, TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoProgress, TodoProductInteraction, TodoRecord } from '@/domain/todos/models';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -24,8 +24,50 @@ const runningTodo: TodoRecord = {
   updatedAt: '2026-11-10T02:00:00Z',
 };
 
-const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_acceptance' };
-const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'pending', collabContextId: undefined };
+const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_action' };
+const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'not_started', collabContextId: undefined };
+
+const todoProgress: TodoProgress = {
+  todoId: 'todo-1',
+  status: 'in_progress',
+  runtimeKind: 'product_collet',
+  runtimeUnavailable: false,
+  currentStageCode: 'analyze',
+  rolloutRevision: 3,
+  stopped: false,
+  stages: [
+    {
+      stageInstanceId: 'stage-1',
+      code: 'analyze',
+      name: '需求分析',
+      order: 1,
+      kind: 'bot',
+      status: 'in_progress',
+      ownerUserId: 'human-1',
+      ownerUserName: 'Human One',
+      executorSubjectId: 'bot-1',
+      executorSubjectName: 'Coding Bot',
+      summary: '正在分析需求',
+      currentStep: '形成需求理解',
+      steps: [
+        {
+          stepId: 'message-1',
+          name: '形成需求理解',
+          status: 'in_progress',
+          detail: '形成需求理解',
+        },
+      ],
+      outputs: [
+        { artifactId: 'artifact-1', kind: 'text', name: '需求理解', summary: '已形成需求理解' },
+      ],
+      attemptCount: 2,
+      detailsLoaded: true,
+      messagesComplete: false,
+      ignoredMessageCount: 1,
+      updatedAt: '2026-11-10T02:00:00Z',
+    },
+  ],
+};
 
 function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -62,6 +104,10 @@ beforeEach(() => {
     interactions: [],
     events: [],
     artifacts: [],
+    progress: null,
+    productInteractionPage: null,
+    productInteractionLoading: false,
+    productInteractionError: null,
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
@@ -74,6 +120,8 @@ beforeEach(() => {
   mockedService.loadTodoInteractions.mockResolvedValue([]);
   mockedService.loadTodoEvents.mockResolvedValue([]);
   mockedService.loadTodoArtifacts.mockResolvedValue([]);
+  mockedService.loadTodoProgress.mockResolvedValue(todoProgress);
+  mockedService.loadTodoProductInteractionPage.mockResolvedValue({ items: [], canSend: true });
   mockedService.loadTodoMentionBots.mockResolvedValue([]);
 });
 
@@ -148,6 +196,20 @@ test('切换待办时立即清理旧详情，避免先渲染上一个待办', as
   expect(mockedService.loadTodo).toHaveBeenLastCalledWith('todo-2');
 });
 
+test('执行进度接口失败不阻断待办详情和事件加载', async () => {
+  mockedService.loadTodoProgress.mockRejectedValueOnce(new Error('进度服务暂不可用'));
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
+  await waitFor(() => expect(result.current.progressLoading).toBe(false));
+
+  expect(result.current.progress).toBeNull();
+  expect(result.current.progressError).toBe('进度服务暂不可用');
+  expect(result.current.error).toBeNull();
+  expect(result.current.events).toEqual([]);
+});
+
 test('B 事件接口失败时不阻断 A 的详情和互动加载', async () => {
   mockedService.loadTodoEvents.mockRejectedValue(new Error('事件服务暂不可用'));
 
@@ -179,7 +241,7 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
   expect(result.current.events.map((item) => item.eventSeq)).toEqual([1, 2]);
 });
 
-test('待验收互动保留稳定回复和结构化 mention，只修剪 message', async () => {
+test('待处理互动保留稳定回复和结构化 mention，只修剪 message', async () => {
   mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
 
@@ -276,4 +338,67 @@ test('执行中详情打开期间轮询刷新 Todo 和事件', async () => {
   expect(mockedService.loadTodoEvents.mock.calls.length).toBeGreaterThanOrEqual(2);
   unmount();
   jest.useRealTimers();
+});
+
+function productInteraction(overrides: Partial<TodoProductInteraction> = {}): TodoProductInteraction {
+  return {
+    interactionId: 'pi-1',
+    todoId: 'todo-1',
+    kind: 'human_message',
+    actorId: '149844',
+    actorName: 'Human One',
+    requestMessage: '请补充价格来源',
+    deliveryState: 'succeeded',
+    productColletId: 1,
+    colletRolloutId: 10,
+    expectedRevision: 3,
+    response: { type: 'RE_DO', message: '已接受处理要求。' },
+    createdAt: '2026-11-27T10:00:00Z',
+    updatedAt: '2026-11-27T10:00:01Z',
+    ...overrides,
+  };
+}
+
+test('Product 待办提交互动后刷新互动页和进度', async () => {
+  mockedService.loadTodoProductInteractionPage.mockResolvedValue({
+    items: [productInteraction()],
+    canSend: true,
+  });
+  mockedService.addTodoProductInteraction.mockResolvedValue(productInteraction());
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+  await waitFor(() => expect(result.current.progress?.runtimeKind).toBe('product_collet'));
+
+  await act(async () => {
+    expect(await result.current.productInteract({ message: ' 请补充价格来源 ' })).toBe(true);
+  });
+
+  expect(mockedService.addTodoProductInteraction).toHaveBeenCalledWith('todo-1', {
+    message: '请补充价格来源',
+    replyToInteractionId: undefined,
+  });
+  expect(mockedService.addTodoInteraction).not.toHaveBeenCalled();
+  expect(result.current.productInteractionPage?.items[0]?.interactionId).toBe('pi-1');
+  expect(mockedService.loadTodoProgress).toHaveBeenCalledTimes(2);
+});
+
+test('Product 停止互动复用当前运行上下文并刷新互动页', async () => {
+  mockedService.loadTodoProductInteractionPage.mockResolvedValue({
+    items: [productInteraction({ deliveryState: 'delivery_unknown', response: undefined })],
+    canSend: false,
+    blockingInteractionId: 'pi-1',
+  });
+  mockedService.stopTodoProductInteraction.mockResolvedValue(
+    productInteraction({ deliveryState: 'cancel_requested' }),
+  );
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+  await waitFor(() => expect(result.current.isProductInteractionRuntime).toBe(true));
+
+  await act(async () => {
+    expect(await result.current.productStopInteraction('pi-1')).toBe(true);
+  });
+
+  expect(mockedService.stopTodoProductInteraction).toHaveBeenCalledWith('todo-1', 'pi-1');
+  expect(mockedService.loadTodoProductInteractionPage.mock.calls.length).toBeGreaterThan(1);
 });

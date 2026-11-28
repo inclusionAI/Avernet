@@ -17,8 +17,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
@@ -102,7 +102,7 @@ class ContextCollabService(
 
     def create_collaboration(
         self, command: CollaborationCreateCommand, context: ActorContext
-    ) -> Collet:
+    ) -> LegacyCollet:
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
         → 返回持久化 Collet。
 

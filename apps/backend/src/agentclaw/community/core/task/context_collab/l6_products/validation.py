@@ -28,7 +28,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
     MethodRelationTemplate,
     MethodTemplate,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     TaskLifecycleContract,
     composition_method_kind,
 )
@@ -45,7 +45,7 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
 )
 
 
-def validate_product_profile(definition: ProductProfileDefinition) -> None:
+def validate_product_profile(definition: LegacyProductConfiguration) -> None:
     """Reject unsupported composition/role/method-policy contracts without installing."""
     if not isinstance(definition.governance, GovernanceRequirements) or not isinstance(
         definition.compatibility, CompatibilityRequirements
@@ -154,7 +154,7 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
                 )
 
 
-def _validate_relations(definition: ProductProfileDefinition) -> None:
+def _validate_relations(definition: LegacyProductConfiguration) -> None:
     composition = definition.composition
     relations = composition.relations
     if not isinstance(relations, tuple) or any(
@@ -170,7 +170,7 @@ def _validate_relations(definition: ProductProfileDefinition) -> None:
         )
     pairs: list[tuple[str, str]] = []
     for item in relations:
-        if item.parent_method not in methods or item.child_method not in methods:
+        if item.source_method not in methods or item.target_method not in methods:
             raise ContextCollabValidationError(
                 "Method relation endpoint is not required"
             )
@@ -178,8 +178,8 @@ def _validate_relations(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "Method relation requires CompositionRelation"
             )
-        validate_composition(item.parent_method, item.relation, item.child_method)
-        pairs.append((item.parent_method, item.child_method))
+        validate_composition(item.source_method, item.relation, item.target_method)
+        pairs.append((item.source_method, item.target_method))
     if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
         raise ContextCollabValidationError("duplicate or cyclic Method relations")
     if relations and {name for pair in pairs for name in pair} != methods:

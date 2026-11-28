@@ -18,7 +18,6 @@ from injector import inject
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
-    ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
     ensure_expected_version,
@@ -30,8 +29,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest as AppendEventRecordRequest,
@@ -42,6 +41,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
     ParticipationFacts,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    encode_collet_context_spec,
+    parse_collet_context_spec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.creation import (
     build_created_collet,
@@ -63,9 +66,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
     _collet_from_row as _primitive_collet_from_row,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
-    _dump_json,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.task_storage import (
     load_tasks,
@@ -159,16 +159,17 @@ class ContextCollabRepositoryProtocol(Protocol):
 
     def list_collets_by_product(
         self, product_kind: str
-    ) -> "list[tuple[Collet, dict, datetime]]": ...
+    ) -> "list[tuple[LegacyCollet, dict, datetime]]": ...
 
     def count_message_events(
         self, collab_context_ids: "Sequence[str]"
     ) -> "dict[str, int]": ...
 
 
-def _collet_from_row(row: ContextCollabColletModel) -> tuple[Collet, dict]:
-    return _primitive_collet_from_row(row), decode_creation_facts(
-        json.loads(row.creation_facts)
+def _collet_from_row(row: ContextCollabColletModel) -> tuple[LegacyCollet, dict]:
+    return (
+        _primitive_collet_from_row(row),
+        decode_creation_facts(parse_collet_context_spec(row).creation_facts),
     )
 
 
@@ -289,7 +290,7 @@ class ContextCollabRepository:
                     "participation": participation.to_dict(),
                 },
             )
-        self._primitives.persist_created(record, _dump_json(stored_facts))
+        self._primitives.persist_created(record, stored_facts)
         return ContextCreatedRecord(
             collet=record.collet,
             creation_facts=stored_facts,
@@ -323,6 +324,7 @@ class ContextCollabRepository:
                     f"context {collab_context_id!r} not found"
                 )
             ensure_expected_version(expected_version, int(row.context_version))
+            spec = parse_collet_context_spec(row)
             _, previous = _collet_from_row(row)
             task, _ = load_tasks(db, row)
             events = (
@@ -414,19 +416,13 @@ class ContextCollabRepository:
                 raise ContextCollabValidationError(
                     "product selection must include its pinned instance"
                 )
-            updated = (
-                db.query(ContextCollabColletModel)
-                .filter(
-                    ContextCollabColletModel.id == row.id,
-                    ContextCollabColletModel.context_version == expected_version,
-                    ContextCollabColletModel.creation_facts == row.creation_facts,
-                )
-                .update(
-                    {"creation_facts": _dump_json(stored)}, synchronize_session=False
-                )
+            row.context_spec = encode_collet_context_spec(
+                spec.with_creation_facts(stored)
             )
-            if updated != 1:
-                raise ContextCollabVersionConflict("product selection CAS failed")
+            # The SELECT ... FOR UPDATE above is the writer fence. Selection does
+            # not advance context_version, so a second SQL WHERE cannot make the
+            # row more serialized; failed flushes propagate unchanged.
+            db.flush()
             bind_initial_participants(
                 db,
                 row,
@@ -454,7 +450,7 @@ class ContextCollabRepository:
 
     def list_collets_by_product(
         self, product_kind: str
-    ) -> list[tuple[Collet, dict, datetime]]:
+    ) -> list[tuple[LegacyCollet, dict, datetime]]:
         """按 product profile 列 Collet(产品列表读,spec bbs-public-discussion §4)。
 
         域类型直出,零发明 record:元组三元素 = 聚合根、创建参数
@@ -471,7 +467,7 @@ class ContextCollabRepository:
                 .order_by(ContextCollabColletModel.gmt_create.desc())
                 .all()
             )
-            listed: list[tuple[Collet, dict, datetime]] = []
+            listed: list[tuple[LegacyCollet, dict, datetime]] = []
             for row in rows:
                 try:
                     collet, facts = _collet_from_row(row)

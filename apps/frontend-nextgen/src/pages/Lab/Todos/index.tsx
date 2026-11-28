@@ -1,35 +1,44 @@
 import { PageHeader } from '@/components/Common/PageHeader';
-import type { TodoBotOption } from '@/domain/todos/models';
+import type { BotTeamRecord, TodoBotOption, TodoExecutorOption, TodoOwner } from '@/domain/todos/models';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { useSpaceContext, useSpaceContextActions } from '@/hooks/useSpaceContext';
+import { useTodoSpaces } from '@/hooks/useTodoSpaces';
 import { useTodos } from '@/hooks/useTodos';
-import { botWorkshopService } from '@/services/botWorkshop';
+import { loadBotTeams, loadTodoBots, loadTodoOwners } from '@/services/todos/todoService';
 import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
-import { useEffect, useState } from 'react';
-import { eligibleTodoBots } from './botScope';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { creatorOwnedTodoBots, eligibleTodoBots } from './botScope';
+import { BotTeamPage } from './components/BotTeamPage';
+import { TodoAutomationPage } from './components/TodoAutomationPage';
 import { TodoBoard } from './components/TodoBoard';
 import { TodoCreateModal } from './components/TodoCreateModal';
-import { TodoToolbar } from './components/TodoToolbar';
-import { loadPublicTodoBotCatalogIds } from '@/services/todos/todoBotCatalogService';
+import { TodoDimaImportModal } from './components/TodoDimaImportModal';
+import { TodoToolbar, todoExecutorFilterValue } from './components/TodoToolbar';
 
-/** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
+type TodoWorkbenchView = 'list' | 'bot-teams' | 'automation';
+
+/** 实验室待办工作台：待办列表、Bot 小队、Dima 导入与自动化入口。 */
 export default function LabTodosPage() {
-  const { init } = useSpaceContextActions();
-  const currentSpace = useSpaceContext((state) => state.currentSpace);
-  const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
-  const spaceInitialized = useSpaceContext((state) => state.initialized);
+  const {
+    currentSpace,
+    currentSpaceId,
+    initialized: spaceInitialized,
+    loading: spaceLoading,
+    error: spaceError,
+    refresh: refreshSpaces,
+  } = useTodoSpaces();
   const { identity: humanIdentity } = useHumanIdentity();
   const currentUserId = humanIdentity?.userId.trim() || undefined;
+  const currentUserName = humanIdentity?.displayName.trim() || currentUserId;
+  const [view, setView] = useState<TodoWorkbenchView>('list');
   const [createOpen, setCreateOpen] = useState(false);
+  const [dimaImportOpen, setDimaImportOpen] = useState(false);
+  const [executorFilter, setExecutorFilter] = useState<string>();
   const [bots, setBots] = useState<TodoBotOption[]>([]);
-  const [botsLoading, setBotsLoading] = useState(false);
+  const [botTeams, setBotTeams] = useState<BotTeamRecord[]>([]);
+  const [owners, setOwners] = useState<TodoOwner[]>([]);
 
-  const todos = useTodos();
-
-  useEffect(() => {
-    if (!spaceInitialized) void init();
-  }, [init, spaceInitialized]);
+  const todos = useTodos({ currentSpaceId, initialized: spaceInitialized });
 
   useEffect(() => {
     const isTeamSpace = currentSpace?.spaceType === 'TEAM';
@@ -39,32 +48,131 @@ export default function LabTodosPage() {
       return;
     }
     let aborted = false;
-    setBotsLoading(true);
-    void botWorkshopService
-      .list({ spaceId: String(currentSpaceId), page: 1, pageSize: 100 })
-      .then(async (result) => {
+    void loadTodoBots(currentSpaceId)
+      .then((items) => {
         if (aborted) return;
-        const publicCatalogIds = await loadPublicTodoBotCatalogIds(result.items);
-        if (aborted) return;
-        setBots(eligibleTodoBots(result.items, currentSpace, currentUserId, publicCatalogIds));
+        setBots(eligibleTodoBots(items, currentSpace, currentUserId));
       })
       .catch((cause) => {
         if (aborted) return;
         setBots([]);
         safeReportError(cause, { title: '当前空间 Bot 加载失败' });
-      })
-      .finally(() => {
-        if (!aborted) setBotsLoading(false);
       });
     return () => {
       aborted = true;
     };
   }, [currentSpace, currentSpaceId, currentUserId, spaceInitialized]);
 
+  const refreshBotTeams = useCallback(async () => {
+    if (currentSpaceId === undefined) {
+      setBotTeams([]);
+      return;
+    }
+    try {
+      const page = await loadBotTeams(currentSpaceId, 'active');
+      setBotTeams(page.items);
+    } catch (cause) {
+      setBotTeams([]);
+      safeReportError(cause, { title: 'Bot 小队加载失败' });
+    }
+  }, [currentSpaceId]);
+
   useEffect(() => {
-    if (botsLoading || !todos.botId) return;
-    if (!bots.some((bot) => bot.botId === todos.botId)) todos.setBotId(undefined);
-  }, [bots, botsLoading, todos.botId, todos.setBotId]);
+    if (!spaceInitialized) return;
+    void refreshBotTeams();
+  }, [refreshBotTeams, spaceInitialized]);
+
+  useEffect(() => {
+    const fallbackOwner: TodoOwner[] = currentUserId
+      ? [{ userId: currentUserId, userName: currentUserName || currentUserId }]
+      : [];
+    if (!spaceInitialized || currentSpaceId === undefined || !currentUserId) {
+      setOwners(fallbackOwner);
+      return;
+    }
+    let aborted = false;
+    void loadTodoOwners(currentSpaceId)
+      .then((members) => {
+        if (aborted) return;
+        setOwners(members.length ? members : fallbackOwner);
+      })
+      .catch((cause) => {
+        if (aborted) return;
+        setOwners(fallbackOwner);
+        safeReportError(cause, { title: '空间成员加载失败' });
+      });
+    return () => {
+      aborted = true;
+    };
+  }, [currentSpaceId, currentUserId, currentUserName, spaceInitialized]);
+
+  const executorOptions = useMemo<TodoExecutorOption[]>(
+    () =>
+      botTeams.flatMap((team) =>
+        team.publishedRevisionId
+          ? [
+              {
+                type: 'bot_team' as const,
+                id: team.botTeamId,
+                revisionId: team.publishedRevisionId,
+                name: team.name,
+                description: team.description,
+              },
+            ]
+          : [],
+      ),
+    [botTeams],
+  );
+  const schedulerBots = useMemo(
+    () => creatorOwnedTodoBots(bots, currentUserId),
+    [bots, currentUserId],
+  );
+
+  useEffect(() => {
+    if (!executorFilter) return;
+    if (!executorOptions.some((executor) => todoExecutorFilterValue(executor) === executorFilter)) {
+      setExecutorFilter(undefined);
+    }
+  }, [executorFilter, executorOptions]);
+
+  const visibleTodos = useMemo(() => {
+    if (!executorFilter) return todos.todos;
+    const separator = executorFilter.indexOf(':');
+    if (separator < 0) return todos.todos;
+    const type = executorFilter.slice(0, separator);
+    const id = executorFilter.slice(separator + 1);
+    return todos.todos.filter((todo) => (type === 'bot_team' ? todo.templateId === id : todo.botId === id));
+  }, [executorFilter, todos.todos]);
+
+  if (view === 'bot-teams') {
+    return (
+      <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-6 py-6">
+          <BotTeamPage
+            spaceId={currentSpaceId}
+            bots={bots}
+            onBack={() => setView('list')}
+            onChanged={() => void refreshBotTeams()}
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (view === 'automation') {
+    return (
+      <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-6 py-6">
+          <TodoAutomationPage
+            spaceId={currentSpaceId}
+            executorOptions={executorOptions}
+            schedulerBots={schedulerBots}
+            onBack={() => setView('list')}
+          />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
@@ -72,43 +180,63 @@ export default function LabTodosPage() {
         <PageHeader
           title="待办"
           compact
-          description="当前空间的 Bot 待办。系统自动调度执行，完成后可查看事件、互动并提交验收。"
+          description="在同一空间内，让 Bot 与团队协作，与团队一起完成工作"
         />
 
         <TodoToolbar
-          space={currentSpace}
-          bots={bots}
-          botsLoading={botsLoading}
+          executors={executorOptions}
           keyword={todos.keyword}
           status={todos.status}
-          botId={todos.botId}
+          executorFilter={executorFilter}
+          total={todos.total}
           onKeywordChange={todos.setKeyword}
           onStatusChange={todos.setStatus}
-          onBotIdChange={todos.setBotId}
+          onExecutorFilterChange={setExecutorFilter}
+          onAutomation={() => setView('automation')}
+          onBotTeams={() => setView('bot-teams')}
+          onImportDima={() => setDimaImportOpen(true)}
           onCreate={() => setCreateOpen(true)}
         />
 
         <TodoBoard
-          todos={todos.todos}
-          status={todos.status}
+          todos={visibleTodos}
           total={todos.total}
           page={todos.page}
           pageSize={todos.pageSize}
-          loading={todos.loading || !spaceInitialized}
-          error={todos.error}
-          onRetry={() => void todos.refresh()}
+          loading={
+            todos.loading ||
+            spaceLoading ||
+            (!spaceInitialized && !spaceError)
+          }
+          error={spaceInitialized ? todos.error : (spaceError ?? todos.error)}
+          onRetry={() => {
+            if (!spaceInitialized) {
+              void refreshSpaces();
+              return;
+            }
+            void todos.refresh();
+          }}
           onSelect={(todoId) => history.push(`/lab/todos/${encodeURIComponent(todoId)}`)}
           onPageChange={todos.setPage}
-          onPageSizeChange={todos.setPageSize}
         />
       </div>
 
       <TodoCreateModal
         open={createOpen}
-        bots={bots}
-        loading={botsLoading}
+        executorOptions={executorOptions}
+        owners={owners}
+        loading={todos.mutationLoading}
         onOpenChange={setCreateOpen}
         onSubmit={async (input) => Boolean(await todos.create(input))}
+      />
+
+      <TodoDimaImportModal
+        open={dimaImportOpen}
+        spaceId={currentSpaceId}
+        executorOptions={executorOptions}
+        owners={owners}
+        onOpenChange={setDimaImportOpen}
+        onImported={todos.refresh}
       />
     </main>
   );

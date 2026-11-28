@@ -16,6 +16,53 @@ is oldest-first within that state. `TodoScheduler` scans `not_started` and
 projection. Template Todos with `pending_action` are never sent through the
 legacy acceptance-reconciliation path.
 
+The Bot team product surface is a compatibility facade over the existing Todo
+template model. `TodoBotTeamServiceProtocol` and `TodoBotTeamService` expose
+Bot-team names, linear Bot nodes, immutable published revisions, and archive
+lifecycle while mapping them to the existing Template/Version/Stage services and
+storage. A node that requires approval expands to an adjacent Human stage bound
+to the `todo_owner` participant. The public BotTeam facade does not rename or
+remove the legacy Template API, add BotTeam-specific tables or columns, or
+backfill historical rows. Product-facing `bot_team_id` and `revision_id` map to
+the existing `template_id` and `template_version_id` fields; those physical names
+are intentionally retained and are not exposed by the BotTeam facade.
+
+`TodoProductCreationServiceProtocol` and `TodoProductCreationService` provide the
+shared Bot/BotTeam creation seam. A single-Bot Todo delegates to the legacy
+creation service. A BotTeam Todo pins the selected published revision, expands its
+stages, and stores the responsible Human as the `todo_owner` participant in the
+existing `participant_bindings_json`. Reads project that binding as
+`owner_id/owner_name`; historical rows without it fall back to `created_by` in
+memory only. There is no owner backfill, naming-driven DDL, or duplicate BotTeam
+storage.
+
+`TodoProductProgressServiceProtocol` and `TodoProductProgressService` project the user-facing progress view. The persisted Todo stage snapshot is the product skeleton: it owns stage identity, order, Bot, and acceptance criteria. The Product runtime rollout and its session messages only add runtime facts such as status, retry, blocker, current step, or sub-steps; they do not rename, reorder, or introduce user-visible stages. A runtime stage that cannot be matched to the Todo snapshot or read through the protocol remains explicitly unavailable/unknown rather than being guessed from source text.
+
+`ac_todo_product_interaction` is the local authoritative record for Product-Todo
+Human dialogs. Each row is created under the owning Todo row lock and only one
+row in `sending`, `delivery_unknown`, or `cancel_requested` may exist per Todo
+(single-flight). The local interaction ID is also the Product protocol
+`request_id`; it does not use a Context event ID, execution ID, or frontend-supplied
+ID. Before calling `interactive()` the service queries the Collet's runtime
+metadata and persists `collet_rollout_id` plus `expected_revision`. Protocol
+timeouts become `delivery_unknown`, which keeps the send lock; stale revisions
+and explicit runtime failures become `failed`. Only a protocol `SHUTDOWN` result
+projects the stop target and Todo as cancelled. Stop requests use the deterministic
+ID `{interaction_id}:shutdown:v1`, so repeated cancel clicks are idempotent.
+Legacy Context Todos continue to use the original interaction event flow and never
+write the Product interaction table; Product Todos never post
+`user_interaction.posted`.
+
+`TodoNotificationPublisherProtocol` is the Todo-owned notification boundary. Its
+adapter maps bounded Todo events to the existing WorkOrder/Inbox infrastructure
+and uses `delivery_key` (hashed as the inbox group ID) for idempotency. The
+recipient is only the explicit Human recipient or the Todo owner; a missing
+recipient is recorded as skipped. Inbox failures do not roll back a persisted Todo
+fact. The current implementation observes product runtime facts while serving
+Progress, so it relies on the stable delivery key to keep Inbox idempotent. It does
+not yet persist a notification-delivery ledger or run a compensation scheduler;
+failed/delivery-unknown retries remain documented follow-up work.
+
 A template Todo is pinned to an immutable published template version. Its
 ordered stage instances are the product workflow:
 
@@ -113,12 +160,40 @@ change that identity, so moving a work item between Dima projects cannot create
 a duplicate Todo in the same TeamClaw Space. The same source item may be
 imported independently into another TeamClaw Space.
 
+`source_metadata_json` stores a bounded, whitelisted JSON snapshot of useful
+Dima fields such as `processor_id` and `processor_name`. It is descriptive
+source metadata only: it does not participate in duplicate identity, bind the
+processor to a Todo template participant, select an Action notification target,
+or update automatically after import.
+
 Todo and source binding are inserted in one database transaction. A friendly
 pre-check returns the existing Todo ID for ordinary retries, while the database
 unique constraint closes concurrent-import races; an import conflict returns
 `409` with `data.existing_todo_id`. This binding is an import snapshot only. It
-does not introduce automatic Dima synchronization, status write-back, or a
-periodic import job.
+does not introduce Dima status write-back.
+
+Automatic Dima import is configuration and progress persistence, not an
+in-process scheduler. Backend stores Human-owned rules, one monotonic
+`cursor_updated_at`, and an idempotent checkpoint for each
+`(rule, container, item, source_updated_at)` source version. Rule creation, owner
+listing, and updates remain Human owner-scoped. Execution is tenant-scoped: any
+authenticated caller, including an application-only Bot caller, may list enabled
+rules, read rule detail and progress, create a Todo through a rule, and write a
+checkpoint. `created_by` is audit and imported-Todo ownership, not an execution
+permission. Each rule keeps two Bot roles separate: `bot_id` is the Space-eligible
+Bot assigned to imported Todos, while `scheduler_bot_id` is a Bot owned by the
+rule creator and selected to execute the scheduled automation. The service
+validates both scopes independently. `trigger_interval_seconds` is the interval
+between automation triggers, not a Todo or Bot execution timeout; the optional
+five-field `cron_expression` is an additional scheduling hint for the external
+Agent. Rule-bound Todo creation takes `space_id`, `bot_id`, and `created_by` only
+from the rule; the caller cannot override them. An external Agent scans every
+configured Dima container, interprets the natural-language filter, creates
+matching Todos, and writes one checkpoint per processed item. It should query Dima with
+`source_updated_at >= cursor_updated_at`, use persisted progress to de-duplicate
+equal timestamps, and advance the rule cursor only after the full multi-container
+scan window is complete. Backend does not call Dima or run a periodic import job
+for these rules.
 
 ## Bot execution and artifact reporting contract
 
@@ -196,7 +271,7 @@ event.
 ## Context Boundary
 
 ```yaml
-purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, and acceptance.
+purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, Product dialogs, notifications, and acceptance.
 provides:
   - TodoServiceProtocol
   - TodoService
@@ -210,9 +285,31 @@ provides:
   - TodoSourceServiceProtocol
   - TodoSourceService
   - TodoSourceInput
+  - TodoAutoImportServiceProtocol
+  - TodoAutoImportService
+  - TodoBotTeamServiceProtocol
+  - TodoBotTeamService
+  - TodoProductCreationServiceProtocol
+  - TodoProductCreationService
+  - TodoProductProgressServiceProtocol
+  - TodoProductProgressService
+  - TodoProductInteractionServiceProtocol
+  - TodoProductInteractionService
+  - TodoNotificationPublisherProtocol
+  - TodoNotificationPublisher
+  - TodoExecutorSelection
+  - TodoOwnerInput
+  - BotTeamRecord
+  - BotTeamRevisionRecord
+  - TodoAutoImportRuleRecord
+  - TodoAutoImportProgressRecord
   - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
+  - TodoAutoImportRepositoryProtocol
+  - TodoProductInteractionRepositoryProtocol
+  - ProductProfileServiceProtocol
+  - WorkOrderRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
   - CachePlugin
@@ -238,10 +335,13 @@ internal_dependencies:
 
 Changes affect Todo create/read, imported-source identity and duplicate
 prevention, automatic scheduling, the compensation Run endpoint, event and
-interaction projection, and acceptance. Repository state
+interaction projection, Product Human dialogs, notification delivery, and
+acceptance. Repository state
 transitions are compare-and-set operations so duplicate schedulers or operator
 retries cannot move a Todo backwards. Context creation and Todo persistence are
 not one cross-store transaction; dispatch therefore resumes from an already
-bound Context when retrying. A does not own an interaction table: Human
-interaction events and executor progress remain in B, while Human acceptance
-and the six product states remain in A; runtime attempt states remain in B.
+bound Context when retrying. A does not own the legacy Context interaction table: those Human interaction
+events and executor progress remain in B. Product Collet Todos do own the local
+`ac_todo_product_interaction` dialog facts because they are Product-boundary
+human actions and must remain readable when the external runtime changes; legacy
+product state and generic runtime attempt states remain in B.

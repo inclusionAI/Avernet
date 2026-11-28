@@ -24,6 +24,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     decode_creation_facts,
 )
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    stored_context_value,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
@@ -95,7 +98,8 @@ def test_create_only_context_without_work_or_upper_access(runtime, db):
         assert session.query(ContextCollabTaskModel).count() == 0
         assert session.query(ContextCollabEventModel).count() == 0
         row = session.query(ContextCollabColletModel).one()
-        assert row.root_task_ref is None and row.current_snapshot is None
+        assert stored_context_value(row, "root_task_ref") is None
+        assert row.current_snapshot is None
 
 
 def _create_work(service, repo):

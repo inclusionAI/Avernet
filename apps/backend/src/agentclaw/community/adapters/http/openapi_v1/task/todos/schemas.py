@@ -4,26 +4,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
     TodoArtifactRecord,
 )
-from agentclaw.community.core.task.todos.source_models import (
-    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
-    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
-    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
-    MAX_TODO_SOURCE_URL_LENGTH,
-    TodoSourceDraft,
-    TodoSourceProject,
-    TodoSourceWorkItem,
-)
-from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 from agentclaw.community.core.task.todos.models import (
     MAX_ACCEPTANCE_ID_LENGTH,
     MAX_ACCEPTANCE_TARGETS,
+    MAX_ACTOR_ID_LENGTH,
+    MAX_ACTOR_NAME_LENGTH,
     MAX_ARTIFACT_ID_LENGTH,
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -34,17 +26,42 @@ from agentclaw.community.core.task.todos.models import (
     TodoEventRecord,
     TodoRecord,
 )
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoProductColletStatus,
+)
+from agentclaw.community.core.task.todos.source_models import (
+    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+    MAX_TODO_SOURCE_URL_LENGTH,
+    TodoSourceDraft,
+    TodoSourceProject,
+    TodoSourceWorkItem,
+    normalize_todo_source_metadata,
+)
+from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
+
+from .auto_import_schemas import (
+    CreateTodoAutoImportRuleRequest as CreateTodoAutoImportRuleRequest,
+    TodoAutoImportCheckpointRequest as TodoAutoImportCheckpointRequest,
+    TodoAutoImportProgressResponse as TodoAutoImportProgressResponse,
+    TodoAutoImportRuleResponse as TodoAutoImportRuleResponse,
+    UpdateTodoAutoImportRuleRequest as UpdateTodoAutoImportRuleRequest,
+)
 
 
 class TodoSourceProjectResponse(BaseModel):
-    """One Dima project visible to the authenticated Human."""
+    """One Dima workspace or project visible to the authenticated Human."""
 
-    id: str = Field(description="Stable Dima project identifier.")
-    name: str = Field(description="Human-readable Dima project name.")
+    id: str = Field(description="Stable Dima workspace or project identifier.")
+    name: str = Field(description="Human-readable Dima workspace or project name.")
+    kind: Literal["workspace", "project"] = Field(
+        description="Whether this selectable container is a workspace or project."
+    )
 
     @classmethod
     def from_record(cls, record: TodoSourceProject) -> "TodoSourceProjectResponse":
-        return cls(id=record.id, name=record.name)
+        return cls(id=record.id, name=record.name, kind=record.kind)
 
 
 class TodoSourceWorkItemResponse(BaseModel):
@@ -100,6 +117,10 @@ class TodoSourceDraftResponse(BaseModel):
         default=None,
         description="Dima update timestamp when the provider returned one.",
     )
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Whitelisted Dima field snapshot, such as processor identity.",
+    )
 
     @classmethod
     def from_record(cls, record: TodoSourceDraft) -> "TodoSourceDraftResponse":
@@ -112,6 +133,7 @@ class TodoSourceDraftResponse(BaseModel):
             description=record.description,
             source_url=record.source_url,
             source_updated_at=record.source_updated_at,
+            metadata=record.metadata,
         )
 
 
@@ -175,10 +197,66 @@ class CreateTodoSourceRequest(BaseModel):
         max_length=MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
         description="Optional Dima update timestamp snapshot.",
     )
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Bounded whitelisted Dima field snapshot.",
+    )
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def validate_metadata(cls, value: object) -> dict[str, str]:
+        return normalize_todo_source_metadata(value)
+
+
+class CreateTodoExecutorRequest(BaseModel):
+    """Single Bot or immutable Bot-team revision selected to execute a Todo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["bot", "bot_team"] = Field(
+        description="Product executor kind selected by the Human."
+    )
+    id: str = Field(
+        min_length=1,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Bot identity or Bot-team identity in the selected Space.",
+    )
+    revision_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Required immutable revision for a Bot team; omitted for a single Bot.",
+    )
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> "CreateTodoExecutorRequest":
+        if self.type == "bot" and self.revision_id is not None:
+            raise ValueError("revision_id is not allowed for a Bot executor")
+        if self.type == "bot_team" and not self.revision_id:
+            raise ValueError("revision_id is required for a Bot-team executor")
+        return self
+
+
+class CreateTodoOwnerRequest(BaseModel):
+    """Human responsible for the Todo and its explicit approval stages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(
+        min_length=1,
+        max_length=MAX_ACTOR_ID_LENGTH,
+        description="Stable Human identity responsible for the Todo.",
+    )
+    user_name: str = Field(
+        min_length=1,
+        max_length=MAX_ACTOR_NAME_LENGTH,
+        description="Human-readable owner name captured for the Todo.",
+    )
 
 
 class CreateTodoRequest(BaseModel):
     """Create one pending Todo in the selected product Space."""
+
+    model_config = ConfigDict(extra="forbid")
 
     space_id: int = Field(
         gt=0,
@@ -193,14 +271,59 @@ class CreateTodoRequest(BaseModel):
         max_length=MAX_DESCRIPTION_LENGTH,
         description="Todo objective persisted by A and passed to B when automatically dispatched.",
     )
-    bot_id: str = Field(
+    bot_id: str | None = Field(
+        default=None,
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
-        description="Identifier of the Space-eligible Bot that will execute the Todo.",
+        description="Legacy single-Bot selector retained for compatible callers.",
+    )
+    executor: CreateTodoExecutorRequest | None = Field(
+        default=None,
+        description="Product executor selector for either a Bot or Bot team.",
+    )
+    owner: CreateTodoOwnerRequest | None = Field(
+        default=None,
+        description="Human responsible for the Todo; required with executor.",
     )
     source: CreateTodoSourceRequest | None = Field(
         default=None,
         description="Imported-source identity; omitted for manually created Todos.",
+    )
+
+    @model_validator(mode="after")
+    def validate_executor_compatibility(self) -> "CreateTodoRequest":
+        if self.bot_id is None and self.executor is None:
+            raise ValueError("bot_id or executor must be provided")
+        if self.bot_id is not None and self.executor is not None and self.executor.type != "bot":
+            raise ValueError("bot_id is only allowed with a Bot executor")
+        if (
+            self.bot_id is not None
+            and self.executor is not None
+            and self.executor.type == "bot"
+            and self.executor.id != self.bot_id
+        ):
+            raise ValueError("bot_id and executor.id must match for a Bot")
+        if self.executor is not None and self.owner is None:
+            raise ValueError("owner is required when executor is provided")
+        return self
+
+
+class CreateTodoFromAutoImportRuleRequest(BaseModel):
+    """Create one Todo from a Dima item selected by an automatic import rule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Todo title derived from the selected Dima work item.",
+    )
+    description: str = Field(
+        max_length=MAX_DESCRIPTION_LENGTH,
+        description="Todo objective derived from the selected Dima work item.",
+    )
+    source: CreateTodoSourceRequest = Field(
+        description="Dima source identity and whitelisted source-field snapshot."
     )
 
 
@@ -407,7 +530,9 @@ class TodoStageResponse(BaseModel):
             state_reason=record.state_reason,
             requested_action=record.requested_action,
             started_at=record.started_at.isoformat() if record.started_at else None,
-            completed_at=record.completed_at.isoformat() if record.completed_at else None,
+            completed_at=record.completed_at.isoformat()
+            if record.completed_at
+            else None,
             created_at=record.created_at.isoformat(),
             updated_at=record.updated_at.isoformat(),
         )
@@ -598,7 +723,7 @@ class TodoInteractionResponse(TodoEventResponse):
 
 
 class TodoResponse(BaseModel):
-    """Public Todo payload without collaboration-owner transport details."""
+    """Public Todo payload including its responsible Human projection."""
 
     todo_id: str = Field(description="A-owned Todo identifier.")
     space_id: int = Field(description="Product Space containing this Todo.")
@@ -631,11 +756,36 @@ class TodoResponse(BaseModel):
     pending_action_kind: str | None = Field(
         description="Why the Todo is waiting for an explicit Human action, if any."
     )
-    state_reason: str | None = Field(description="Current product-state reason, if any.")
-    requested_action: str | None = Field(description="Action requested from the Human, if any.")
+    state_reason: str | None = Field(
+        description="Current product-state reason, if any."
+    )
+    requested_action: str | None = Field(
+        description="Action requested from the Human, if any."
+    )
+    owner_id: str = Field(
+        description="Responsible Human identity, with legacy rows projected from created_by."
+    )
+    owner_name: str = Field(
+        description="Responsible Human display name when captured by the product flow."
+    )
+    product_runtime_status: Literal[
+        "ready",
+        "retryable_failure",
+        "not_applicable",
+        "binding_conflict",
+        "invalid_binding",
+    ] | None = Field(
+        default=None,
+        description="Dynamic Product runtime binding result when explicitly checked.",
+    )
 
     @classmethod
-    def from_record(cls, record: TodoRecord) -> "TodoResponse":
+    def from_record(
+        cls,
+        record: TodoRecord,
+        *,
+        product_runtime_status: TodoProductColletStatus | None = None,
+    ) -> "TodoResponse":
         return cls(
             todo_id=record.todo_id,
             space_id=record.space_id,
@@ -654,4 +804,11 @@ class TodoResponse(BaseModel):
             pending_action_kind=record.pending_action_kind,
             state_reason=record.state_reason,
             requested_action=record.requested_action,
+            owner_id=record.owner_id,
+            owner_name=record.owner_name,
+            product_runtime_status=(
+                product_runtime_status.value
+                if product_runtime_status is not None
+                else None
+            ),
         )

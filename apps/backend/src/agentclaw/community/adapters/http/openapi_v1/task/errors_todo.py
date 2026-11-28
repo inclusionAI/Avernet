@@ -1,5 +1,8 @@
 """Stable public error mapping for the Todo workbench."""
 
+from agentclaw.community.core.task.todos.collaboration.protocol import (
+    TodoCollaborationError,
+)
 from agentclaw.community.core.task.todos.errors import (
     TodoArtifactContentError,
     TodoArtifactNotFoundError,
@@ -7,24 +10,36 @@ from agentclaw.community.core.task.todos.errors import (
     TodoArtifactStorageError,
     TodoArtifactStorageNotConfiguredError,
     TodoArtifactUploadTooLargeError,
+    TodoAutoImportCursorConflictError,
+    TodoAutoImportRuleDisabledError,
+    TodoAutoImportRuleNotFoundError,
     TodoBotAmbiguousError,
     TodoBotScopeError,
     TodoExecutionAuthError,
     TodoNotFoundError,
-    TodoStateConflictError,
-    TodoSourceAuthError,
+    TodoProductInteractionInFlightError,
+    TodoProductInteractionNotCancellableError,
+    TodoProductInteractionTransitionError,
+    TodoProductInteractionTerminalTodoError,
+    TodoProductInvalidRuntimeBindingError,
+    TodoProductRuntimeNotReadyError,
     TodoSourceAlreadyImportedError,
+    TodoSourceAuthError,
     TodoSourceResponseError,
     TodoSourceUnavailableError,
     TodoSourceWorkItemNotFoundError,
-)
-from agentclaw.community.core.task.todos.collaboration.protocol import (
-    TodoCollaborationError,
+    TodoStateConflictError,
 )
 
 TODO_HTTP_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TodoNotFoundError: (404, "Not found"),
     TodoStateConflictError: (409, "Todo state conflict"),
+    TodoProductInteractionInFlightError: (409, "Product interaction is in flight"),
+    TodoProductInteractionNotCancellableError: (409, "Product interaction cannot be cancelled"),
+    TodoProductInteractionTransitionError: (409, "Product interaction transition conflict"),
+    TodoProductInteractionTerminalTodoError: (409, "Todo is terminal"),
+    TodoProductInvalidRuntimeBindingError: (409, "Todo runtime binding is invalid"),
+    TodoProductRuntimeNotReadyError: (409, "Todo product runtime is not ready"),
     TodoBotScopeError: (403, "Forbidden"),
     TodoBotAmbiguousError: (409, "Todo bot is ambiguous"),
     TodoExecutionAuthError: (401, "Invalid Todo execution credential"),
@@ -34,6 +49,9 @@ TODO_HTTP_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TodoArtifactObjectNotFoundError: (404, "Not found"),
     TodoArtifactStorageNotConfiguredError: (503, "Todo artifact storage unavailable"),
     TodoArtifactStorageError: (502, "Todo artifact storage operation failed"),
+    TodoAutoImportRuleNotFoundError: (404, "Not found"),
+    TodoAutoImportRuleDisabledError: (409, "Todo auto-import rule is disabled"),
+    TodoAutoImportCursorConflictError: (409, "Todo auto-import cursor conflict"),
     TodoCollaborationError: (503, "Todo collaboration service unavailable"),
     TodoSourceAuthError: (401, "Dima authorization is unavailable"),
     TodoSourceAlreadyImportedError: (409, "Dima work item already imported"),

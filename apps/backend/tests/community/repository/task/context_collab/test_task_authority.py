@@ -48,6 +48,12 @@ from tests.community.core.task.context_collab.creation_facts import (
     creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    store_event_subject,
+    stored_context_value,
+    stored_event_subject,
+)
 
 OWNER = PrincipalRef("human", "u_task_owner")
 EXECUTOR = AgentRef("bot", "bot_task_worker")
@@ -128,7 +134,7 @@ def _storage(db):
         collets = [
             (
                 r.collab_context_id,
-                r.root_task_ref,
+                stored_context_value(r, "root_task_ref"),
                 r.context_version,
                 r.current_event_id,
                 r.current_snapshot,
@@ -146,8 +152,7 @@ def _storage(db):
         events = [
             (
                 r.event_id,
-                r.task_ref,
-                r.task_version_after,
+                *stored_event_subject(r),
                 r.context_version_after,
                 r.payload,
             )
@@ -166,11 +171,10 @@ def _make_legacy(db, repository, context_id):
     with db.orm_session() as session:
         session.query(ContextCollabTaskModel).delete()
         row = session.query(ContextCollabColletModel).one()
-        row.root_task_ref = None
+        store_context_value(row, "root_task_ref", None)
         row.current_snapshot = json.dumps(snapshot)
         for event in session.query(ContextCollabEventModel):
-            event.task_ref = None
-            event.task_version_after = None
+            store_event_subject(event)
 
 
 def test_independent_task_identity_revision_and_work_subject(repository, db):
@@ -364,9 +368,13 @@ def test_invalid_task_authority_fails_closed_without_snapshot_fallback(
                 replace(created.task, last_event_ref="missing-event").to_dict()
             )
         elif corruption == "wrong_subject":
-            session.query(ContextCollabEventModel).one().task_ref = "different-task"
+            store_event_subject(
+                session.query(ContextCollabEventModel).one(),
+                task_ref="different-task",
+                task_version_after=1,
+            )
         elif corruption == "orphan":
-            row.root_task_ref = None
+            store_context_value(row, "root_task_ref", None)
         else:
             for child_id, parent_id in (("child-a", "child-b"), ("child-b", "child-a")):
                 child = replace(
@@ -436,7 +444,7 @@ def test_partial_legacy_context_allows_message_but_not_work(repository, db):
     with db.orm_session() as session:
         session.query(ContextCollabTaskModel).delete()
         row = session.query(ContextCollabColletModel).one()
-        row.root_task_ref = None
+        store_context_value(row, "root_task_ref", None)
         row.current_snapshot = None
     assert repository.get_current_status(created.collet.collet_id).task is None
     message = _message(repository, created.collet.collet_id)

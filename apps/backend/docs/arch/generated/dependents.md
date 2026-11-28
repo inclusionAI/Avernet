@@ -363,6 +363,10 @@ _No dependents in the boundary-significant set._
 - `agentclaw.community.core.repository`
 - `agentclaw.community.core.service_bot`
 
+## `agentclaw.community.core.task.context_collab.l6_products.product_profile_service`
+
+- `agentclaw.community.api`
+
 ## `agentclaw.community.core.task_queue`
 
 - `agentclaw.community.core.acli_clis`

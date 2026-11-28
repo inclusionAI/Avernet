@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import json
-from typing import Any
 from uuid import uuid4
 
 from injector import inject
 
-from agentclaw.community.core.bot_public.catalog_metadata import (
-    BotCatalogMetadataServiceProtocol,
-)
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todo_templates import (
@@ -37,6 +33,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.stage_models import (
     TodoParticipantBinding,
     TodoParticipantBindingInput,
@@ -68,13 +65,11 @@ class TodoTemplateCreationService(TodoTemplateCreationServiceProtocol):
         template_repository: TodoTemplateRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
-        catalog_metadata: BotCatalogMetadataServiceProtocol,
     ) -> None:
         self._repository = repository
         self._templates = template_repository
         self._space_access = space_access
         self._bot_repository = bot_repository
-        self._catalog_metadata = catalog_metadata
 
     def create_todo_from_template(
         self,
@@ -86,6 +81,7 @@ class TodoTemplateCreationService(TodoTemplateCreationServiceProtocol):
         title: str,
         description: str,
         bindings: Mapping[str, object],
+        source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord:
         space_id = self._positive_int(space_id, "space_id")
@@ -164,6 +160,7 @@ class TodoTemplateCreationService(TodoTemplateCreationServiceProtocol):
             record=todo,
             participant_bindings=tuple(concrete.values()),
             stages=stages,
+            source=source,
         )
 
     def _resolve_bindings(
@@ -191,7 +188,6 @@ class TodoTemplateCreationService(TodoTemplateCreationServiceProtocol):
             if item.subject_type is TodoParticipantSubjectType.BOT:
                 bot = resolve_todo_bot(
                     bot_repository=self._bot_repository,
-                    catalog_metadata=self._catalog_metadata,
                     space=space,
                     actor_id=actor_id,
                     bot_id=value.subject_id,
@@ -305,7 +301,6 @@ class TodoTemplateCreationService(TodoTemplateCreationServiceProtocol):
         if reference.subject_type is TodoParticipantSubjectType.BOT:
             bot = resolve_todo_bot(
                 bot_repository=self._bot_repository,
-                catalog_metadata=self._catalog_metadata,
                 space=space,
                 actor_id=actor_id,
                 bot_id=reference.subject_id,

@@ -8,7 +8,7 @@ from dataclasses import fields, is_dataclass
 from functools import lru_cache
 from enum import Enum
 from types import UnionType
-from typing import Union, get_args, get_origin, get_type_hints
+from typing import Literal, Union, get_args, get_origin, get_type_hints
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -36,8 +36,21 @@ def encode(value):
         }
     if is_dataclass(value):
         return {
-            "type": type(value).__name__,
-            **{f.name: encode(getattr(value, f.name)) for f in fields(value) if f.init},
+            "type": (
+                "ProductProfileDefinition"
+                if type(value).__name__ == "LegacyProductConfiguration"
+                else type(value).__name__
+            ),
+            **{
+                f.name: encode(getattr(value, f.name))
+                for f in fields(value)
+                if f.init
+                and not (
+                    type(value).__name__ == "AdaptiveUntilAccepted"
+                    and f.name == "feedback_timeout_seconds"
+                    and value.feedback_mode == "autonomous"
+                )
+            },
         }
     if isinstance(value, Enum):
         return value.value
@@ -52,6 +65,10 @@ def encode(value):
 
 def decode(data, expected, registry, method_resolver=None):
     origin, args = get_origin(expected), get_args(expected)
+    if origin is Literal:
+        if not any(type(data) is type(option) and data == option for option in args):
+            raise ContextCollabValidationError("unknown definition literal")
+        return data
     if origin in (Union, UnionType):
         for option in args:
             try:
@@ -91,14 +108,37 @@ def decode(data, expected, registry, method_resolver=None):
             raise ContextCollabValidationError("invalid MethodProfile reference")
         return method_resolver(data["method"], data["version"])
     if type(data) is dict:
-        subtype = next((t for t in registry if t.__name__ == data.get("type")), None)
+        subtype = next(
+            (
+                t
+                for t in registry
+                if (
+                    "ProductProfileDefinition"
+                    if t.__name__ == "LegacyProductConfiguration"
+                    else t.__name__
+                )
+                == data.get("type")
+            ),
+            None,
+        )
         if subtype is not None and issubclass(subtype, expected):
             expected = subtype
     names = {f.name for f in fields(expected) if f.init}
     if (
+        expected.__name__ == "AdaptiveUntilAccepted"
+        and type(data) is dict
+        and data.get("feedback_mode") == "autonomous"
+    ):
+        names.remove("feedback_timeout_seconds")
+    if (
         type(data) is not dict
         or set(data) != names | {"type"}
-        or data["type"] != expected.__name__
+        or data["type"]
+        != (
+            "ProductProfileDefinition"
+            if expected.__name__ == "LegacyProductConfiguration"
+            else expected.__name__
+        )
     ):
         raise ContextCollabValidationError(
             f"invalid fields/discriminator for {expected.__name__}"

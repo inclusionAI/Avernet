@@ -19,6 +19,11 @@ export interface BbsNotificationTarget {
   topicId: string;
   postId?: string;
 }
+/** Todo 通知携带的站内跳转目标。 */
+export interface TodoNotificationTarget {
+  todoId: string;
+  focus: 'interaction';
+}
 
 /** 空间加入态（后端 join_status：JOINED/APPLYING/NOT_JOINED） */
 export type SpaceJoinStatus = 'JOINED' | 'APPLYING' | 'NOT_JOINED' | 'UNKNOWN';
@@ -87,6 +92,8 @@ export interface WorkOrder {
   content: string;
   /** BBS 通知的站内跳转目标（由 content.target 解析）。 */
   bbsTarget?: BbsNotificationTarget;
+  /** Todo 通知的站内跳转目标（由 content.target 解析）。 */
+  todoTarget?: TodoNotificationTarget;
   /** 详情抽屉用的原始 JSON 文本（非文本型对象 content 经 JSON.stringify，列表/通知文本不填充）。 */
   contentRaw?: string;
   /** 通知 content 对象内的外部详情链接（如 Bot 公开风险检测的安全工单）；用于列表内联链接与详情外链按钮。 */
@@ -123,6 +130,7 @@ export type NotificationSummary = Pick<
   | 'bizType'
   | 'eventType'
   | 'bbsTarget'
+  | 'todoTarget'
 >;
 
 /** 工单列表查询参数（Hook/Service 层用） */

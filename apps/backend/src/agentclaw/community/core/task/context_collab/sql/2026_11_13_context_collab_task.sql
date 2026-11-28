@@ -1,14 +1,9 @@
 -- Apply AFTER 2026_11_11_context_collab.sql, before starting the Task-authoritative runtime.
 -- OceanBase MySQL mode, matching the baseline dialect. Apply once via the deployment migration process.
 -- Stop old snapshot-writing runtimes before cutover; mixed old/new writers are not supported.
--- No historic events or profile versions are rewritten. GET never performs backfill.
-
-ALTER TABLE `ac_context_collab_collet`
-  ADD COLUMN `root_task_ref` varchar(128) DEFAULT NULL COMMENT 'Independent root L4 Task; NULL selects explicit legacy decoding';
-
-ALTER TABLE `ac_context_collab_event`
-  ADD COLUMN `task_ref` varchar(128) DEFAULT NULL COMMENT 'Work subject; NULL for Message and pre-Task history',
-  ADD COLUMN `task_version_after` bigint(20) DEFAULT NULL COMMENT 'Task revision, distinct from context_version_after';
+-- Work Event subject/revision stays inside ac_context_collab_event.payload.__task_subject;
+-- the baseline Event table must NOT gain task_ref/task_version_after physical columns.
+-- The root Task pointer lives inside ac_context_collab_collet.context_spec, not a physical Collet column.
 
 CREATE TABLE `ac_context_collab_task` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

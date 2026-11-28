@@ -23,8 +23,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -52,12 +52,12 @@ class InitialEventDraft:
 
 @dataclass
 class CreatedColletRecord:
-    collet: Collet
+    collet: LegacyCollet
 
 
 @dataclass
 class CreatedWorkRecord:
-    collet: Collet
+    collet: LegacyCollet
     task: Task
     initial_event: EventRecord
 
@@ -65,14 +65,14 @@ class CreatedWorkRecord:
 @dataclass
 class StoredEventAppend:
     event: EventRecord
-    collet: Collet
+    collet: LegacyCollet
     task: Task | None
     creation_facts_json: str
 
 
 @dataclass
 class PrimitiveReadState:
-    collet: Collet
+    collet: LegacyCollet
     task: Task | None
     tasks: tuple[Task, ...]
     events: list[EventRecord]
@@ -118,7 +118,7 @@ class CollaborationRecordDecoder(Protocol[ReadStateT_co]):
 def decode_primitive_creation_facts(creation_facts_json: str) -> dict:
     facts = json.loads(creation_facts_json)
     if facts == {}:
-        return {}  # A newly created Collet has no Work facts.
+        return {}  # A newly created LegacyCollet has no Work facts.
     if (
         not isinstance(facts, dict)
         or set(facts) != {"objective", "executor_refs"}

@@ -56,6 +56,12 @@ from agentclaw.community.adapters.http.task.task_config_router import (
 from agentclaw.community.adapters.http.task.task_read_routes import (
     router as task_read_api_router,
 )
+from agentclaw.community.adapters.http.task.space_routes import (
+    router as space_api_router,
+)
+from agentclaw.community.adapters.http.task.todos.internal_router import (
+    router as todo_internal_router,
+)
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
     emit_relay_report_reject_trajectory,
@@ -101,6 +107,8 @@ router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
 router.include_router(manifest_api_router)
 router.include_router(task_read_api_router)
+router.include_router(space_api_router)
+router.include_router(todo_internal_router)
 router.include_router(task_config_router)
 router.include_router(artifact_api_router)
 router.include_router(artifact_object_file_router)

@@ -126,6 +126,7 @@ class TodoRepository(TodoRepositoryProtocol):
         bot_name: str | None,
         created_by: str,
         source: TodoSourceInput | None = None,
+        participant_bindings: tuple[TodoParticipantBinding, ...] = (),
     ) -> TodoRecord:
         if source is not None:
             existing_todo_id = self._find_source_todo_id(
@@ -151,6 +152,9 @@ class TodoRepository(TodoRepositoryProtocol):
                     pending_action_kind=None,
                     state_reason=None,
                     requested_action=None,
+                    participant_bindings_json=self._participant_bindings_json(
+                        participant_bindings
+                    ),
                     bot_id=bot_id,
                     bot_name=bot_name,
                     status=TodoStatus.NOT_STARTED.value,
@@ -170,6 +174,12 @@ class TodoRepository(TodoRepositoryProtocol):
                             source_item_id=source.item_id,
                             source_url=source.url,
                             source_updated_at=source.updated_at,
+                            source_metadata_json=json.dumps(
+                                source.metadata,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
                             imported_by=created_by,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
@@ -195,47 +205,154 @@ class TodoRepository(TodoRepositoryProtocol):
         record: TodoRecord,
         participant_bindings: tuple[TodoParticipantBinding, ...],
         stages: tuple[TodoStageRecord, ...],
+        source: TodoSourceInput | None = None,
     ) -> TodoRecord:
-        with self._transaction() as db:
-            row = TodoModel(
-                todo_id=record.todo_id,
+        if source is not None:
+            existing_todo_id = self._find_source_todo_id(
                 space_id=record.space_id,
-                title=record.title,
-                description=record.description,
-                template_id=record.template_id,
-                template_version_id=record.template_version_id,
-                template_name_snapshot=record.template_name_snapshot,
-                current_stage_instance_id=record.current_stage_instance_id,
-                pending_action_kind=record.pending_action_kind,
-                state_reason=record.state_reason,
-                requested_action=record.requested_action,
-                participant_bindings_json=json.dumps(
-                    [
-                        {
-                            "key": binding.key,
-                            "label": binding.label,
-                            "subject_type": binding.subject_type,
-                            "subject_id": binding.subject_id,
-                            "subject_name": binding.subject_name,
-                        }
-                        for binding in participant_bindings
-                    ]
-                ),
-                bot_id=record.bot_id,
-                bot_name=record.bot_name,
-                status=record.status.value,
-                collab_context_id=record.collab_context_id,
-                created_by=record.created_by,
-                env=get_current_env(),
-                avernet_tenant=get_current_avernet_tenant(),
+                source_type=source.source_type,
+                source_item_id=source.item_id,
             )
-            db.add(row)
-            db.flush()
-            for stage in stages:
-                db.add(self._stage_model(todo_id=record.todo_id, stage=stage))
+            if existing_todo_id is not None:
+                raise TodoSourceAlreadyImportedError(existing_todo_id)
+        try:
+            with self._transaction() as db:
+                row = TodoModel(
+                    todo_id=record.todo_id,
+                    space_id=record.space_id,
+                    title=record.title,
+                    description=record.description,
+                    template_id=record.template_id,
+                    template_version_id=record.template_version_id,
+                    template_name_snapshot=record.template_name_snapshot,
+                    current_stage_instance_id=record.current_stage_instance_id,
+                    pending_action_kind=record.pending_action_kind,
+                    state_reason=record.state_reason,
+                    requested_action=record.requested_action,
+                    participant_bindings_json=self._participant_bindings_json(
+                        participant_bindings
+                    ),
+                    bot_id=record.bot_id,
+                    bot_name=record.bot_name,
+                    status=record.status.value,
+                    collab_context_id=record.collab_context_id,
+                    product_collet_id=record.product_collet_id,
+                    created_by=record.created_by,
+                    env=get_current_env(),
+                    avernet_tenant=get_current_avernet_tenant(),
+                )
+                db.add(row)
+                if source is not None:
+                    db.add(
+                        self._source_binding_model(
+                            todo_id=record.todo_id,
+                            space_id=record.space_id,
+                            source=source,
+                            imported_by=record.created_by,
+                        )
+                    )
+                db.flush()
+                for stage in stages:
+                    db.add(self._stage_model(todo_id=record.todo_id, stage=stage))
+                db.flush()
+                db.refresh(row)
+                return row.to_record()
+        except IntegrityError as exc:
+            if source is not None:
+                existing_todo_id = self._find_source_todo_id(
+                    space_id=record.space_id,
+                    source_type=source.source_type,
+                    source_item_id=source.item_id,
+                )
+                if existing_todo_id is not None:
+                    raise TodoSourceAlreadyImportedError(existing_todo_id) from exc
+            raise
+
+    @staticmethod
+    def _source_binding_model(
+        *,
+        todo_id: str,
+        space_id: int,
+        source: TodoSourceInput,
+        imported_by: str,
+    ) -> TodoSourceBindingModel:
+        return TodoSourceBindingModel(
+            todo_id=todo_id,
+            space_id=space_id,
+            source_type=source.source_type,
+            source_container_id=source.container_id,
+            source_item_id=source.item_id,
+            source_url=source.url,
+            source_updated_at=source.updated_at,
+            source_metadata_json=json.dumps(
+                source.metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            imported_by=imported_by,
+            env=get_current_env(),
+            avernet_tenant=get_current_avernet_tenant(),
+        )
+
+    def get_source_binding(self, *, todo_id: str) -> TodoSourceInput | None:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(TodoSourceBindingModel)
+                .filter(
+                    TodoSourceBindingModel.todo_id == todo_id,
+                    TodoSourceBindingModel.env == get_current_env(),
+                    TodoSourceBindingModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            return TodoSourceInput(
+                source_type=row.source_type,
+                container_id=row.source_container_id,
+                item_id=row.source_item_id,
+                url=row.source_url,
+                updated_at=row.source_updated_at,
+                metadata=json.loads(row.source_metadata_json or "{}"),
+            )
+
+    def bind_product_collet(
+        self, *, todo_id: str, product_collet_id: int
+    ) -> TodoRecord:
+        if isinstance(product_collet_id, bool) or not isinstance(product_collet_id, int) or product_collet_id <= 0:
+            raise TodoStateConflictError("product_collet_id must be positive")
+        with self._transaction() as db:
+            row = self._require_todo(db, todo_id=todo_id, lock=True)
+            if row.product_collet_id is None:
+                row.product_collet_id = product_collet_id
+            elif row.product_collet_id != product_collet_id:
+                raise TodoStateConflictError(
+                    "Todo is already bound to a different Product Collet"
+                )
             db.flush()
             db.refresh(row)
             return row.to_record()
+
+    @staticmethod
+    def _participant_bindings_json(
+        participant_bindings: tuple[TodoParticipantBinding, ...],
+    ) -> str:
+        return json.dumps(
+            [
+                {
+                    "key": binding.key,
+                    "label": binding.label,
+                    "subject_type": binding.subject_type,
+                    "subject_id": binding.subject_id,
+                    "subject_name": binding.subject_name,
+                }
+                for binding in participant_bindings
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     @classmethod
     def _stage_model(cls, *, todo_id: str, stage: TodoStageRecord):

@@ -27,6 +27,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     INITIAL_BINDING_EVENT,
     ParticipationFacts,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    encode_collet_context_spec,
+    parse_collet_context_spec,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
     ContextCollabTaskModel,
@@ -119,7 +123,9 @@ def bind_initial_participants(
         .update(
             {
                 "context_version": previous_version + 1,
-                "collet_metadata": _dump_json(metadata.to_dict()) if metadata else None,
+                "context_spec": encode_collet_context_spec(
+                    parse_collet_context_spec(row).with_collet_metadata(metadata)
+                ),
                 "gmt_modified": now,
             },
             synchronize_session=False,

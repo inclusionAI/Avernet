@@ -105,6 +105,9 @@ class TodoRecord:
     pending_action_kind: str | None = None
     state_reason: str | None = None
     requested_action: str | None = None
+    owner_id: str = ""
+    owner_name: str = ""
+    product_collet_id: int | None = None
 
 
 @dataclass(frozen=True)

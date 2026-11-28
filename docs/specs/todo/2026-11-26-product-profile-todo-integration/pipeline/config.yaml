@@ -1,0 +1,10 @@
+pipeline:
+  tier1:
+    max_rounds: 4
+    max_fix_attempts: 3
+    difficulty: hard
+    checkpoint: false
+  tier2:
+    coverage_threshold: 80
+    max_rounds: 2
+    checkpoint: false

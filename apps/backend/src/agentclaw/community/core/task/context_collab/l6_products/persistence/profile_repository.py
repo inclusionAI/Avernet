@@ -19,7 +19,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductCapabilities,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profile_codec import (
@@ -77,7 +77,7 @@ class SqlProductProfileRepository:
             Row.avernet_tenant == axes.avernet_tenant, Row.env == axes.env
         )
 
-    def get(self, product: str, version: int) -> ProductProfileDefinition:
+    def get(self, product: str, version: int) -> LegacyProductConfiguration:
         ref, axes = VersionedProfileRef(product, version), profile_axes()
         with self.db.orm_session() as session:
             row = (
@@ -104,7 +104,7 @@ class SqlProductProfileRepository:
 
     def publish_many(
         self,
-        definitions: tuple[ProductProfileDefinition, ...],
+        definitions: tuple[LegacyProductConfiguration, ...],
         publisher: PrincipalRef,
         *,
         verify_history: bool = False,
@@ -155,6 +155,9 @@ class SqlProductProfileRepository:
                 return tuple(result)
 
     def _verify_history(self, session, axes):
+        from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+            parse_collet_context_spec,
+        )
         from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
             ContextCollabColletModel,
         )
@@ -170,7 +173,7 @@ class SqlProductProfileRepository:
             .filter(ContextCollabColletModel.env == axes.env)
             .all()
         ):
-            facts = json.loads(row.creation_facts)
+            facts = parse_collet_context_spec(row).creation_facts
             ref = creation_profile_ref(facts)
             if ref is not None and ref not in available:
                 raise ContextCollabValidationError(

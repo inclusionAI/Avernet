@@ -1,13 +1,13 @@
-import { Badge, Button, Card, Empty, Pagination, Spin } from '@/components/ui';
-import type { TodoRecord, TodoStatus } from '@/domain/todos/models';
+import { Badge, Button, Empty, Spin } from '@/components/ui';
+import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import type { TodoRecord } from '@/domain/todos/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL } from '@/domain/todos/status';
 import { cn } from '@/utils/cn';
-import { Bot, CalendarDays, ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { Bot, ChevronLeft, ChevronRight, Workflow } from 'lucide-react';
+import { useMemo } from 'react';
 
 interface TodoBoardProps {
   todos: TodoRecord[];
-  status?: TodoStatus;
   total: number;
   page: number;
   pageSize: number;
@@ -16,118 +16,21 @@ interface TodoBoardProps {
   onRetry: () => void;
   onSelect: (todoId: string) => void;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
 }
 
-type TodoGroupKey = TodoStatus;
-
-interface TodoGroup {
-  key: TodoGroupKey;
-  label: string;
-  statuses: TodoStatus[];
-  labelClassName?: string;
-  attentionDotClassName?: string;
-}
-
-const TODO_GROUPS: TodoGroup[] = [
-  {
-    key: 'pending',
-    label: '待处理',
-    statuses: ['pending'],
-    labelClassName: 'font-semibold text-destructive',
-    attentionDotClassName: 'bg-destructive',
-  },
-  {
-    key: 'in_progress',
-    label: '进行中',
-    statuses: ['in_progress'],
-  },
-  {
-    key: 'pending_acceptance',
-    label: '待验收',
-    statuses: ['pending_acceptance'],
-    labelClassName: 'font-semibold text-warning',
-    attentionDotClassName: 'bg-warning',
-  },
-  {
-    key: 'completed',
-    label: '已完成',
-    statuses: ['completed'],
-  },
-];
-
-function filteredGroup(status: TodoStatus): TodoGroup {
-  if (status === 'in_progress' || status === 'completed') {
-    return { key: status, label: TODO_STATUS_LABEL[status], statuses: [status] };
-  }
-  return {
-    key: status,
-    label: TODO_STATUS_LABEL[status],
-    statuses: [status],
-    labelClassName: status === 'pending' ? 'font-semibold text-destructive' : 'font-semibold text-warning',
-    attentionDotClassName: status === 'pending' ? 'bg-destructive' : 'bg-warning',
-  };
-}
-
-const TODO_DOT_CLASS: Record<TodoStatus, string> = {
-  pending: 'bg-warning',
-  in_progress: 'bg-info',
-  pending_acceptance: 'bg-warning',
-  completed: 'bg-success',
-};
-
-function formatDate(value: string): string {
+function formatDateTime(value?: string): string {
   if (!value) return '—';
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }).replaceAll('/', '-');
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
 }
 
-function TodoCard({ todo, onSelect }: { todo: TodoRecord; onSelect: (todoId: string) => void }) {
-  return (
-    <Card
-      role="article"
-      aria-label={todo.title}
-      className="overflow-hidden rounded-xl border-border bg-card shadow-sm transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md"
-    >
-      <Button
-        variant="ghost"
-        className="h-auto w-full flex-col items-stretch gap-0 rounded-xl border-0 p-4 text-left font-normal normal-case hover:bg-muted/20"
-        onClick={() => onSelect(todo.todoId)}
-      >
-        <span className="flex w-full items-start gap-2">
-          <span className={cn('mt-1 size-2 shrink-0 rounded-full', TODO_DOT_CLASS[todo.status])} aria-hidden />
-          <span className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">{todo.title}</span>
-        </span>
-
-        <span className="mt-2 line-clamp-2 w-full whitespace-normal text-xs leading-[18px] text-muted-foreground">
-          {todo.description || '暂无描述'}
-        </span>
-
-        <span className="mt-2.5 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-divider pt-2.5 text-xs text-muted-foreground">
-          <span className="flex min-w-0 items-center gap-2">
-            <Bot className="size-3 shrink-0 text-foreground" aria-hidden />
-            <span className="truncate">{todo.botName || todo.botId || '—'}</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-2.5">
-            <span className="flex items-center gap-2">
-              <CalendarDays className="size-3" aria-hidden />
-              {formatDate(todo.updatedAt)}
-            </span>
-            <Badge className={cn('shrink-0 border-0 px-2 py-0.5 text-xs', TODO_STATUS_CLASS[todo.status])}>
-              {TODO_STATUS_LABEL[todo.status]}
-            </Badge>
-          </span>
-        </span>
-      </Button>
-    </Card>
-  );
+function executorName(todo: TodoRecord): string {
+  if (todo.templateId) return todo.templateName || todo.templateId;
+  return todo.botName || todo.botId || '—';
 }
 
 export function TodoBoard({
   todos,
-  status,
   total,
   page,
   pageSize,
@@ -136,19 +39,76 @@ export function TodoBoard({
   onRetry,
   onSelect,
   onPageChange,
-  onPageSizeChange,
 }: TodoBoardProps) {
-  const [expanded, setExpanded] = useState<Record<TodoGroupKey, boolean>>({
-    pending: true,
-    in_progress: true,
-    pending_acceptance: true,
-    completed: false,
-  });
-
-  const visibleTodos = status ? todos.filter((todo) => todo.status === status) : todos;
-  const groups = status ? [filteredGroup(status)] : TODO_GROUPS;
-  const responseContainsOtherStatuses = Boolean(status && todos.some((todo) => todo.status !== status));
-  const visibleTotal = responseContainsOtherStatuses ? visibleTodos.length : total;
+  const columns = useMemo<DataTableColumn<TodoRecord>[]>(
+    () => [
+      {
+        id: 'title',
+        header: '标题',
+        width: '28%',
+        cell: (todo) => <p className="m-0 truncate text-sm font-medium text-foreground">{todo.title}</p>,
+      },
+      {
+        id: 'status',
+        header: '状态',
+        width: '10%',
+        cell: (todo) => (
+          <div className="flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className={cn(
+                'size-2 shrink-0 rounded-full',
+                todo.status === 'in_progress' && 'bg-info',
+                todo.status === 'pending_action' && 'bg-warning',
+                todo.status === 'interrupted' && 'bg-destructive',
+                todo.status === 'completed' && 'bg-success',
+                (todo.status === 'not_started' || todo.status === 'cancelled') && 'bg-muted-foreground/50',
+              )}
+            />
+            <Badge className={cn('border-0 px-2 py-0.5 text-xs', TODO_STATUS_CLASS[todo.status])}>
+              {TODO_STATUS_LABEL[todo.status]}
+            </Badge>
+          </div>
+        ),
+      },
+      {
+        id: 'executor',
+        header: '执行方',
+        width: '16%',
+        cell: (todo) => (
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            {todo.templateId ? <Workflow className="size-3.5 shrink-0" aria-hidden /> : <Bot className="size-3.5 shrink-0" aria-hidden />}
+            <span className="truncate">{executorName(todo)}</span>
+          </div>
+        ),
+      },
+      {
+        id: 'owner',
+        header: '负责人',
+        width: '13%',
+        cell: (todo) => <span className="truncate text-xs text-foreground">{todo.ownerName || todo.ownerId || '—'}</span>,
+      },
+      {
+        id: 'source',
+        header: '创建方式',
+        width: '10%',
+        cell: () => <span className="text-xs text-muted-foreground">—</span>,
+      },
+      {
+        id: 'createdAt',
+        header: '创建时间',
+        width: '13%',
+        cell: (todo) => <span className="text-xs text-muted-foreground">{formatDateTime(todo.createdAt)}</span>,
+      },
+      {
+        id: 'completedAt',
+        header: '完成时间',
+        width: '10%',
+        cell: () => <span className="text-xs text-muted-foreground">—</span>,
+      },
+    ],
+    [],
+  );
 
   if (loading) return <Spin tip="加载待办中…" className="py-16" />;
   if (error) {
@@ -164,74 +124,44 @@ export function TodoBoard({
       />
     );
   }
-  if (visibleTodos.length === 0) {
-    return <Empty title="暂无待办" description="创建一个待办，让当前空间的 Bot 开始处理。" />;
-  }
 
   return (
-    <section role="region" aria-label="待办分组" className="space-y-3">
-      {groups.map((group) => {
-        const items = visibleTodos.filter((todo) => group.statuses.includes(todo.status));
-        const isExpanded = status ? true : expanded[group.key];
-        return (
-          <section key={group.key} aria-labelledby={`todo-group-${group.key}`} className="space-y-4">
-            {status ? (
-              <div className="flex w-fit items-center gap-2 py-1 text-sm">
-                <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
-                  {group.label}
-                </span>
-                <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
-                {group.attentionDotClassName && items.length > 0 ? (
-                  <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
-                ) : null}
-              </div>
-            ) : (
-              <Button
-                variant="ghost"
-                className="h-auto w-fit justify-start gap-2 rounded-md border-0 px-0 py-1 text-sm hover:bg-transparent"
-                aria-expanded={isExpanded}
-                onClick={() => setExpanded((current) => ({ ...current, [group.key]: !current[group.key] }))}
-              >
-                {isExpanded ? (
-                  <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
-                ) : (
-                  <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
-                )}
-                <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
-                  {group.label}
-                </span>
-                <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
-                {group.attentionDotClassName && items.length > 0 ? (
-                  <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
-                ) : null}
-              </Button>
-            )}
-
-            {isExpanded ? (
-              items.length > 0 ? (
-                <div className="grid gap-[10px] [grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))]">
-                  {items.map((todo) => (
-                    <TodoCard key={todo.todoId} todo={todo} onSelect={onSelect} />
-                  ))}
-                </div>
-              ) : (
-                <p className="m-0 rounded-xl border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">
-                  暂无{group.label}待办
-                </p>
-              )
-            ) : null}
-          </section>
-        );
-      })}
-
-      <Pagination
-        current={page}
-        pageSize={pageSize}
-        total={visibleTotal}
-        onChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-        layout="between"
+    <section role="region" aria-label="待办列表" className="space-y-3 overflow-hidden rounded-xl border border-border bg-card">
+      <DataTable
+        ariaLabel="待办列表"
+        columns={columns}
+        rows={todos}
+        getRowKey={(todo) => todo.todoId}
+        onRowClick={(todo) => onSelect(todo.todoId)}
+        minWidth="min-w-[1120px]"
+        rowHeight="h-14"
+        empty={<div className="py-10 text-sm text-muted-foreground">没有符合条件的待办</div>}
       />
+      {total > pageSize ? (
+        <div className="flex items-center justify-end gap-2 border-t border-divider px-4 py-3 text-xs text-muted-foreground">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-7 rounded-lg"
+            aria-label="上一页"
+            disabled={page <= 1}
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+          >
+            <ChevronLeft className="size-3.5" aria-hidden />
+          </Button>
+          <span>{page} / {Math.max(1, Math.ceil(total / pageSize))}</span>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-7 rounded-lg"
+            aria-label="下一页"
+            disabled={page >= Math.ceil(total / pageSize)}
+            onClick={() => onPageChange(Math.min(Math.ceil(total / pageSize), page + 1))}
+          >
+            <ChevronRight className="size-3.5" aria-hidden />
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

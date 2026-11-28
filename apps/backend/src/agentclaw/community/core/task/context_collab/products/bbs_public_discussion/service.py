@@ -56,7 +56,7 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
+    LegacyProductProfileKey,
     WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
@@ -160,7 +160,7 @@ class BbsPublicDiscussionService:
             actor=context,
         )
         profile = prepare_product_profile(
-            product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
+            product_kind=LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value,
             workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
             method_kind=method_kind,
             profile_ref=None,
@@ -173,7 +173,7 @@ class BbsPublicDiscussionService:
             executor_ref=None,
             objective=title,
             resource_refs=tuple(command.resource_refs),
-            product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
+            product_kind=LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value,
             workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
             product_profile_ref=profile.ref if profile is not None else None,
         )
@@ -185,7 +185,7 @@ class BbsPublicDiscussionService:
                 executor_ref=None,
                 objective=title,
                 resource_refs=tuple(command.resource_refs),
-                product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
+                product_kind=LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value,
                 workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
                 product_profile_ref=profile.ref if profile is not None else None,
                 creation_facts=facts,
@@ -243,7 +243,7 @@ class BbsPublicDiscussionService:
         # 语义不得漂到别人的上下文上。
         if (
             creation_product_kind(record.creation_facts)
-            != ProductProfile.BBS_PUBLIC_DISCUSSION.value
+            != LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value
         ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} is not "
@@ -337,7 +337,7 @@ class BbsPublicDiscussionService:
         title 过渡期伴随读(裁决 2,自 spec JSON;P3 随过滤源升级)。
         """
         rows = self._repo.list_collets_by_product(
-            ProductProfile.BBS_PUBLIC_DISCUSSION.value
+            LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value
         )
         counts = self._repo.count_message_events(
             [collet.collet_id for collet, _, _ in rows]
@@ -369,7 +369,7 @@ class BbsPublicDiscussionService:
             )
         if (
             creation_product_kind(record.creation_facts)
-            != ProductProfile.BBS_PUBLIC_DISCUSSION.value
+            != LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value
         ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} is not "

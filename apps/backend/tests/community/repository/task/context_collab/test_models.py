@@ -1,4 +1,4 @@
-"""Collet, Task and Event storage matches baseline plus Task migration DDL.
+"""L4 storage matches the deployed Collet plus Task/business-column migrations.
 
 Build real SQLite tables and verify columns, indexes and tenant registration.
 """
@@ -32,14 +32,14 @@ def test_collet_columns_match_ddl(engine):
         "env",
         "collab_context_id",
         "actor_ref",
-        "scope",
-        "collet_metadata",
-        "resources",
-        "creation_facts",
+        "context_spec",
         "current_snapshot",
-        "root_task_ref",
         "current_event_id",
         "context_version",
+        "content",
+        "status",
+        "product_profile_id",
+        "current_rollout_id",
         "gmt_create",
         "gmt_modified",
     }
@@ -67,8 +67,8 @@ def test_event_columns_match_ddl(engine):
         "env",
         "collab_context_id",
         "event_id",
-        "task_ref",
-        "task_version_after",
+        "collet_rollout_id",
+        "collet_stage_rollout_id",
         "parent_event",
         "event_kind",
         "primitive_type",

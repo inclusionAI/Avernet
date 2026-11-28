@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
     CurrentSnapshot,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -44,7 +44,7 @@ class CollaborationReadState(Protocol):
         ...
 
     @property
-    def collet(self) -> Collet: ...
+    def collet(self) -> LegacyCollet: ...
     @property
     def task(self) -> Task | None: ...
     @property

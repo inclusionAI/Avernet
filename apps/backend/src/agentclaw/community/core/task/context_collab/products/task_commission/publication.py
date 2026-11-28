@@ -7,7 +7,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
     BotSelfApplicationAdmission as BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 
 
@@ -18,7 +18,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
 
 
 def require_designated_admission(
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
 ) -> DesignatedOpenAdmission:
     """The bounded executor must not silently interpret another product's strategy."""
     policy = profile.composition.require_policy("Open").publication.admission

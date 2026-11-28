@@ -27,8 +27,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
@@ -102,7 +102,7 @@ def make_task():
 
 @dataclass
 class LowerRecord:
-    collet: Collet
+    collet: LegacyCollet
     task: Task
     owner_principal_id: str = "owner"
     designated_executor_id: str = "worker"
@@ -112,7 +112,7 @@ class Reader:
     def get_current_status(self, collab_context_id):
         assert collab_context_id == COLLET_ID
         return LowerRecord(
-            Collet(
+            LegacyCollet(
                 COLLET_ID,
                 OWNER.actor,
                 ColletState.ACTIVE,

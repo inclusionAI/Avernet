@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
@@ -69,7 +69,7 @@ class ColletCreateCommand:
         validate_collet_text(self.description, "description")
         for name in ("objective", "acceptance_criteria"):
             if not isinstance(getattr(self, name), str):
-                raise ContextCollabValidationError(f"Collet.{name} must be a string")
+                raise ContextCollabValidationError(f"LegacyCollet.{name} must be a string")
         if not isinstance(self.resources, tuple) or any(
             not isinstance(resource, ResourceBinding)
             or not isinstance(resource.resource_ref, ResourceRef)
@@ -112,7 +112,7 @@ class TaskCreateCommand:
 
 class CreatedCollet(Protocol):
     @property
-    def collet(self) -> Collet: ...
+    def collet(self) -> LegacyCollet: ...
 
 
 class CreatedTask(Protocol):
@@ -166,7 +166,7 @@ class CollaborationRecord(Protocol):
     @property
     def events(self) -> list[EventRecord]: ...
     @property
-    def collet(self) -> Collet: ...
+    def collet(self) -> LegacyCollet: ...
     @property
     def task(self) -> Task | None: ...
     @property
@@ -185,7 +185,7 @@ class AppendedEvent(Protocol):
     @property
     def event(self) -> EventRecord: ...
     @property
-    def collet(self) -> Collet: ...
+    def collet(self) -> LegacyCollet: ...
     @property
     def task(self) -> Task | None: ...
 

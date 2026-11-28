@@ -32,7 +32,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.value_codec import 
     decode,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
     MethodRelationTemplate,
     MethodTemplate,
@@ -51,6 +51,10 @@ from agentclaw.community.core.task.context_collab.l6_products.participant_scope 
 from agentclaw.community.core.task.context_collab.l6_products.validation import (
     validate_product_profile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.relation_storage import (
+    from_legacy_relation_fields,
+    to_legacy_relation_fields,
+)
 
 SCHEMA_VERSION = 1
 MAX_DEFINITION_BYTES = 1024 * 1024
@@ -65,7 +69,7 @@ _TYPES = (
     BotSelfApplicationAdmission,
     OpenPublicationProfile,
     DesignatedOpenAdmission,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
     MethodRelationTemplate,
     MethodTemplate,
@@ -94,7 +98,7 @@ def _nonfinite(value):
     raise ContextCollabValidationError(f"non-finite definition number: {value}")
 
 
-def decode_profile(value: str) -> ProductProfileDefinition:
+def decode_profile(value: str) -> LegacyProductConfiguration:
     if type(value) is not str or len(value.encode("utf-8")) > MAX_DEFINITION_BYTES:
         raise ContextCollabValidationError(
             "profile definition exceeds 1 MiB or is not JSON text"
@@ -109,9 +113,12 @@ def decode_profile(value: str) -> ProductProfileDefinition:
         ):
             raise ContextCollabValidationError("unknown ProductProfile storage schema")
         profile = decode(
-            data["definition"], ProductProfileDefinition, _TYPES, get_profile
+            from_legacy_relation_fields(data["definition"]),
+            LegacyProductConfiguration,
+            _TYPES,
+            get_profile,
         )
-        if encode(profile) != data["definition"]:
+        if to_legacy_relation_fields(encode(profile)) != data["definition"]:
             raise ContextCollabValidationError(
                 "noncanonical or normalized ProductProfile input"
             )
@@ -125,9 +132,12 @@ def decode_profile(value: str) -> ProductProfileDefinition:
         raise ContextCollabValidationError("invalid ProductProfile JSON") from exc
 
 
-def encode_profile(profile: ProductProfileDefinition) -> str:
+def encode_profile(profile: LegacyProductConfiguration) -> str:
     value = json.dumps(
-        {"schema_version": SCHEMA_VERSION, "definition": encode(profile)},
+        {
+            "schema_version": SCHEMA_VERSION,
+            "definition": to_legacy_relation_fields(encode(profile)),
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -139,5 +149,5 @@ def encode_profile(profile: ProductProfileDefinition) -> str:
     return value
 
 
-def profile_digest(profile: ProductProfileDefinition) -> str:
+def profile_digest(profile: LegacyProductConfiguration) -> str:
     return sha256(encode_profile(profile).encode("utf-8")).hexdigest()

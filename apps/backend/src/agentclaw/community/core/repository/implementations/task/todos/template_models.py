@@ -106,6 +106,7 @@ class TodoTemplateVersionModel(Base):
     created_by = Column(String(256), nullable=False)
     published_by = Column(String(256), nullable=True)
     published_at = Column(DateTime, nullable=True)
+    product_profile_id = Column(BigInteger, nullable=True)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
@@ -141,6 +142,12 @@ class TodoTemplateVersionModel(Base):
             "version_no",
             "id",
         ),
+        Index(
+            "idx_todo_template_version_product_profile",
+            "avernet_tenant",
+            "env",
+            "product_profile_id",
+        ),
     )
 
     def to_record(self) -> TodoTemplateVersionRecord:
@@ -157,6 +164,7 @@ class TodoTemplateVersionModel(Base):
             published_at=self.published_at,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
+            product_profile_id=self.product_profile_id,
         )
 
 

@@ -15,7 +15,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
@@ -45,6 +45,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 )
 from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
     InMemoryColletLifecycleStore,
+)
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
 )
 from sqlalchemy import event as sql_event
 
@@ -109,8 +113,9 @@ def test_l4_storage_creates_and_reads_without_product_dependencies(repository, d
     assert stored_counts(db) == (1, 0, 0)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert row.root_task_ref is None and row.current_snapshot is None
-        assert json.loads(row.creation_facts) == {}
+        assert stored_context_value(row, "root_task_ref") is None
+        assert row.current_snapshot is None
+        assert stored_context_value(row, "creation_facts") == {}
 
 
 def test_primitive_repository_satisfies_a_lower_reader_consumer(repository):
@@ -271,7 +276,9 @@ def test_lower_decoder_rejects_invalid_storage_on_read_and_before_append(
     created = create_work(repository)
     cid = created.collet.collet_id
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().creation_facts = json.dumps(facts)
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "creation_facts", facts
+        )
     with pytest.raises(ContextCollabValidationError):
         repository.get_current_status(cid)
     with pytest.raises(ContextCollabValidationError):

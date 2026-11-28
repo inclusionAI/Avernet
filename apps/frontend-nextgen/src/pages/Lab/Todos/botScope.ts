@@ -1,11 +1,9 @@
-import type { Space } from '@/domain/admin/models';
 import type { BotDomain } from '@/domain/botWorkshop';
-import type { TodoBotOption } from '@/domain/todos/models';
-import { todoBotCatalogId } from '@/services/todos/todoBotCatalogService';
+import type { TodoBotOption, TodoSpace } from '@/domain/todos/models';
 
 export function botBelongsToCurrentSpace(
   bot: Pick<BotDomain, 'id' | 'ownerId'>,
-  space: Space | undefined,
+  space: TodoSpace | undefined,
   currentUserId: string | undefined,
 ): boolean {
   if (!space) return false;
@@ -18,15 +16,16 @@ export function botBelongsToCurrentSpace(
 
 export function eligibleTodoBots(
   bots: Array<Pick<BotDomain, 'id' | 'ownerId'> & { name?: string }>,
-  space: Space | undefined,
+  space: TodoSpace | undefined,
   currentUserId: string | undefined,
-  publicCatalogIds: ReadonlySet<string>,
 ): TodoBotOption[] {
   return bots
     .filter((bot) => botBelongsToCurrentSpace(bot, space, currentUserId))
-    .filter((bot) => {
-      const catalogId = todoBotCatalogId(bot);
-      return Boolean(catalogId && publicCatalogIds.has(catalogId));
-    })
-    .map((bot) => ({ botId: bot.id, botName: bot.name || bot.id }));
+    .map((bot) => ({ botId: bot.id, botName: bot.name || bot.id, ownerId: bot.ownerId }));
+}
+
+export function creatorOwnedTodoBots(bots: TodoBotOption[], currentUserId: string | undefined): TodoBotOption[] {
+  const ownerId = currentUserId?.trim();
+  if (!ownerId) return [];
+  return bots.filter((bot) => bot.ownerId?.trim() === ownerId);
 }

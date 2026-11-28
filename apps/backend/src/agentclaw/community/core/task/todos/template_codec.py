@@ -131,6 +131,21 @@ class TodoTemplateDefinitionCodec:
                             for gate in stage.completion_gate.required_artifacts
                         ]
                     },
+                    **(
+                        {
+                            "executor_candidates": [
+                                cls._to_reference(candidate)
+                                for candidate in stage.executor_candidates
+                            ]
+                        }
+                        if stage.executor_candidates
+                        else {}
+                    ),
+                    **(
+                        {"completion_condition": stage.completion_condition}
+                        if stage.completion_condition
+                        else {}
+                    ),
                 }
                 for stage in definition.stages
             ],
@@ -203,7 +218,7 @@ class TodoTemplateDefinitionCodec:
                 "executor_ref",
                 "completion_gate",
             },
-            optional={"owner_ref"},
+            optional={"owner_ref", "executor_candidates", "completion_condition"},
             label=label,
         )
         completion = cls._mapping(item["completion_gate"], f"{label}.completion_gate")
@@ -235,6 +250,17 @@ class TodoTemplateDefinitionCodec:
                     cls._artifact_gate(artifact, label, artifact_index)
                     for artifact_index, artifact in enumerate(artifacts)
                 )
+            ),
+            executor_candidates=tuple(
+                cls._reference(candidate, f"{label}.executor_candidates[{candidate_index}]")
+                for candidate_index, candidate in enumerate(
+                    cls._list(item.get("executor_candidates", []), f"{label}.executor_candidates")
+                )
+            ),
+            completion_condition=cls._string(
+                item.get("completion_condition", ""),
+                f"{label}.completion_condition",
+                allow_empty=True,
             ),
         )
 
@@ -321,7 +347,8 @@ class TodoTemplateDefinitionCodec:
             )
 
     @staticmethod
-    def _string(value: Any, label: str) -> str:
+    def _string(value: Any, label: str, *, allow_empty: bool = False) -> str:
+        del allow_empty
         if not isinstance(value, str):
             raise TodoTemplateValidationError(f"{label} must be text")
         return value

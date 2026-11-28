@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.task.todos.models import TodoRecord
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 
 
 @runtime_checkable
@@ -24,5 +25,6 @@ class TodoTemplateCreationServiceProtocol(Protocol):
         title: str,
         description: str,
         bindings: Mapping[str, object],
+        source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord: ...

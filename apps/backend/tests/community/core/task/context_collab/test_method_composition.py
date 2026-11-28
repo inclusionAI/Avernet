@@ -11,6 +11,7 @@
 - 矩阵与 ``METHOD_PROFILE_REGISTRY`` 声明的 composable_relations 对齐
   (含 Open 只作为子方法侧参与、不作为矩阵父方法的非对称性)。
 """
+
 import dataclasses
 
 import pytest
@@ -34,7 +35,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 )
 
 # 组合矩阵只连接四种基础方法;产品组合名称不是矩阵节点。
-ALL_METHOD_WIRES = frozenset(kind.value for kind in MethodKind)
+ALL_METHOD_WIRES = frozenset(
+    kind.value for kind in MethodKind if kind is not MethodKind.MULTI_ROLLOUT
+)
 # 矩阵父方法只有三个核心方法;Open 依非对称裁决不作为父方法出现。
 PARENT_WIRES = ("Single", "Group", "Swarm")
 
@@ -157,7 +160,9 @@ def test_matrix_covers_exactly_the_pinned_rows():
         ("Group", CompositionRelation.ESCALATE),
         ("Swarm", CompositionRelation.ESCALATE),
     }
-    assert set(COMPOSITION_MATRIX) == expected
+    assert set(COMPOSITION_MATRIX) == expected | {
+        ("MultiRollout", CompositionRelation.NEST)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +181,7 @@ def test_validate_rejects_unknown_parent_and_child():
 def test_validate_rejects_parent_without_matrix_row():
     # Open 是合法基础方法,但不发起组合;报错需点出父×关系组合。
     parent = "Open"
-    with pytest.raises(
-        ContextCollabValidationError, match=r"Open.*nest"
-    ):
+    with pytest.raises(ContextCollabValidationError, match=r"Open.*nest"):
         validate_composition(parent, CompositionRelation.NEST, "Group")
 
 
@@ -186,12 +189,18 @@ def test_validate_rejects_parent_without_matrix_row():
 @pytest.mark.parametrize("endpoint", ["parent", "child"])
 @pytest.mark.parametrize(
     "relation",
-    [CompositionRelation.NEST, CompositionRelation.SUPPORT, CompositionRelation.DELEGATE_TO],
+    [
+        CompositionRelation.NEST,
+        CompositionRelation.SUPPORT,
+        CompositionRelation.DELEGATE_TO,
+    ],
 )
 def test_validate_rejects_product_compositions_as_method_endpoints(
     composite, endpoint, relation
 ):
-    parent, child = (composite, "Open") if endpoint == "parent" else ("Swarm", composite)
+    parent, child = (
+        (composite, "Open") if endpoint == "parent" else ("Swarm", composite)
+    )
     with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
         validate_composition(parent, relation, child)
 
@@ -243,9 +252,7 @@ def test_detect_cycle_positive_self_loop_and_repeated_edges():
 
 
 def test_detect_cycle_negative_dag():
-    assert (
-        detect_cycle([("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")]) is False
-    )
+    assert detect_cycle([("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")]) is False
 
 
 def test_detect_cycle_negative_repeated_edges_are_safe():

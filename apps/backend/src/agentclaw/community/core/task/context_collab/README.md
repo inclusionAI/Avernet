@@ -1,5 +1,20 @@
 # Context collaboration: authority, telemetry and read projections
 
+## Product runtime v2 (2026-11-26)
+
+The new [ProductProfileService](l6_products/product_profile_service/README.md)
+provides the five-method product API, canonical integer-ID objects, YAML-owned
+stages and durable rollouts. That guide owns its authority, DDL, worker/report
+integration, real session routing and finite v1 compatibility boundary.
+The [MultiRollout@1.0 local extension](l5_methods/MULTI-ROLLOUT.md) adds
+explicit NEST Swarm composition, parallel best-of-N and feedback-driven iteration
+on this same durable authority, not the process-local MethodStore. Its isolation,
+trusted strategy/evidence, tenant admission and explicit worker/deadline capabilities
+are required; new Profile creation defaults to its human-feedback strategy over
+a static Swarm YAML workflow, while uninstalled public host capabilities fail closed.
+The remaining sections describe the retained **legacy v1** collaboration path;
+its Event-backed logical sessions are not v2 runtime sessions.
+
 Owner: Backend `core/task/context_collab`. This is the ACCS collaboration path,
 separate from the older goal-driven TaskGraph framework in the parent directory.
 It implements bounded local contracts, not full ACCS conformance.
@@ -137,7 +152,7 @@ products/
 ```
 
 - L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
-  `create_product_profile` operation returning `ProductProfileDefinition`.
+  `create_product_profile` operation returning `LegacyProductConfiguration`.
   L5-owned Method policies are co-located in each `MethodTemplate(profile, policy)`
   declaration (for example, `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
   [L6 authoring contract](l6_products/README.md#create-a-product-profile). Creation
@@ -348,7 +363,7 @@ L4 ContextServiceProtocol.start(existing_collet_id, WorkStartCommand, actor)
 ```
 
 The SQL repository's read decoder port is storage-only: it receives the already
-loaded primitive records and serialized `creation_facts` column in the same read,
+loaded primitive records and creation facts serialized from `context_spec` in the same read,
 not a repository/service callback. A standalone lower-only repository uses
 `PrimitiveRecordDecoder` without a catalog. The deployed
 [`ProductRecordDecoder`](l6_products/persistence/records.py) validates optional
@@ -596,7 +611,7 @@ it delegates primitive SQL operations to L4. Old shared persistence paths are
 compatibility imports, not the implementation locations:
 
 ```text
-Collet.root_task_ref ──→ Task.task_id
+Collet.context_spec.root_task_ref ──→ Task.task_id
       │                      │
       └── Collet revision    └── independent Task revision
                    ↘        ↙
@@ -607,11 +622,12 @@ Collet.root_task_ref ──→ Task.task_id
   Application composition may include pinned ProductInstance metadata; explicit
   later L6 instantiation installs it separately without rewriting creation evidence. New rows leave `current_snapshot`
   NULL. Root IDs differ from Collet IDs, even when both revisions start at 1.
-- `ac_context_collab_collet.collet_metadata` stores L4 schema/description/audit
-  JSON separately from `creation_facts`, Task JSON and shared SQL row timestamps.
-  NULL is reserved for unknown legacy metadata; it is not automatically
-  backfilled. L6 may update composition facts on the same row without changing
-  the Collet representation, so `gmt_modified` is not Collet's audit authority.
+- `ac_context_collab_collet.context_spec.collet_metadata` stores L4
+  schema/description/audit JSON, separate from creation facts, Task JSON and
+  shared SQL row timestamps. A null value is reserved for unknown legacy
+  metadata; it is not automatically backfilled. L6 may update composition facts
+  in the same envelope without changing the Collet representation, so
+  `gmt_modified` is not Collet's audit authority.
 - Collet `artifacts` is a tuple of the same L4 Artifact values, defaulting to
   empty. Non-empty values use Artifact's nested JSON representation and are
   included in the Collet ETag; empty values are omitted to preserve existing
@@ -624,7 +640,7 @@ Collet.root_task_ref ──→ Task.task_id
   Non-empty resources serialize as a list of binding objects and participate in
   the Collet ETag; empty resources are omitted to preserve existing shapes and
   ETags. `ColletCreateCommand.resources` accepts the same typed tuple and stores
-  it in the Collet's dedicated `resources` JSON column; legacy SQL NULL reads as
+  it in the Collet's `context_spec` JSON envelope; missing legacy values read as
   empty. Creation does not grant access or create binding events, and there is
   no automatic propagation from L6 inputs or initial binding events. Existing
   event-based binding facts remain unchanged, and a resource entry does not grant access.
@@ -650,10 +666,20 @@ Collet.root_task_ref ──→ Task.task_id
   decomposition, reassignment or recursive-completion API. Parent links model
   recursion, but do not automatically complete parents or execute child Tasks.
 - The existing EventEnvelope adapter continues to export a **Collet aggregate**
-  envelope. Local Task subject/version columns are not included. That adapter
-  is not a lossless Task-state replication format or a remote Task import API.
+  envelope. Local Task subject/version facts are not user payload and are not
+  exported. That adapter is not a lossless Task-state replication format or a
+  remote Task import API.
 
 ### Database cutover
+
+The L4 Collet has one JSON storage envelope: the physical
+`ac_context_collab_collet.context_spec` column. It carries versioned scope,
+audit metadata, resource bindings, creation facts and the root-Task pointer;
+there are no separate `scope`, `collet_metadata`, `resources`,
+`creation_facts` or `root_task_ref` columns. The
+[codec](l4_context_primitives/persistence/context_spec_codec.py) parses
+versioned rows without synthesizing missing facts and accepts documented
+unversioned `context_spec` history through the explicit legacy mapping.
 
 Before the database-backed Profile reader is used, also apply the
 [ProductProfile DDL](sql/2026_11_23_context_collab_product_profile.sql) and perform
@@ -662,27 +688,22 @@ No request-path table creation or seed fallback is supplied.
 
 
 Apply [the Task migration](sql/2026_11_13_context_collab_task.sql) **after**
-[the baseline schema](sql/2026_11_11_context_collab.sql), before starting the new
-runtime. It adds the root link, Event subject/revision and independent Task
-storage. The script targets OceanBase MySQL mode and is applied once by the
+[the single-context_spec baseline](sql/2026_11_11_context_collab.sql). It adds
+independent Task storage; the root-Task pointer belongs inside `context_spec`,
+not a physical Collet column. Event Work subject/revision is serialized inside
+the existing `payload.__task_subject` JSON envelope by
+[`event_payload_codec.py`](l4_context_primitives/persistence/event_payload_codec.py);
+the Event table does not have physical `task_ref` or `task_version_after`
+columns. The script targets OceanBase MySQL mode and is applied once by the
 normal deployment process; SQLite tests create ORM metadata, not this DDL.
 
-Existing deployments without `collet_metadata` must additionally apply the
-[additive metadata migration](sql/2026_11_17_context_collab_collet_metadata.sql)
-after their Task/creation-facts cutover and **before** deploying the new runtime.
-No legacy audit backfill is performed. Fresh installations using the current
-baseline already have this column and must skip that ALTER. Existing deployments
-without `resources` must also apply the
-[additive resources migration](sql/2026_11_19_context_collab_collet_resources.sql)
-before deploying the new runtime; fresh installations skip this ALTER too.
-No resource backfill or resource authorization change is performed. The historical
-[creation-facts migration](sql/2026_11_16_context_collab_creation_facts.sql) is
-only for deployments still storing `context_spec`, not the current baseline.
-
-Stop old snapshot writers during cutover: mixed old/new writers and old-runtime
-rollback after Task-authoritative writes are not supported. Preserve historical
-profile definitions. This storage cutover is not a product-profile upgrade.
-Production DDL execution must be verified separately.
+Do not apply any historical migration that adds the removed split Collet
+columns. Current fresh-install SQL does not create them, and the new runtime
+must not require them. Stop old snapshot writers during cutover: mixed
+old/new writers and old-runtime rollback after Task-authoritative writes are
+not supported. Preserve historical profile definitions. This storage cutover
+is not a product-profile upgrade. Production DDL execution must be verified
+separately.
 
 [Legacy decoding](persistence/task_storage.py) is explicit:
 

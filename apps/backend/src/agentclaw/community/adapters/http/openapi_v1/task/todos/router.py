@@ -28,12 +28,26 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
+from agentclaw.community.api.task.todo_auto_import_service import (
+    TodoAutoImportServiceProtocol,
+)
+from agentclaw.community.api.task.todo_product_creation_service import (
+    TodoProductCreationServiceProtocol,
+)
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.api.task.todo_product_progress_service import (
+    TodoProductProgressServiceProtocol,
+)
+from agentclaw.community.api.task.todo_product_interaction_service import (
+    TodoProductInteractionServiceProtocol,
+)
 from agentclaw.community.api.task.todo_source_service import TodoSourceServiceProtocol
 from agentclaw.community.api.task.todo_stage_service import TodoStageServiceProtocol
 from agentclaw.community.api.task.todo_template_creation_service import (
@@ -48,28 +62,50 @@ from agentclaw.community.core.task.todos.models import (
     TodoInteractionMention,
     TodoInteractionMentionActorType,
 )
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoExecutorKind,
+    TodoExecutorSelection,
+    TodoOwnerInput,
+)
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoDimaImportItem,
+)
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
+from agentclaw.community.core.task.todos.stage_models import TodoParticipantBindingInput
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 
+from .progress_schemas import TodoProgressResponse
+from .product_interaction_schemas import (
+    CreateTodoProductInteractionRequest,
+    TodoProductInteractionPageResponse,
+    TodoProductInteractionResponseSchema,
+)
+from .dima_import_schemas import (
+    ImportDimaTodosRequest,
+    ImportDimaTodosResponse,
+)
+
 from .schemas import (
+    CancelTodoRequest,
+    CompleteTodoStageRequest,
+    CreateTodoAutoImportRuleRequest,
+    CreateTodoFromTemplateRequest,
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
-    CreateTodoFromTemplateRequest,
     TodoArtifactRecordResponse,
-    TodoStageResponse,
+    TodoAutoImportRuleResponse,
     TodoEventResponse,
     TodoInteractionResponse,
     TodoResponse,
     TodoSourceDraftResponse,
     TodoSourceProjectResponse,
     TodoSourceWorkItemResponse,
+    TodoStageResponse,
     TodoStatusSchema,
-    CompleteTodoStageRequest,
-    CancelTodoRequest,
+    UpdateTodoAutoImportRuleRequest,
 )
-from agentclaw.community.core.task.todos.stage_models import TodoParticipantBindingInput
 
 OwnersDep = Annotated[str, Query(min_length=1, description=USER_ID_DESCRIPTION)]
 
@@ -176,30 +212,127 @@ async def create_todo(
     principal: PrincipalDep,
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
+    product_service: TodoProductCreationServiceProtocol = Injected(
+        TodoProductCreationServiceProtocol
+    ),
 ) -> Envelope[TodoResponse]:
-    """Create one pending Todo for a Space-eligible Bot and await dispatch."""
+    """Create one pending Todo for a Space-eligible Bot or Bot team."""
     actor_id = call_user(user_id=user_id, principal=principal)
-    create_args: dict[str, object] = {
-        "space_id": body.space_id,
-        "actor_id": actor_id,
-        "title": body.title,
-        "description": body.description,
-        "bot_id": body.bot_id,
-    }
+    source = None
     if body.source is not None:
-        create_args["source"] = TodoSourceInput(
+        source = TodoSourceInput(
             source_type=body.source.type,
             container_id=body.source.container_id,
             item_id=body.source.item_id,
             url=body.source.url,
             updated_at=body.source.updated_at,
+            metadata=body.source.metadata,
         )
-    result = await run_in_threadpool(  # allow-run-in-threadpool
-        service.create_todo,
-        **create_args,
+
+    if body.executor is None and body.owner is None:
+        result = await run_in_threadpool(  # allow-run-in-threadpool
+            service.create_todo,
+            space_id=body.space_id,
+            actor_id=actor_id,
+            title=body.title,
+            description=body.description,
+            bot_id=body.bot_id,
+            **({"source": source} if source is not None else {}),
+        )
+        response_object = TodoResponse.from_record(result)
+    else:
+        request_executor = body.executor
+        executor = TodoExecutorSelection(
+            type=(
+                TodoExecutorKind(request_executor.type)
+                if request_executor is not None
+                else TodoExecutorKind.BOT
+            ),
+            id=request_executor.id
+            if request_executor is not None
+            else body.bot_id or "",
+            revision_id=(
+                request_executor.revision_id if request_executor is not None else None
+            ),
+        )
+        if body.owner is None:
+            raise ValueError("owner is required for product Todo creation")
+        product_args: dict[str, object] = {
+            "space_id": body.space_id,
+            "actor_id": actor_id,
+            "title": body.title,
+            "description": body.description,
+            "executor": executor,
+            "owner": TodoOwnerInput(
+                user_id=body.owner.user_id,
+                user_name=body.owner.user_name,
+            ),
+        }
+        if source is not None:
+            product_args["source"] = source
+        result = await run_in_threadpool(  # allow-run-in-threadpool
+            product_service.create_todo,
+            **product_args,
+        )
+        runtime = await product_service.ensure_product_collet(
+            todo_id=result.todo_id,
+            actor_id=actor_id,
+        )
+        response_object = TodoResponse.from_record(
+            runtime.todo,
+            product_runtime_status=runtime.status,
+        )
+    response.status_code = 201
+    return created(response_object, request)
+
+
+@router.post(
+    "/products/dima-imports",
+    response_model=Envelope[ImportDimaTodosResponse],
+)
+@envelope_errors
+async def import_dima_todos(
+    body: ImportDimaTodosRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoProductCreationServiceProtocol = Injected(
+        TodoProductCreationServiceProtocol
+    ),
+) -> Envelope[ImportDimaTodosResponse]:
+    """Import up to twenty Dima items and return one independent result each."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    results = await service.import_dima_todos(
+        space_id=body.space_id,
+        actor_id=actor_id,
+        executor=TodoExecutorSelection(
+            type=TodoExecutorKind(body.executor.type),
+            id=body.executor.id,
+            revision_id=body.executor.revision_id,
+        ),
+        owner=TodoOwnerInput(
+            user_id=body.owner.user_id,
+            user_name=body.owner.user_name,
+        ),
+        items=tuple(
+            TodoDimaImportItem(
+                title=item.title,
+                description=item.description,
+                source=TodoSourceInput(
+                    source_type=item.source.type,
+                    container_id=item.source.container_id,
+                    item_id=item.source.item_id,
+                    url=item.source.url,
+                    updated_at=item.source.updated_at,
+                    metadata=item.source.metadata,
+                ),
+            )
+            for item in body.items
+        ),
     )
     response.status_code = 201
-    return created(TodoResponse.from_record(result), request)
+    return created(ImportDimaTodosResponse.from_records(results), request)
 
 
 @router.get(
@@ -302,6 +435,110 @@ async def get_dima_work_item_draft(
     return envelope(TodoSourceDraftResponse.from_record(draft), request)
 
 
+@router.post(
+    "/sources/dima/auto-import-rules",
+    response_model=Envelope[TodoAutoImportRuleResponse],
+)
+@envelope_errors
+async def create_dima_auto_import_rule(
+    body: CreateTodoAutoImportRuleRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[TodoAutoImportRuleResponse]:
+    """Save one Dima auto-import rule for an external Agent to execute."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rule = await run_in_threadpool(
+        service.create_rule,
+        space_id=body.space_id,
+        actor_id=actor_id,
+        source_container_ids=tuple(body.source_container_ids),
+        filter_text=body.filter_text,
+        bot_id=body.bot_id,
+        scheduler_bot_id=body.scheduler_bot_id,
+        trigger_interval_seconds=body.trigger_interval_seconds,
+        cron_expression=body.cron_expression,
+    )
+    response.status_code = 201
+    return created(TodoAutoImportRuleResponse.from_record(rule), request)
+
+
+@router.get(
+    "/sources/dima/auto-import-rules",
+    response_model=Envelope[list[TodoAutoImportRuleResponse]],
+)
+@envelope_errors
+async def list_dima_auto_import_rules(
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    space_id: int | None = Query(
+        default=None,
+        gt=0,
+        description="Only return rules owned by this Product Space.",
+    ),
+    status: Literal["enabled", "disabled"] | None = Query(
+        default=None,
+        description="Only return rules in this enablement state.",
+    ),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[list[TodoAutoImportRuleResponse]]:
+    """List the authenticated Human's automatic Dima import rules."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rules = await run_in_threadpool(
+        service.list_rules,
+        actor_id=actor_id,
+        space_id=space_id,
+        status=status,
+    )
+    return envelope(
+        [TodoAutoImportRuleResponse.from_record(rule) for rule in rules], request
+    )
+
+
+@router.patch(
+    "/sources/dima/auto-import-rules/{rule_id}",
+    response_model=Envelope[TodoAutoImportRuleResponse],
+)
+@envelope_errors
+async def update_dima_auto_import_rule(
+    rule_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=64,
+            description="Automatic Dima import rule identifier.",
+        ),
+    ],
+    body: UpdateTodoAutoImportRuleRequest,
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[TodoAutoImportRuleResponse]:
+    """Update configuration or enablement for one automatic import rule."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rule = await run_in_threadpool(
+        service.update_rule,
+        rule_id=rule_id,
+        actor_id=actor_id,
+        source_container_ids=(
+            tuple(body.source_container_ids)
+            if body.source_container_ids is not None
+            else None
+        ),
+        filter_text=body.filter_text,
+        bot_id=body.bot_id,
+        scheduler_bot_id=body.scheduler_bot_id,
+        trigger_interval_seconds=body.trigger_interval_seconds,
+        cron_expression=body.cron_expression,
+        status=body.status,
+    )
+    return envelope(TodoAutoImportRuleResponse.from_record(rule), request)
+
+
 @router.post("/from-template", response_model=Envelope[TodoResponse])
 @envelope_errors
 async def create_todo_from_template(
@@ -395,6 +632,122 @@ async def list_todo_stages(
     return envelope([TodoStageResponse.from_record(item) for item in stages], request)
 
 
+@router.get("/{todo_id}/progress", response_model=Envelope[TodoProgressResponse])
+@envelope_errors
+async def get_todo_progress(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    expanded_stage_code: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description="Optional persisted stage code whose session details should load.",
+    ),
+    message_limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Bounded number of session messages loaded for the selected stage.",
+    ),
+    service: TodoProductProgressServiceProtocol = Injected(
+        TodoProductProgressServiceProtocol
+    ),
+) -> Envelope[TodoProgressResponse]:
+    """Project the Todo stage skeleton and current Product runtime facts."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    progress = await service.get_progress(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        expanded_stage_code=expanded_stage_code,
+        limit=message_limit,
+    )
+    return envelope(TodoProgressResponse.from_record(progress), request)
+
+
+@router.get(
+    "/{todo_id}/product-interactions",
+    response_model=Envelope[TodoProductInteractionPageResponse],
+)
+@envelope_errors
+async def list_todo_product_interactions(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionPageResponse]:
+    """Return local Product interaction dialogs for one Todo."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.list_interactions(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        page=page,
+        page_size=page_size,
+    )
+    return envelope(TodoProductInteractionPageResponse.from_record(result), request)
+
+
+@router.post(
+    "/{todo_id}/product-interactions",
+    response_model=Envelope[TodoProductInteractionResponseSchema],
+)
+@envelope_errors
+async def create_todo_product_interaction(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    body: CreateTodoProductInteractionRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionResponseSchema]:
+    """Persist and send one Human Product interaction under single-flight."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.send_interaction(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        message=body.message,
+        reply_to_interaction_id=body.reply_to_interaction_id,
+    )
+    response.status_code = 201
+    return created(TodoProductInteractionResponseSchema.from_record(result), request)
+
+
+@router.post(
+    "/{todo_id}/product-interactions/{interaction_id}/cancel",
+    response_model=Envelope[TodoProductInteractionResponseSchema],
+)
+@envelope_errors
+async def cancel_todo_product_interaction(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    interaction_id: Annotated[
+        str, Path(description="In-flight interaction to stop.")
+    ],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionResponseSchema]:
+    """Send the deterministic stop intent for one in-flight interaction."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.cancel_interaction(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        interaction_id=interaction_id,
+    )
+    return envelope(TodoProductInteractionResponseSchema.from_record(result), request)
+
+
 @router.post(
     "/{todo_id}/stages/{stage_instance_id}/complete",
     response_model=Envelope[TodoResponse],
@@ -402,7 +755,9 @@ async def list_todo_stages(
 @envelope_errors
 async def complete_human_todo_stage(
     todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
-    stage_instance_id: Annotated[str, Path(description="Current Human stage instance.")],
+    stage_instance_id: Annotated[
+        str, Path(description="Current Human stage instance.")
+    ],
     body: CompleteTodoStageRequest,
     request: Request,
     principal: PrincipalDep,

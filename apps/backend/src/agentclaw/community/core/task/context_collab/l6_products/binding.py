@@ -25,7 +25,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_reader imp
     ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     ScenarioRole,
     VersionedProfileRef,
     composition_method_kind,
@@ -40,7 +40,7 @@ def product_definition(
     method_kind: str | None,
     profile_ref: VersionedProfileRef | None,
     catalog: ProductProfileReader,
-) -> ProductProfileDefinition | None:
+) -> LegacyProductConfiguration | None:
     """Resolve the pinned L6 profile, or ``None`` for generic L4 creation."""
     if product_kind is None:
         if profile_ref is not None or workflow_kind is not None:
@@ -75,7 +75,7 @@ def validate_product_selection(
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
     catalog: ProductProfileReader,
-) -> ProductProfileDefinition | None:
+) -> LegacyProductConfiguration | None:
     """Validate profile topology and required ScenarioRole sources."""
     profile = product_definition(
         product_kind=product_kind,
@@ -96,7 +96,7 @@ def validate_product_selection(
 
 
 def validate_role_sources(
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
 ) -> None:
@@ -126,7 +126,7 @@ def prepare_product_profile(
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
     catalog: ProductProfileReader,
-) -> ProductProfileDefinition | None:
+) -> LegacyProductConfiguration | None:
     """Select an exact installed profile without mutating a creation object."""
     return validate_product_selection(
         product_kind=product_kind,
@@ -164,7 +164,7 @@ def scenario_participant_id(role: ScenarioRole, executor: AgentRef | None) -> st
 def role_binding_refs(
     collet_id: str,
     *,
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     executor_ref: AgentRef | None = None,
 ) -> tuple[str, ...]:
     """Return stable references for the profile's declared role facts."""

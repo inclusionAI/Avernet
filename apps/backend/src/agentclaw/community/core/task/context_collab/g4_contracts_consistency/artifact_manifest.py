@@ -5,15 +5,15 @@ from collections.abc import Iterable
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
-    Artifact,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_artifact import (
+    LegacyArtifact,
 )
 
 
 @dataclass(frozen=True)
 class ArtifactPortBinding:
     name: str
-    artifacts: tuple[Artifact, ...]
+    artifacts: tuple[LegacyArtifact, ...]
 
     def __post_init__(self) -> None:
         if (
@@ -24,9 +24,9 @@ class ArtifactPortBinding:
         ):
             raise ContextCollabValidationError("invalid artifact port binding")
         for artifact in self.artifacts:
-            if not isinstance(artifact, Artifact):
+            if not isinstance(artifact, LegacyArtifact):
                 raise ContextCollabValidationError("port requires typed artifacts")
-            Artifact.from_dict(artifact.to_dict())
+            LegacyArtifact.from_dict(artifact.to_dict())
             resource = artifact.resource_binding.resource_ref
             if not resource.revision or resource.revision.lower() in {
                 "latest",
@@ -51,7 +51,7 @@ class ArtifactPortBinding:
             raise ContextCollabValidationError("invalid artifact port fields")
         try:
             result = cls(
-                data["name"], tuple(Artifact.from_dict(a) for a in data["artifacts"])
+                data["name"], tuple(LegacyArtifact.from_dict(a) for a in data["artifacts"])
             )
             if result.to_dict() != data:
                 raise ContextCollabValidationError("noncanonical artifact manifest")

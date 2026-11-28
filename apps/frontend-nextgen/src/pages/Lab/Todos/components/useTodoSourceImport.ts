@@ -7,18 +7,18 @@ import type {
 } from '@/domain/todos/models';
 import { loadTodoSourceDraft, loadTodoSourceProjects, loadTodoSourceWorkItems } from '@/services/todos/todoService';
 import type { Dispatch, SetStateAction } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type SourceErrorKind = 'projects' | 'workItems' | 'draft';
 
 interface UseTodoSourceImportOptions {
   open: boolean;
+  sourceType: TodoSourceType;
   setTitle: Dispatch<SetStateAction<string>>;
   setDescription: Dispatch<SetStateAction<string>>;
 }
 
-export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoSourceImportOptions) {
-  const [sourceType, setSourceType] = useState<TodoSourceType>('manual');
+export function useTodoSourceImport({ open, sourceType, setTitle, setDescription }: UseTodoSourceImportOptions) {
   const [projects, setProjects] = useState<TodoSourceProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const [workItems, setWorkItems] = useState<TodoSourceWorkItem[]>([]);
@@ -32,24 +32,7 @@ export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoS
   const [sourceErrorKind, setSourceErrorKind] = useState<SourceErrorKind | null>(null);
   const sourceRequestGeneration = useRef(0);
 
-  useEffect(() => {
-    sourceRequestGeneration.current += 1;
-    setProjectsLoading(false);
-    setWorkItemsLoading(false);
-    setDraftLoading(false);
-    if (!open) return;
-    setSourceType('manual');
-    setProjects([]);
-    setProjectId('');
-    setWorkItems([]);
-    setWorkItemId('');
-    setWorkItemQuery('');
-    setLoadedDraft(null);
-    setSourceError('');
-    setSourceErrorKind(null);
-  }, [open]);
-
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     const generation = ++sourceRequestGeneration.current;
     setProjectsLoading(true);
     setSourceError('');
@@ -62,12 +45,28 @@ export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoS
     } catch {
       if (generation !== sourceRequestGeneration.current) return;
       setProjects([]);
-      setSourceError('Dima 项目加载失败，请重试。');
+      setSourceError('Dima 空间与项目加载失败，请重试。');
       setSourceErrorKind('projects');
     } finally {
       if (generation === sourceRequestGeneration.current) setProjectsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    sourceRequestGeneration.current += 1;
+    setProjectsLoading(false);
+    setWorkItemsLoading(false);
+    setDraftLoading(false);
+    setProjects([]);
+    setProjectId('');
+    setWorkItems([]);
+    setWorkItemId('');
+    setWorkItemQuery('');
+    setLoadedDraft(null);
+    setSourceError('');
+    setSourceErrorKind(null);
+    if (open && sourceType === 'dima') void fetchProjects();
+  }, [fetchProjects, open, sourceType]);
 
   const fetchWorkItems = async (selectedProjectId: string) => {
     const generation = ++sourceRequestGeneration.current;
@@ -86,24 +85,6 @@ export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoS
     } finally {
       if (generation === sourceRequestGeneration.current) setWorkItemsLoading(false);
     }
-  };
-
-  const changeSourceType = (next: TodoSourceType) => {
-    sourceRequestGeneration.current += 1;
-    setProjectsLoading(false);
-    setWorkItemsLoading(false);
-    setDraftLoading(false);
-    setSourceType(next);
-    setSourceError('');
-    setSourceErrorKind(null);
-    setProjectId('');
-    setWorkItems([]);
-    setWorkItemId('');
-    setWorkItemQuery('');
-    setLoadedDraft(null);
-    setTitle('');
-    setDescription('');
-    if (next === 'dima') void fetchProjects();
   };
 
   const changeProject = (nextProjectId: string) => {
@@ -172,6 +153,7 @@ export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoS
         itemId: loadedDraft.workItemId,
         ...(loadedDraft.sourceUrl ? { url: loadedDraft.sourceUrl } : {}),
         ...(loadedDraft.sourceUpdatedAt ? { updatedAt: loadedDraft.sourceUpdatedAt } : {}),
+        metadata: loadedDraft.metadata,
       }
     : undefined;
 
@@ -191,7 +173,6 @@ export function useTodoSourceImport({ open, setTitle, setDescription }: UseTodoS
     selectedWorkItem,
     createSource,
     setWorkItemQuery,
-    changeSourceType,
     changeProject,
     changeWorkItem,
     retrySourceRequest,

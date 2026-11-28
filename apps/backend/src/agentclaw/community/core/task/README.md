@@ -213,6 +213,13 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
 `BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
 状态查询编排；本轮不修改 `TaskExecutor`，也不抽取 Task/Todo 公共执行层。
 
+### Todo Space 选择边界
+
+- `GET /api/v1/collaboration/tasks/spaces` 是 Todo 页面读取 Space 的 Engine 内部面，必须排在通用 `/{task_id}` 读路由之前。
+- HTTP 层只从 `get_current_user` 获取认证主体，并以 `user.staffId` 调用 `SpaceServiceProtocol.list_spaces`；客户端 `user_id` 不参与身份选择。
+- 该入口只允许 `scope=accessible`，复用 Space 域的个人空间和有效团队成员关系判定，不复制 Repository 查询。
+- 返回分页 Envelope，单项仅暴露 Todo 选择器需要的 `space_id`、`space_name`、`space_type`。
+
 ### BCS Bot 身份边界
 
 - 任务领域只保存产品 Bot ID:`SearchResult.bot_id`/`GroupFormation.bot_ids`/单 Bot `assignee` 不保存 BCS UUID。

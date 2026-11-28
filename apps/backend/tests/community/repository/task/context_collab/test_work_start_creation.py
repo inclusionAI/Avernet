@@ -56,6 +56,10 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
@@ -124,8 +128,8 @@ def _sql_snapshot(db, cid):
             .one()
         )
         return (
-            row.root_task_ref,
-            row.creation_facts,
+            stored_context_value(row, "root_task_ref"),
+            stored_context_value(row, "creation_facts"),
             session.query(ContextCollabTaskModel)
             .filter_by(collab_context_id=cid)
             .count(),
@@ -178,7 +182,7 @@ def test_start_is_first_task_write_and_preserves_instantiation_facts(runtime, db
     assert _sql_snapshot(db, cid) == (task.task_id, facts, 1, 3)
     # The immutable installation record remains taskless; read projection resolves
     # the current authoritative root without letting L4 rewrite L6 metadata.
-    assert json.loads(facts)["product_instance"]["root_task_ref"] is None
+    assert facts["product_instance"]["root_task_ref"] is None
 
 
 @pytest.mark.parametrize(
@@ -343,9 +347,9 @@ def test_start_rejects_conflicting_initial_executor_evidence(
                 .filter_by(collab_context_id=cid)
                 .one()
             )
-            facts = json.loads(row.creation_facts)
+            facts = stored_context_value(row, "creation_facts")
             facts["executor_ref"] = AgentRef("bot", "eligible-unbound").to_dict()
-            row.creation_facts = json.dumps(facts)
+            store_context_value(row, "creation_facts", facts)
         else:
             row = (
                 session.query(ContextCollabEventModel)

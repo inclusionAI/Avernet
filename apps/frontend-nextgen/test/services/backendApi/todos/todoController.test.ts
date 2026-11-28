@@ -1,16 +1,22 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
 import {
+  createBotTeam,
+  createTodoAutoImportRule,
   createTodo,
   createTodoInteraction,
   getTodo,
   getTodoSourceDraft,
+  importDimaTodos,
   listTodoEvents,
   listTodoInteractions,
+  listTodoSpaces,
   listTodos,
   listTodoSourceProjects,
   listTodoSourceWorkItems,
+  listTodoAutoImportRules,
   runTodo,
   submitTodoAcceptance,
+  updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoController';
 
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
@@ -31,6 +37,21 @@ describe('todoController', () => {
     request.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } } as never);
   });
 
+  it('从 Engine 内部 API 查询 Todo 可访问空间', async () => {
+    await listTodoSpaces();
+
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/spaces', {
+      method: 'GET',
+      params: {
+        page_no: 1,
+        page_size: 100,
+        scope: 'accessible',
+      },
+      operation: 'list-todo-spaces',
+      retryOnTransient: true,
+    });
+  });
+
   it('全量查询不下发空筛选键', async () => {
     await listTodos({
       spaceId: 10,
@@ -38,7 +59,7 @@ describe('todoController', () => {
       pageSize: 10,
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos', {
       method: 'GET',
       params: {
         space_id: 10,
@@ -54,19 +75,19 @@ describe('todoController', () => {
   it('下发当前用户、空间、状态、负责人和搜索条件', async () => {
     await listTodos({
       spaceId: 10,
-      status: 'pending_acceptance',
+      status: 'pending_action',
       botId: 'bot-1',
       keyword: '方案',
       page: 2,
       pageSize: 20,
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos', {
       method: 'GET',
       params: {
         space_id: 10,
         keyword: '方案',
-        status: 'pending_acceptance',
+        status: 'pending_action',
         bot_id: 'bot-1',
         page: 2,
         page_size: 20,
@@ -80,7 +101,7 @@ describe('todoController', () => {
   it('查询待办详情时下发当前用户', async () => {
     await getTodo('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1', {
       method: 'GET',
       params: userParams,
       operation: 'get-todo',
@@ -93,10 +114,11 @@ describe('todoController', () => {
       spaceId: 10,
       title: '标题',
       description: '描述',
-      botId: 'bot-1',
+      executor: { type: 'bot', id: 'bot-1' },
+      owner: { userId: 'human-1', userName: '测试用户' },
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos', {
       method: 'POST',
       params: userParams,
       data: {
@@ -104,6 +126,8 @@ describe('todoController', () => {
         title: '标题',
         description: '描述',
         bot_id: 'bot-1',
+        executor: { type: 'bot', id: 'bot-1' },
+        owner: { user_id: 'human-1', user_name: '测试用户' },
       },
       operation: 'create-todo',
     });
@@ -114,17 +138,22 @@ describe('todoController', () => {
       spaceId: 10,
       title: '标题',
       description: '描述',
-      botId: 'bot-1',
+      executor: { type: 'bot', id: 'bot-1' },
+      owner: { userId: 'human-1', userName: '测试用户' },
       source: {
         type: 'dima',
         containerId: 'P1',
         itemId: 'work-1',
         url: 'https://dima.example/items/work-1',
         updatedAt: '2026-11-20T12:00:00Z',
+        metadata: {
+          processor_id: '149844',
+          processor_name: '张三',
+        },
       },
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos', {
       method: 'POST',
       params: userParams,
       data: {
@@ -132,21 +161,72 @@ describe('todoController', () => {
         title: '标题',
         description: '描述',
         bot_id: 'bot-1',
+        executor: { type: 'bot', id: 'bot-1' },
+        owner: { user_id: 'human-1', user_name: '测试用户' },
         source: {
           type: 'dima',
           container_id: 'P1',
           item_id: 'work-1',
           url: 'https://dima.example/items/work-1',
           updated_at: '2026-11-20T12:00:00Z',
+          metadata: {
+            processor_id: '149844',
+            processor_name: '张三',
+          },
         },
       },
       operation: 'create-todo',
     });
   });
 
+  it('批量导入 Dima 待办时保留 Bot 执行者字符串身份', async () => {
+    await importDimaTodos({
+      spaceId: 107,
+      executor: { type: 'bot', id: '20261103_wcapfdkz' },
+      owner: { userId: '149844', userName: '持续' },
+      items: [
+        {
+          title: '测试',
+          description: '111111',
+          source: {
+            type: 'dima',
+            containerId: 'P1',
+            itemId: '2026112400120935582',
+            metadata: {},
+          },
+        },
+      ],
+    });
+
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/products/dima-imports', {
+      method: 'POST',
+      params: userParams,
+      data: {
+        space_id: 107,
+        executor: { type: 'bot', id: '20261103_wcapfdkz' },
+        owner: { user_id: '149844', user_name: '持续' },
+        items: [
+          {
+            title: '测试',
+            description: '111111',
+            source: {
+              type: 'dima',
+              container_id: 'P1',
+              item_id: '2026112400120935582',
+              url: undefined,
+              updated_at: undefined,
+              metadata: {},
+            },
+          },
+        ],
+      },
+      operation: 'import-dima-todos',
+    });
+  });
+
   it('查询 Dima 来源时编码路径并下发当前用户', async () => {
     await listTodoSourceProjects();
-    expect(request).toHaveBeenLastCalledWith('/openapi/v1/collaboration/tasks/todos/sources/dima/projects', {
+    expect(request).toHaveBeenLastCalledWith('/api/v1/collaboration/tasks/todos/sources/dima/projects', {
       method: 'GET',
       params: userParams,
       operation: 'list-todo-source-projects',
@@ -155,7 +235,7 @@ describe('todoController', () => {
 
     await listTodoSourceWorkItems('P/1', '  支付  ');
     expect(request).toHaveBeenLastCalledWith(
-      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items',
+      '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items',
       {
         method: 'GET',
         params: { query: '支付', user_id: 'human-1' },
@@ -166,7 +246,7 @@ describe('todoController', () => {
 
     await getTodoSourceDraft('P/1', 'work/1');
     expect(request).toHaveBeenLastCalledWith(
-      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
+      '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
       {
         method: 'GET',
         params: userParams,
@@ -180,9 +260,97 @@ describe('todoController', () => {
     await listTodoSourceWorkItems('P1', '   ');
 
     expect(request).toHaveBeenCalledWith(
-      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P1/work-items',
+      '/api/v1/collaboration/tasks/todos/sources/dima/projects/P1/work-items',
       expect.objectContaining({ params: userParams }),
     );
+  });
+
+  it('创建、查询和更新 Dima 自动导入规则时使用用户作用域', async () => {
+    await createTodoAutoImportRule({
+      spaceId: 10,
+      sourceContainerIds: ['W1', 'P1'],
+      filterText: '只导入需要研发处理且尚未完成的事项',
+      botId: 'bot-owned:u-1',
+      schedulerBotId: 'scheduler-bot-owned:u-1',
+      triggerIntervalSeconds: 1800,
+      cronExpression: '*/30 * * * *',
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      {
+        method: 'POST',
+        params: userParams,
+        data: {
+          space_id: 10,
+          source_container_ids: ['W1', 'P1'],
+          filter_text: '只导入需要研发处理且尚未完成的事项',
+          bot_id: 'bot-owned:u-1',
+          scheduler_bot_id: 'scheduler-bot-owned:u-1',
+          trigger_interval_seconds: 1800,
+          cron_expression: '*/30 * * * *',
+        },
+        operation: 'create-todo-auto-import-rule',
+      },
+    );
+
+    await listTodoAutoImportRules(10, 'enabled');
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      {
+        method: 'GET',
+        params: { space_id: 10, status: 'enabled', user_id: 'human-1' },
+        operation: 'list-todo-auto-import-rules',
+        retryOnTransient: true,
+      },
+    );
+
+    await updateTodoAutoImportRule('rule/1', { status: 'disabled' });
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule%2F1',
+      {
+        method: 'PATCH',
+        params: userParams,
+        data: { status: 'disabled' },
+        operation: 'update-todo-auto-import-rule',
+      },
+    );
+  });
+
+  it('创建 Bot 小队时保留节点的多个 Bot 和文本门禁', async () => {
+    await createBotTeam({
+      spaceId: 10,
+      name: 'Coding 小队',
+      description: '完成代码交付',
+      nodes: [
+        {
+          code: 'develop',
+          name: '代码开发',
+          botIds: ['bot-developer', 'bot-reviewer'],
+          approvalRequired: true,
+          completionGate: '代码已提交并通过验证',
+        },
+      ],
+    });
+
+    expect(request).toHaveBeenLastCalledWith('/api/v1/collaboration/tasks/bot-teams', {
+      method: 'POST',
+      params: userParams,
+      data: {
+        space_id: 10,
+        name: 'Coding 小队',
+        description: '完成代码交付',
+        nodes: [
+          {
+            code: 'develop',
+            name: '代码开发',
+            bot_ids: ['bot-developer', 'bot-reviewer'],
+            approval_required: true,
+            completion_gate: '代码已提交并通过验证',
+          },
+        ],
+      },
+      operation: 'create-todo-bot-team',
+    });
   });
 
   it('提交验收时下发当前用户', async () => {
@@ -193,7 +361,7 @@ describe('todoController', () => {
       targets: [],
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/acceptance', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/acceptance', {
       method: 'POST',
       params: userParams,
       data: {
@@ -209,7 +377,7 @@ describe('todoController', () => {
   it('查询互动时下发当前用户', async () => {
     await listTodoInteractions('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/interactions', {
       method: 'GET',
       params: userParams,
       operation: 'list-todo-interactions',
@@ -220,7 +388,7 @@ describe('todoController', () => {
   it('创建互动时下发当前用户', async () => {
     await createTodoInteraction('todo/1', { message: '补充信息' });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/interactions', {
       method: 'POST',
       params: userParams,
       data: { message: '补充信息' },
@@ -235,7 +403,7 @@ describe('todoController', () => {
       mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/interactions', {
       method: 'POST',
       params: userParams,
       data: {
@@ -250,7 +418,7 @@ describe('todoController', () => {
   it('查询事件时下发当前用户', async () => {
     await listTodoEvents('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/events', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/events', {
       method: 'GET',
       params: userParams,
       operation: 'list-todo-events',
@@ -261,7 +429,7 @@ describe('todoController', () => {
   it('运行待办时下发当前用户', async () => {
     await runTodo('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/run', {
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/todos/todo%2F1/run', {
       method: 'POST',
       params: userParams,
       operation: 'run-todo',

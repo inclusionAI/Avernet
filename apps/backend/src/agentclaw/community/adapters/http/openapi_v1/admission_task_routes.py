@@ -182,6 +182,20 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todo-template-capabilities",
     ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/bot-teams"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/bot-teams"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}/archive",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
     (
@@ -219,6 +233,10 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/products/dima-imports",
+    ): AdmissionMode.REFUSED,
+    (
         "GET",
         "/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
     ): AdmissionMode.REFUSED,
@@ -232,6 +250,38 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.REFUSED,
     (
         "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/active",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}",
+    ): AdmissionMode.OPEN,
+    (
+        "PATCH",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/progress",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/checkpoints",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/todos",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
         "/openapi/v1/collaboration/tasks/todos/from-template",
     ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
@@ -239,16 +289,50 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages",
     ): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/progress",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions/{interaction_id}/cancel",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/events",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts",
+    ): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     ): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance",
+    ): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",

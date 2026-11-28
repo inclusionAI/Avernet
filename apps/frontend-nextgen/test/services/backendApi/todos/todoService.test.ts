@@ -1,27 +1,47 @@
 import {
+  createTodoAutoImportRule,
   getTodoSourceDraft,
   listTodoArtifacts,
+  listTodoAutoImportRules,
   listTodoSourceProjects,
+  listTodoSpaces,
   listTodoSourceWorkItems,
+  updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoController';
 import {
+  createTodoAutoImportRule as createTodoAutoImportRuleService,
   loadTodoArtifacts,
+  loadTodoAutoImportRules,
   loadTodoSourceDraft,
   loadTodoSourceProjects,
+  loadTodoSpaces,
   loadTodoSourceWorkItems,
+  updateTodoAutoImportRule as updateTodoAutoImportRuleService,
 } from '@/services/backendApi/todos/todoService';
 
-jest.mock('@/services/backendApi/todos/todoController', () => ({
-  listTodoArtifacts: jest.fn(),
-  listTodoSourceProjects: jest.fn(),
-  listTodoSourceWorkItems: jest.fn(),
-  getTodoSourceDraft: jest.fn(),
-}));
+jest.mock('@/services/backendApi/todos/todoController', () => {
+  const actual = jest.requireActual('@/services/backendApi/todos/todoController');
+  return {
+    ...actual,
+    createTodoAutoImportRule: jest.fn(),
+    getTodoSourceDraft: jest.fn(),
+    listTodoArtifacts: jest.fn(),
+    listTodoAutoImportRules: jest.fn(),
+    listTodoSourceProjects: jest.fn(),
+    listTodoSpaces: jest.fn(),
+    listTodoSourceWorkItems: jest.fn(),
+    updateTodoAutoImportRule: jest.fn(),
+  };
+});
 
 const listArtifacts = jest.mocked(listTodoArtifacts);
 const listProjects = jest.mocked(listTodoSourceProjects);
+const listSpaces = jest.mocked(listTodoSpaces);
 const listWorkItems = jest.mocked(listTodoSourceWorkItems);
 const getDraft = jest.mocked(getTodoSourceDraft);
+const createAutoImportRule = jest.mocked(createTodoAutoImportRule);
+const listAutoImportRules = jest.mocked(listTodoAutoImportRules);
+const updateAutoImportRule = jest.mocked(updateTodoAutoImportRule);
 
 describe('todoService artifacts', () => {
   beforeEach(() => {
@@ -89,6 +109,52 @@ describe('todoService artifacts', () => {
   });
 });
 
+describe('todoService Engine space normalization', () => {
+  beforeEach(() => {
+    listSpaces.mockReset();
+  });
+
+  it('映射 Engine 分页空间响应为 Todo 最小空间模型', async () => {
+    listSpaces.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            space_id: 10,
+            space_name: '测试用户的个人空间',
+            space_type: 'PERSONAL',
+          },
+        ],
+      },
+    });
+
+    await expect(loadTodoSpaces()).resolves.toEqual([
+      {
+        spaceId: 10,
+        spaceName: '测试用户的个人空间',
+        spaceType: 'PERSONAL',
+      },
+    ]);
+  });
+
+  it('兼容 Engine 的 id/name/type 与 spaces 列表结构', async () => {
+    listSpaces.mockResolvedValue({
+      code: 200000,
+      data: {
+        spaces: [{ id: '11', name: '协作空间', type: 'team' }],
+      },
+    });
+
+    await expect(loadTodoSpaces()).resolves.toEqual([
+      {
+        spaceId: 11,
+        spaceName: '协作空间',
+        spaceType: 'TEAM',
+      },
+    ]);
+  });
+});
+
 describe('todoService Dima source normalization', () => {
   beforeEach(() => {
     listProjects.mockReset();
@@ -99,7 +165,7 @@ describe('todoService Dima source normalization', () => {
   it('映射项目、工作项和可编辑草稿', async () => {
     listProjects.mockResolvedValue({
       code: 200000,
-      data: [{ id: 1259, name: '支付项目' }],
+      data: [{ id: 1259, name: '支付项目', kind: 'project' }],
     });
     listWorkItems.mockResolvedValue({
       code: 200000,
@@ -124,10 +190,14 @@ describe('todoService Dima source normalization', () => {
         title: '登录缺陷',
         description: '整理后的内容',
         source_url: 'https://dima.example/items/1',
+        metadata: {
+          processor_id: '149844',
+          processor_name: '张三',
+        },
       },
     });
 
-    await expect(loadTodoSourceProjects()).resolves.toEqual([{ id: '1259', name: '支付项目' }]);
+    await expect(loadTodoSourceProjects()).resolves.toEqual([{ id: '1259', name: '支付项目', kind: 'project' }]);
     await expect(loadTodoSourceWorkItems('1259')).resolves.toEqual([
       {
         id: '2026112000000000001',
@@ -147,6 +217,90 @@ describe('todoService Dima source normalization', () => {
       description: '整理后的内容',
       sourceUrl: 'https://dima.example/items/1',
       sourceUpdatedAt: undefined,
+      metadata: {
+        processor_id: '149844',
+        processor_name: '张三',
+      },
+    });
+  });
+});
+
+describe('todoService Dima auto import rule normalization', () => {
+  beforeEach(() => {
+    createAutoImportRule.mockReset();
+    listAutoImportRules.mockReset();
+    updateAutoImportRule.mockReset();
+  });
+
+  const ruleDto = {
+    rule_id: 'rule-1',
+    space_id: 10,
+    source_container_ids: ['W1', 'P1'],
+    filter_text: '只导入需要研发处理且尚未完成的事项',
+    bot_id: 'bot-owned:u-1',
+    scheduler_bot_id: 'scheduler-bot-owned:u-1',
+    trigger_interval_seconds: 1800,
+    cron_expression: '*/30 * * * *',
+    status: 'enabled',
+    cursor_updated_at: '2026-11-25T08:00:00+00:00',
+    created_at: '2026-11-25T07:00:00+00:00',
+    updated_at: '2026-11-25T08:00:00+00:00',
+  };
+
+  const rule = {
+    ruleId: 'rule-1',
+    spaceId: 10,
+    sourceContainerIds: ['W1', 'P1'],
+    filterText: '只导入需要研发处理且尚未完成的事项',
+    botId: 'bot-owned:u-1',
+    schedulerBotId: 'scheduler-bot-owned:u-1',
+    triggerIntervalSeconds: 1800,
+    cronExpression: '*/30 * * * *',
+    status: 'enabled' as const,
+    cursorUpdatedAt: '2026-11-25T08:00:00+00:00',
+    createdAt: '2026-11-25T07:00:00+00:00',
+    updatedAt: '2026-11-25T08:00:00+00:00',
+  };
+
+  it('映射创建和查询响应中的 snake_case 字段', async () => {
+    createAutoImportRule.mockResolvedValue({ code: 200000, data: ruleDto });
+    listAutoImportRules.mockResolvedValue({ code: 200000, data: [ruleDto] });
+
+    await expect(
+      createTodoAutoImportRuleService({
+        spaceId: 10,
+        sourceContainerIds: ['W1', 'P1'],
+        filterText: '只导入需要研发处理且尚未完成的事项',
+        botId: 'bot-owned:u-1',
+        schedulerBotId: 'scheduler-bot-owned:u-1',
+        triggerIntervalSeconds: 1800,
+        cronExpression: '*/30 * * * *',
+      }),
+    ).resolves.toEqual(rule);
+    await expect(loadTodoAutoImportRules(10)).resolves.toEqual([rule]);
+  });
+
+  it('兼容没有定时任务执行者的历史规则', async () => {
+    listAutoImportRules.mockResolvedValue({
+      code: 200000,
+      data: [{ ...ruleDto, scheduler_bot_id: null }],
+    });
+
+    await expect(loadTodoAutoImportRules(10)).resolves.toEqual([
+      { ...rule, schedulerBotId: undefined },
+    ]);
+  });
+
+  it('映射规则更新结果', async () => {
+    updateAutoImportRule.mockResolvedValue({
+      code: 200000,
+      data: { ...ruleDto, status: 'disabled', cursor_updated_at: null },
+    });
+
+    await expect(updateTodoAutoImportRuleService('rule-1', { status: 'disabled' })).resolves.toEqual({
+      ...rule,
+      status: 'disabled',
+      cursorUpdatedAt: undefined,
     });
   });
 });

@@ -23,11 +23,23 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoExecutionRecord,
     TodoExecutionStatus,
 )
+from agentclaw.community.core.task.todos.auto_import_models import (
+    TodoAutoImportProgressRecord,
+    TodoAutoImportProgressStatus,
+    TodoAutoImportRuleRecord,
+    TodoAutoImportRuleStatus,
+)
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.stage_models import (
     TodoPendingActionKind,
     TodoStageRecord,
     TodoStageStatus,
+)
+from agentclaw.community.core.task.todos.product_interaction_models import (
+    TodoProductInteraction,
+    TodoProductInteractionDeliveryState,
+    TodoProductInteractionKind,
+    TodoProductInteractionResponse,
 )
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
@@ -64,6 +76,7 @@ class TodoModel(Base):
     bot_name = Column(String(256), nullable=True)
     status = Column(String(32), nullable=False)
     collab_context_id = Column(String(256), nullable=True)
+    product_collet_id = Column(AutoIncrementBigInteger, nullable=True)
     created_by = Column(String(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -107,9 +120,17 @@ class TodoModel(Base):
             "gmt_create",
             "id",
         ),
+        Index(
+            "idx_todo_product_collet",
+            "avernet_tenant",
+            "env",
+            "product_collet_id",
+            "id",
+        ),
     )
 
     def to_record(self) -> TodoRecord:
+        owner_id, owner_name = self._owner_projection()
         return TodoRecord(
             todo_id=self.todo_id,
             space_id=self.space_id,
@@ -126,11 +147,40 @@ class TodoModel(Base):
             bot_name=self.bot_name or "",
             status=TodoStatus(self.status),
             collab_context_id=self.collab_context_id,
+            product_collet_id=self.product_collet_id,
             created_by=self.created_by,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
+            owner_id=owner_id,
+            owner_name=owner_name,
         )
 
+    def _owner_projection(self) -> tuple[str, str]:
+        try:
+            bindings = json.loads(self.participant_bindings_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            bindings = []
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                if (
+                    binding.get("key") != "todo_owner"
+                    or binding.get("subject_type") != "human"
+                ):
+                    continue
+                raw_id = binding.get("subject_id")
+                if not isinstance(raw_id, str) or not raw_id.strip():
+                    continue
+                owner_id = raw_id.strip()
+                raw_name = binding.get("subject_name")
+                owner_name = (
+                    raw_name.strip()
+                    if isinstance(raw_name, str) and raw_name.strip()
+                    else owner_id
+                )
+                return owner_id, owner_name
+        return self.created_by, self.created_by
 
 
 class TodoStageInstanceModel(Base):
@@ -297,6 +347,7 @@ class TodoSourceBindingModel(Base):
     source_item_id = Column(String(128), nullable=False)
     source_url = Column(String(2048), nullable=True)
     source_updated_at = Column(String(128), nullable=True)
+    source_metadata_json = Column(Text, nullable=True, default="{}")
     imported_by = Column(String(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -331,6 +382,155 @@ class TodoSourceBindingModel(Base):
             "source_item_id",
         ),
     )
+
+
+class TodoAutoImportRuleModel(Base):
+    """One user-owned configuration consumed by an external import Agent."""
+
+    __tablename__ = "ac_todo_source_import_rule"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    rule_id = Column(String(64), nullable=False)
+    space_id = Column(AutoIncrementBigInteger, nullable=False)
+    source_type = Column(String(32), nullable=False, default="dima")
+    source_container_ids_json = Column(Text, nullable=False)
+    filter_text = Column(Text, nullable=False)
+    bot_id = Column(String(256), nullable=False)
+    scheduler_bot_id = Column(String(256), nullable=True)
+    trigger_interval_seconds = Column(Integer, nullable=False, default=1800)
+    cron_expression = Column(String(128), nullable=False, default="*/30 * * * *")
+    status = Column(String(32), nullable=False)
+    cursor_updated_at = Column(DateTime, nullable=True)
+    created_by = Column(String(256), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            name="uk_todo_source_import_rule_id",
+        ),
+        Index(
+            "idx_todo_source_import_rule_owner",
+            "avernet_tenant",
+            "env",
+            "created_by",
+            "status",
+            "gmt_modified",
+            "id",
+        ),
+        Index(
+            "idx_todo_source_import_rule_space",
+            "avernet_tenant",
+            "env",
+            "space_id",
+            "status",
+            "gmt_modified",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoAutoImportRuleRecord:
+        container_ids = json.loads(self.source_container_ids_json)
+        return TodoAutoImportRuleRecord(
+            rule_id=self.rule_id,
+            space_id=self.space_id,
+            source_container_ids=tuple(str(item) for item in container_ids),
+            filter_text=self.filter_text,
+            bot_id=self.bot_id,
+            scheduler_bot_id=self.scheduler_bot_id,
+            trigger_interval_seconds=self.trigger_interval_seconds,
+            cron_expression=self.cron_expression,
+            status=TodoAutoImportRuleStatus(self.status),
+            cursor_updated_at=self.cursor_updated_at,
+            created_by=self.created_by,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+class TodoAutoImportProgressModel(Base):
+    """One retry-safe outcome for a version of a Dima work item."""
+
+    __tablename__ = "ac_todo_source_import_progress"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    progress_id = Column(String(64), nullable=False)
+    rule_id = Column(String(64), nullable=False)
+    source_container_id = Column(String(128), nullable=False)
+    source_item_id = Column(String(128), nullable=False)
+    source_updated_at = Column(DateTime, nullable=False)
+    status = Column(String(32), nullable=False)
+    todo_id = Column(String(64), nullable=True)
+    detail = Column(Text, nullable=False, default="")
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "progress_id",
+            name="uk_todo_source_import_progress_id",
+        ),
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            "source_container_id",
+            "source_item_id",
+            "source_updated_at",
+            name="uk_todo_source_import_progress_version",
+        ),
+        Index(
+            "idx_todo_source_import_progress_rule",
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            "source_updated_at",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoAutoImportProgressRecord:
+        return TodoAutoImportProgressRecord(
+            progress_id=self.progress_id,
+            rule_id=self.rule_id,
+            source_container_id=self.source_container_id,
+            source_item_id=self.source_item_id,
+            source_updated_at=self.source_updated_at,
+            status=TodoAutoImportProgressStatus(self.status),
+            todo_id=self.todo_id,
+            detail=self.detail,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
 
 
 class TodoExecutionModel(Base):
@@ -419,7 +619,93 @@ for _model in (
     TodoStageInstanceModel,
     TodoAcceptanceModel,
     TodoSourceBindingModel,
+    TodoAutoImportRuleModel,
+    TodoAutoImportProgressModel,
     TodoExecutionModel,
     TodoArtifactModel,
 ):
     register_avernet_tenant_guard(_model)
+
+
+class TodoProductInteractionModel(Base):
+    """One locally persisted Human request and Product platform response."""
+
+    __tablename__ = "ac_todo_product_interaction"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    interaction_id = Column(String(128), nullable=False)
+    todo_id = Column(String(64), nullable=False)
+    interaction_kind = Column(String(32), nullable=False)
+    target_interaction_id = Column(String(128), nullable=True)
+    product_collet_id = Column(AutoIncrementBigInteger, nullable=False)
+    collet_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
+    expected_revision = Column(BigInteger, nullable=True)
+    actor_id = Column(String(256), nullable=False)
+    actor_name = Column(String(256), nullable=True)
+    request_message = Column(Text, nullable=False)
+    delivery_state = Column(String(32), nullable=False)
+    response_type = Column(String(64), nullable=True)
+    response_message = Column(Text, nullable=True)
+    failure_code = Column(String(64), nullable=True)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "interaction_id",
+            name="uk_todo_product_interaction_tenant_env_id",
+        ),
+        Index(
+            "idx_todo_product_interaction_list",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "gmt_create",
+            "id",
+        ),
+        Index(
+            "idx_todo_product_interaction_state",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "delivery_state",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoProductInteraction:
+        return TodoProductInteraction(
+            interaction_id=self.interaction_id,
+            todo_id=self.todo_id,
+            kind=TodoProductInteractionKind(self.interaction_kind),
+            actor_id=self.actor_id,
+            actor_name=self.actor_name,
+            request_message=self.request_message,
+            delivery_state=TodoProductInteractionDeliveryState(self.delivery_state),
+            product_collet_id=self.product_collet_id,
+            collet_rollout_id=self.collet_rollout_id,
+            expected_revision=self.expected_revision,
+            target_interaction_id=self.target_interaction_id,
+            response=(
+                TodoProductInteractionResponse(self.response_type, self.response_message or "")
+                if self.response_type
+                else None
+            ),
+            failure_code=self.failure_code,
+            created_at=self.gmt_create.isoformat(),
+            updated_at=self.gmt_modified.isoformat(),
+        )

@@ -2,8 +2,9 @@
 
 覆盖 ``MethodKind`` wire 值接受/拒绝、``PrincipalRef`` / ``AgentRef`` /
 ``SpaceRef`` / ``ResourceRef`` 的 ``from_dict`` round-trip 与缺字段拒绝、
-``ProductProfile`` / ``WorkflowKind`` 全部合法值,以及错误类继承关系。
+``LegacyProductProfileKey`` / ``WorkflowKind`` 全部合法值,以及错误类继承关系。
 """
+
 import pytest
 
 from agentclaw.community.core.errors import (
@@ -29,28 +30,43 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     MethodKind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
+    LegacyProductProfileKey,
     WorkflowKind,
 )
 
 
 @pytest.mark.parametrize(
     "bad",
-    ["", "swarm", "open+group", "single", "Open + Group", "Open + Single", "Open + Swarm"],
+    [
+        "",
+        "swarm",
+        "open+group",
+        "single",
+        "Open + Group",
+        "Open + Single",
+        "Open + Swarm",
+    ],
 )
 def test_method_kind_rejects_unknown_wire_values(bad):
     with pytest.raises(ContextCollabValidationError):
         MethodKind.from_wire(bad)
 
 
-def test_method_kind_has_exactly_four_base_members():
+def test_method_kind_has_four_core_and_one_local_extension():
     assert MethodKind.__members__ == {
         "SINGLE": MethodKind.SINGLE,
         "GROUP": MethodKind.GROUP,
         "SWARM": MethodKind.SWARM,
         "OPEN": MethodKind.OPEN,
+        "MULTI_ROLLOUT": MethodKind.MULTI_ROLLOUT,
     }
-    assert {kind.value for kind in MethodKind} == {"Single", "Group", "Swarm", "Open"}
+    assert {kind.value for kind in MethodKind} == {
+        "Single",
+        "Group",
+        "Swarm",
+        "Open",
+        "MultiRollout",
+    }
 
 
 def test_method_kind_accepts_spec_values():
@@ -61,9 +77,7 @@ def test_method_kind_accepts_spec_values():
 
 
 def test_principal_ref_round_trip():
-    ref = PrincipalRef.from_dict(
-        {"principal_type": "human", "principal_id": "u_1001"}
-    )
+    ref = PrincipalRef.from_dict({"principal_type": "human", "principal_id": "u_1001"})
     assert ref == PrincipalRef(principal_type="human", principal_id="u_1001")
     dumped = ref.to_dict()
     assert dumped == {"principal_type": "human", "principal_id": "u_1001"}
@@ -109,9 +123,7 @@ def test_agent_ref_rejects_missing_or_empty_fields(data):
 
 
 def test_space_ref_round_trip():
-    ref = SpaceRef.from_dict(
-        {"space_id": "space_workspace_001", "environment": "prod"}
-    )
+    ref = SpaceRef.from_dict({"space_id": "space_workspace_001", "environment": "prod"})
     assert ref == SpaceRef(space_id="space_workspace_001", environment="prod")
     dumped = ref.to_dict()
     assert dumped == {"space_id": "space_workspace_001", "environment": "prod"}
@@ -150,9 +162,7 @@ def test_resource_ref_round_trip():
 
 
 def test_resource_ref_revision_is_optional():
-    ref = ResourceRef.from_dict(
-        {"resource_type": "repo", "resource_id": "repo_001"}
-    )
+    ref = ResourceRef.from_dict({"resource_type": "repo", "resource_id": "repo_001"})
     assert ref.revision is None
     assert ResourceRef.from_dict(ref.to_dict()) == ref
 
@@ -173,18 +183,17 @@ def test_resource_ref_rejects_missing_or_empty_fields(data):
 
 
 def test_product_profile_covers_spec_values():
-    assert ProductProfile.TEAM_TODO.value == "team_todo"
-    assert ProductProfile.PUBLIC_DISCUSSION.value == "public_discussion"
-    assert ProductProfile.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
-    assert ProductProfile.BBS_HELP_REQUEST.value == "bbs_help_request"
+    assert LegacyProductProfileKey.TEAM_TODO.value == "team_todo"
+    assert LegacyProductProfileKey.PUBLIC_DISCUSSION.value == "public_discussion"
+    assert (
+        LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
+    )
+    assert LegacyProductProfileKey.BBS_HELP_REQUEST.value == "bbs_help_request"
 
 
 def test_workflow_kind_covers_spec_values():
     assert WorkflowKind.TEAM_TODO_EXECUTION.value == "team_todo_execution"
-    assert (
-        WorkflowKind.FORUM_PUBLIC_DISCUSSION.value
-        == "forum_public_discussion"
-    )
+    assert WorkflowKind.FORUM_PUBLIC_DISCUSSION.value == "forum_public_discussion"
     assert WorkflowKind.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
     assert WorkflowKind.BBS_HELP_REQUEST_GOAL.value == "bbs_help_request_goal"
 

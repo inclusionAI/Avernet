@@ -1,6 +1,5 @@
 """Explicit application/L6 installation never becomes an L4 creation side effect."""
 
-import json
 from dataclasses import replace
 
 import pytest
@@ -69,6 +68,10 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
+)
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
@@ -421,9 +424,9 @@ def test_existing_work_instance_cannot_masquerade_as_pre_start_installation(
             .filter_by(collab_context_id=command.collet_id)
             .one()
         )
-        facts = json.loads(row.creation_facts)
+        facts = stored_context_value(row, "creation_facts")
         facts["product_instance"]["root_task_ref"] = None
-        row.creation_facts = json.dumps(facts)
+        store_context_value(row, "creation_facts", facts)
         session.commit()
     with pytest.raises(ContextCollabValidationError, match="missing its root Task"):
         repo.get_current_status(command.collet_id)

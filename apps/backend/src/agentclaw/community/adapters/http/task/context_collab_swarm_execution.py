@@ -61,7 +61,8 @@ async def step_swarm(
     service: TaskCommissionServiceProtocol = Injected(TaskCommissionServiceProtocol),  # noqa: B008
 ) -> Envelope[dict]:
     return envelope(
-        service.step_swarm(
+        await asyncio.to_thread(
+            service.step_swarm,
             collab_context_id,
             binding_id,
             StepCommand(**body.model_dump()),

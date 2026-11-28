@@ -13,9 +13,15 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.vie
     CurrentSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    parse_collet_context_spec,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabEventModel,
     ContextCollabTaskModel,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
+    _event_from_row,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -49,7 +55,12 @@ def legacy_task(
 
 
 def load_tasks(db, row) -> tuple[Task | None, tuple[Task, ...]]:
-    if row.root_task_ref is None:
+    if row.product_profile_id is not None:
+        raise ContextCollabValidationError(
+            "product Collet cannot own legacy Task state"
+        )
+    spec = parse_collet_context_spec(row)
+    if spec.root_task_ref is None:
         orphan = (
             db.query(ContextCollabTaskModel.id)
             .filter(
@@ -92,7 +103,7 @@ def load_tasks(db, row) -> tuple[Task | None, tuple[Task, ...]]:
         ):
             raise ContextCollabValidationError("Task storage identity/version mismatch")
         tasks.append(task)
-    root = next((task for task in tasks if task.task_id == row.root_task_ref), None)
+    root = next((task for task in tasks if task.task_id == spec.root_task_ref), None)
     if root is None or root.parent_task_ref is not None:
         raise ContextCollabValidationError("missing or invalid root Task")
     ids = {task.task_id for task in tasks}
@@ -156,13 +167,16 @@ def _validate_task_evidence(db, row, tasks) -> None:
     }
     events = {
         event.event_id: event
-        for event in db.query(ContextCollabEventModel)
-        .filter(
-            ContextCollabEventModel.collab_context_id == row.collab_context_id,
-            ContextCollabEventModel.env == get_current_env(),
-            ContextCollabEventModel.event_id.in_(refs),
+        for event in (
+            _event_from_row(stored)
+            for stored in db.query(ContextCollabEventModel)
+            .filter(
+                ContextCollabEventModel.collab_context_id == row.collab_context_id,
+                ContextCollabEventModel.env == get_current_env(),
+                ContextCollabEventModel.event_id.in_(refs),
+            )
+            .all()
         )
-        .all()
     }
     for task in tasks:
         for ref, kind in (
@@ -206,7 +220,7 @@ def _validate_task_evidence(db, row, tasks) -> None:
                     "Task update evidence revision mismatch"
                 )
             if kind == "progress":
-                payload = json.loads(event.payload) if event.payload is not None else {}
+                payload = event.payload or {}
                 if (
                     event.event_kind != "task.progress.updated"
                     or type(payload.get("percent")) is not int

@@ -122,6 +122,32 @@ class TodoTemplateDefinitionValidator:
         if owner_type is not TodoParticipantSubjectType.HUMAN:
             raise TodoTemplateValidationError("stage owner must resolve to human")
 
+        if not isinstance(stage.completion_condition, str):
+            raise TodoTemplateValidationError("stage completion_condition must be text")
+
+        candidates = stage.executor_candidates
+        if candidates:
+            seen_candidates: set[TodoParticipantReference] = set()
+            for candidate in candidates:
+                candidate_type = self._reference_subject_type(
+                    candidate,
+                    participants,
+                    role="executor",
+                )
+                if candidate_type is not executor_type:
+                    raise TodoTemplateValidationError(
+                        "stage executor candidate must match stage_kind"
+                    )
+                if candidate in seen_candidates:
+                    raise TodoTemplateValidationError(
+                        "duplicate stage executor candidate"
+                    )
+                seen_candidates.add(candidate)
+            if stage.executor_ref not in seen_candidates:
+                raise TodoTemplateValidationError(
+                    "stage executor_ref must be included in executor_candidates"
+                )
+
         seen_gates: set[tuple[str, str]] = set()
         for gate in stage.completion_gate.required_artifacts:
             self._required_text(gate.artifact_type, "artifact gate type")

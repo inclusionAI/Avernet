@@ -1,16 +1,11 @@
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 
-export function TodoDetailItem({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
+export function TodoDetailItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        {icon}
-      </span>
-      <div className="min-w-0">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-0.5 break-words text-xs font-medium text-foreground">{value || '—'}</div>
-      </div>
+    <div className="text-xs leading-5">
+      <span className="text-muted-foreground">{label}:</span>{' '}
+      <span className="break-words text-foreground/85">{value || '—'}</span>
     </div>
   );
 }
@@ -30,8 +25,10 @@ export function TodoDetailTab({
       role="tab"
       aria-selected={active}
       className={cn(
-        '-mb-px h-auto rounded-none border-x-0 border-t-0 border-b-2 bg-transparent px-1 pb-4 text-xl font-semibold outline-none hover:bg-transparent',
-        active ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+        'relative h-auto rounded-none border-0 bg-transparent px-4 py-2.5 text-sm font-medium outline-none hover:bg-transparent',
+        active
+          ? 'text-foreground after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-primary'
+          : 'text-muted-foreground hover:text-foreground',
       )}
       onClick={onClick}
     >

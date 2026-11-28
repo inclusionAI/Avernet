@@ -1,6 +1,6 @@
 """Task context-collab 公开 HTTP adapter —— /openapi/v1 双面规则(spec §6.1)。
 
-``adapters/http/task/context_collab.py`` 的公开孪生:同一条
+``adapters/http/task/context_collab/router.py`` 的公开孪生:同一条
 ``ContextCollabServiceProtocol``,DTO/命令组装/Envelope/错误映射全部复用
 (``schemas_context_collab.py`` 单处维护),本文件只做公开面特有的一件事
 ——身份转换:gateway 签发的 ``X-Avernet-Principal`` 经

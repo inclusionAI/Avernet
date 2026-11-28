@@ -1,4 +1,8 @@
-"""One append-only row per published ProductProfile version; no runtime state."""
+"""Archived v1 publication schema; requires the explicit storage migration.
+
+The integer-ID/YAML Profile owns the unqualified product_profile table. Never
+point the legacy reader at that incompatible schema or rewrite its source bytes.
+"""
 
 from sqlalchemy import Column, Index, Integer, String
 from sqlalchemy.dialects import mysql
@@ -13,7 +17,7 @@ from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tena
 
 
 class ProductProfileModel(Base):
-    __tablename__ = "ac_context_collab_product_profile"
+    __tablename__ = "ac_context_collab_product_profile_legacy_v1"
     id = Column(
         AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
     )

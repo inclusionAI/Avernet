@@ -16,6 +16,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.event_payload_codec import (
+    decode_event_payload,
+)
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
@@ -33,6 +36,9 @@ from tests.community.core.task.context_collab.creation_facts import (
     creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    stored_context_value,
+)
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
@@ -97,13 +103,13 @@ class TestCreateContext:
             assert row.context_version == 1
             assert row.current_event_id is None  # Deprecated SQL column is not written.
             assert row.env == get_current_env()
-            assert json.loads(row.scope) == {
+            assert stored_context_value(row, "scope") == {
                 "space_id": "space_workspace_001",
                 "environment": "prod",
             }
-            assert json.loads(row.creation_facts) == _context_spec()
+            assert stored_context_value(row, "creation_facts") == _context_spec()
             assert row.current_snapshot is None
-            assert row.root_task_ref == record.task.task_id
+            assert stored_context_value(row, "root_task_ref") == record.task.task_id
             assert record.task.task_id != record.collet.collet_id
             assert record.task.version == 1
             assert record.task.created_event_ref == record.initial_event.event_id
@@ -120,7 +126,10 @@ class TestCreateContext:
                 "principal_id": "u_1001",
             }
             assert evt.visibility == "public"
-            assert json.loads(evt.payload) == _context_spec()
+            stored_payload, subject = decode_event_payload(evt.payload)
+            assert stored_payload == _context_spec()
+            assert subject.task_ref == record.task.task_id
+            assert subject.task_version_after == 1
             assert evt.context_version_after == 1
             assert isinstance(evt.occurred_at, datetime)
             assert evt.env == get_current_env()

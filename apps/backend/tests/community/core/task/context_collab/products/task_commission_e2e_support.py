@@ -77,7 +77,7 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     role_binding_refs,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
@@ -426,7 +426,7 @@ class SimulatedAdmissionAgent:
         store: MethodStoreProtocol,
         axes: StoreAxes,
         opportunity: OpenOpportunity,
-        profile: ProductProfileDefinition,
+        profile: LegacyProductConfiguration,
     ):
         self._open_method = open_method
         self._store = store
@@ -508,7 +508,7 @@ class SimulatedWorkingBot:
         self,
         client: TestClient,
         signed_principal: str,
-        profile: ProductProfileDefinition,
+        profile: LegacyProductConfiguration,
         bot_id: str,
         owner_id: str,
         *,
