@@ -15,6 +15,22 @@ only when the Engine upload response contains its explicit read-only marker. Oth
 without being classified as read-only. This does not promise atomic writes or
 change the permissions of the underlying filesystem.
 
+### BaaS file read failover
+
+File reads and directory listings opt in explicitly at the filesystem call site;
+HTTP method and endpoint path do not determine eligibility. On an auto-selected
+cloud BaaS device, an initial gateway response of 502, 503, or 504 can trigger
+one replay on a different `ACTIVE` device of the same Bot. `ACTIVE` is recorded
+provider state, not a live health check. When an alternate is resolved, its
+connection info replaces the stale entry in the 30-second per-path cache if
+another request hasn't already refreshed it. If the failed device cannot be
+identified or no alternate can be selected and resolved, return the original
+gateway response. Once replayed, return the alternate's response without any
+further retry. Writes, explicitly pinned devices, and Desktop BaaS do not use
+this failover; existing 401 token refresh is unchanged.
+
+See the [BaaS read failover spec](../../../../../specs/2026-11-25-baas-transport-gateway-unavailable-failover/spec.md) for details.
+
 ## Staff template overrides
 
 Staff template overrides (`system/personal_bot_test_template_whitelist`) match

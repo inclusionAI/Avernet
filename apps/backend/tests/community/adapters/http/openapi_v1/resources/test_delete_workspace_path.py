@@ -38,8 +38,8 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
     calls = []
     list_route = "/api/v1/file/list" if file_system is TeclawDeviceFileSystem else "/api/file/list"
 
-    def post(route, *, json):
-        calls.append((route, json))
+    def post(route, *, json, allow_device_failover=False):
+        calls.append((route, json, allow_device_failover))
         request = httpx.Request("POST", f"http://device.test{route}")
         if route == "/api/file/read":
             return httpx.Response(
@@ -78,9 +78,15 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
             file_svc=service,
         )
 
-    expected = [(list_route, {"dir_path": "workspace/scripts", "recursive": False})]
+    expected = [
+        (
+            list_route,
+            {"dir_path": "workspace/scripts", "recursive": False},
+            file_system is BaasDeviceFileSystem,
+        )
+    ]
     if delete_route is not None:
-        expected.append((delete_route, {"target_path": "workspace/scripts/sql"}))
+        expected.append((delete_route, {"target_path": "workspace/scripts/sql"}, False))
         result = await delete()
         assert result.data.deleted
         records.delete_file_record.assert_awaited_once_with(path="scripts/sql")

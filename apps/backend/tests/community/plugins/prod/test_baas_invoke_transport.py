@@ -593,8 +593,340 @@ def test_baas_transport_methods_are_abstract():
     assert BaasTransport.__abstractmethods__ == frozenset({"post", "post_multipart"})
 
     class _PostOnly(BaasTransport):
-        def post(self, path, *, json=None):
+        def post(self, path, *, json=None, allow_device_failover=False):
             return _ok_response()
 
     with pytest.raises(TypeError, match="post_multipart"):
         _PostOnly()
+
+
+# ── gateway-unavailable read failover ─────────────────────────────────────
+
+
+def _http_info_with_target(target: str):
+    """A resolved connection info whose ``target`` names one device instance."""
+    from agentclaw.community.core.service_bot.services.baas_service import (
+        HttpConnectionInfo,
+    )
+
+    return HttpConnectionInfo(
+        http_url=f"https://gw/proxypass/{target}/api/file/read",
+        token="tok",
+        target=target,
+    )
+
+
+def _devices(*rows):
+    return [
+        {
+            "device_uuid": uuid,
+            "status": status,
+            "provider_device_id": paas_id,
+        }
+        for uuid, status, paas_id in rows
+    ]
+
+
+@pytest.mark.parametrize("path", ["/api/file/read", "/test/renamed-read"])
+def test_read_502_rotates_once_to_another_active_device(path):
+    """Gateway 502 on an auto-selected read hands the read to another instance."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    dead = _http_info_with_target("ARCA_ARCA-SANDBOX-dead@0:20003")
+    alive = _http_info_with_target("ARCA_ARCA-SANDBOX-alive@0:20003")
+    svc.get_http_info.side_effect = [dead, alive]
+    svc.invoke_http.side_effect = [_response(502), _ok_response()]
+    svc.list_devices_by_bot_uuid.return_value = _devices(
+        ("DEVICE-1", "ACTIVE", "ARCA-SANDBOX-dead@0"),
+        ("DEVICE-2", "ACTIVE", "ARCA-SANDBOX-alive@0"),
+    )
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    resp = transport.post(path, json={"file_path": "AGENTS.md"}, allow_device_failover=True)
+
+    assert resp.status_code == 200
+    assert svc.invoke_http.call_count == 2
+    first, second = svc.invoke_http.call_args_list
+    assert first.kwargs["http_info"] is dead
+    assert second.kwargs["http_info"] is alive
+    # the retry names the surviving instance, not the failed one
+    assert second.kwargs["device_uuid"] == "DEVICE-2"
+    assert first.kwargs["path"] == second.kwargs["path"] == path
+    assert "allow_device_failover" not in first.kwargs
+    assert "allow_device_failover" not in second.kwargs
+    # the alternate was resolved through BaaS's targeted device selection
+    assert svc.get_http_info.call_args_list[1].kwargs["device_uuid"] == "DEVICE-2"
+    # the rotation excluded the failed instance by its provider device id
+    svc.list_devices_by_bot_uuid.assert_called_once_with(
+        "BOT-1", tenant="team_claw"
+    )
+
+
+def test_rotated_read_replaces_cached_info_for_the_rest_of_the_batch():
+    """After a rotation, subsequent reads go straight to the surviving device."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    dead = _http_info_with_target("ARCA_ARCA-SANDBOX-dead@0:20003")
+    alive = _http_info_with_target("ARCA_ARCA-SANDBOX-alive@0:20003")
+    svc.get_http_info.side_effect = [dead, alive]
+    svc.invoke_http.side_effect = [_response(502), _ok_response(), _ok_response()]
+    svc.list_devices_by_bot_uuid.return_value = _devices(
+        ("DEVICE-1", "ACTIVE", "ARCA-SANDBOX-dead@0"),
+        ("DEVICE-2", "ACTIVE", "ARCA-SANDBOX-alive@0"),
+    )
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    assert transport.post("/api/file/read", json={}, allow_device_failover=True).status_code == 200
+    # second read of the batch: no new resolution, no new failure hop
+    assert transport.post("/api/file/read", json={}, allow_device_failover=True).status_code == 200
+
+    assert svc.get_http_info.call_count == 2
+    assert svc.invoke_http.call_count == 3
+
+
+def test_mutation_paths_are_never_rotated():
+    """upload/remove/rmtree stay single-shot — replaying a mutation can double-apply."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    for path, call in (
+        ("/api/file/upload", {"files": {"f": ("a", b"x")}, "data": {"p": "a"}}),
+        ("/api/file/remove", {"json": {"file_path": "a"}}),
+        ("/api/file/rmtree", {"json": {"dir_path": "d"}}),
+    ):
+        svc = MagicMock()
+        svc.get_http_info.return_value = _http_info_with_target(
+            "ARCA_ARCA-SANDBOX-x@0:20003"
+        )
+        svc.invoke_http.return_value = _response(502)
+
+        transport = BaasInvokeTransport(
+            bind_id=42, engine_port=20003, tenant="team_claw",
+            baas_service=svc, bot_uuid="BOT-1",
+        )
+        if "files" in call:
+            resp = transport.post_multipart(path, **call)
+        else:
+            resp = transport.post(path, **call)
+
+        assert resp.status_code == 502
+        assert svc.invoke_http.call_count == 1
+        svc.list_devices_by_bot_uuid.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["/api/file/read", "/api/file/list"])
+def test_read_path_alone_does_not_enable_rotation(path):
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target("ARCA_device-a:20003")
+    failed = _response(502)
+    svc.invoke_http.return_value = failed
+    svc.list_devices_by_bot_uuid.return_value = _devices(("b", "ACTIVE", "device-b"))
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="t", baas_service=svc, bot_uuid="bot",
+    )
+
+    assert transport.post(path, json={}) is failed
+    svc.invoke_http.assert_called_once()
+    svc.list_devices_by_bot_uuid.assert_not_called()
+
+
+def test_desktop_does_not_retry_an_opted_in_read():
+    transport, client = _desktop()
+    failed = _response(503)
+    client.post.return_value = failed
+
+    assert transport.post("/api/file/read", json={}, allow_device_failover=True) is failed
+    client.post.assert_called_once()
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_read_failover_covers_all_gateway_unavailable_status(status):
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    dead = _http_info_with_target("ARCA_ARCA-SANDBOX-dead@0:20003")
+    alive = _http_info_with_target("ARCA_ARCA-SANDBOX-alive@0:20003")
+    svc.get_http_info.side_effect = [dead, alive]
+    svc.invoke_http.side_effect = [_response(status), _ok_response()]
+    svc.list_devices_by_bot_uuid.return_value = _devices(
+        ("DEVICE-1", "ACTIVE", "ARCA-SANDBOX-dead@0"),
+        ("DEVICE-2", "ACTIVE", "ARCA-SANDBOX-alive@0"),
+    )
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    assert transport.post("/api/file/read", json={}, allow_device_failover=True).status_code == 200
+
+
+def test_read_failover_normalizes_device_status_case():
+    """A BaaS device list whose status casing varies still rotates.
+
+    Mirrors ``baas_device_header_updater``'s case-normalized status read: a
+    lowercase status must not silently disable the failover.
+    """
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    dead = _http_info_with_target("ARCA_ARCA-SANDBOX-dead@0:20003")
+    alive = _http_info_with_target("ARCA_ARCA-SANDBOX-alive@0:20003")
+    svc.get_http_info.side_effect = [dead, alive]
+    svc.invoke_http.side_effect = [_response(502), _ok_response()]
+    svc.list_devices_by_bot_uuid.return_value = _devices(
+        ("DEVICE-1", "active", "ARCA-SANDBOX-dead@0"),
+        ("DEVICE-2", "Active", "ARCA-SANDBOX-alive@0"),
+    )
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 200
+    assert svc.invoke_http.call_count == 2
+    assert svc.invoke_http.call_args_list[1].kwargs["device_uuid"] == "DEVICE-2"
+
+
+def test_read_failover_without_another_active_device_returns_the_verdict():
+    """Only-instance bot: the 502 stands, and nothing extra was attempted."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target(
+        "ARCA_ARCA-SANDBOX-solo@0:20003"
+    )
+    svc.invoke_http.return_value = _response(502)
+    svc.list_devices_by_bot_uuid.return_value = _devices(
+        ("DEVICE-1", "ACTIVE", "ARCA-SANDBOX-solo@0"),
+    )
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 502
+    assert svc.invoke_http.call_count == 1
+
+
+def test_read_failover_is_disabled_without_a_bot_uuid():
+    """Teclaw-style callers pass no bot uuid — rotation must not fire."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target(
+        "ARCA_ARCA-SANDBOX-x@0:20003"
+    )
+    svc.invoke_http.return_value = _response(502)
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc,
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 502
+    assert svc.invoke_http.call_count == 1
+    svc.list_devices_by_bot_uuid.assert_not_called()
+
+
+def test_read_failover_is_disabled_when_the_caller_pinned_a_device():
+    """An explicitly targeted instance is the caller's decision, never rotated."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target(
+        "ARCA_ARCA-SANDBOX-pinned@0:20003"
+    )
+    svc.invoke_http.return_value = _response(502)
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, device_uuid="DEVICE-pinned", bot_uuid="BOT-1",
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 502
+    assert svc.invoke_http.call_count == 1
+    svc.list_devices_by_bot_uuid.assert_not_called()
+
+
+def test_read_failover_skips_when_the_failed_instance_is_not_identifiable():
+    """No parseable target → the retry could land on the same dead device, so it doesn't run."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target("")
+    svc.invoke_http.return_value = _response(502)
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 502
+    assert svc.invoke_http.call_count == 1
+    # without a failed-instance identity there is nothing to exclude, so the
+    # device list is never even consulted
+    svc.list_devices_by_bot_uuid.assert_not_called()
+
+
+def test_device_404_is_still_the_devices_answer_and_never_rotates():
+    """A device-authored 404 (file absent) is answered, not retried elsewhere."""
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.get_http_info.return_value = _http_info_with_target(
+        "ARCA_ARCA-SANDBOX-x@0:20003"
+    )
+    svc.invoke_http.return_value = _response(404)
+
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw",
+        baas_service=svc, bot_uuid="BOT-1",
+    )
+    resp = transport.post("/api/file/read", json={}, allow_device_failover=True)
+
+    assert resp.status_code == 404
+    assert svc.invoke_http.call_count == 1
+
+
+def test_resolver_passes_the_baas_bot_uuid_to_the_cloud_transport():
+    """The cloud baas transport must be able to name the bot for read failover."""
+    from agentclaw.community.core.devices.services.device_filesystem_resolver import (
+        DefaultDeviceFileSystemResolver,
+    )
+    from agentclaw.community.core.devices.services.baas_invoke_transport import (
+        BaasInvokeTransport,
+    )
+
+    resolver = DefaultDeviceFileSystemResolver(
+        baas_service=MagicMock(),
+        bot_repo=MagicMock(),
+        binding_repo=MagicMock(),
+        sandbox_client=MagicMock(),
+    )
+    conn_info = {
+        "bind_id": 7,
+        "tenant": "team_claw",
+        "paas_device_id": "BOT-uuid-1",
+        "engine_port": 20003,
+    }
+    ctx = MagicMock(provider="baas", bot_type="service", conn_info=conn_info)
+
+    fs = resolver(ctx, lambda path: path)
+
+    assert isinstance(fs._transport, BaasInvokeTransport)
+    assert fs._transport._bot_uuid == "BOT-uuid-1"

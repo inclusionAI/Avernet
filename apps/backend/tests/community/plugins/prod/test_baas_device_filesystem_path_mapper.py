@@ -42,6 +42,7 @@ async def test_read_maps_logical_path_before_post():
 
     transport.post.assert_called_once_with(
         "/api/file/read",
+        allow_device_failover=True,
         json={
             "file_path": "/aidesktop/aidesktop_pre/bolt_data/staff_x/default/openclaw/workspace/IDENTITY.md"
         },
@@ -71,7 +72,7 @@ async def test_no_mapper_passes_host_path_through():
 
     await fs.read_file(host)
 
-    transport.post.assert_called_once_with("/api/file/read", json={"file_path": host})
+    transport.post.assert_called_once_with("/api/file/read", json={"file_path": host}, allow_device_failover=True)
 
 
 @pytest.mark.asyncio
@@ -84,7 +85,7 @@ async def test_exists_maps_once_via_delegation():
 
     mapped = "/aidesktop/aidesktop_pre/bolt_data/staff_x/default/openclaw/workspace/IDENTITY.md"
     # read_file short-circuits exists() → single /api/file/read with the once-mapped path
-    transport.post.assert_called_once_with("/api/file/read", json={"file_path": mapped})
+    transport.post.assert_called_once_with("/api/file/read", json={"file_path": mapped}, allow_device_failover=True)
 
 
 @pytest.mark.asyncio
@@ -98,6 +99,7 @@ async def test_desktop_subclass_inherits_mapper():
 
     transport.post.assert_called_once_with(
         "/api/file/read",
+        allow_device_failover=True,
         json={
             "file_path": "/aidesktop/aidesktop_pre/bolt_data/staff_x/default/openclaw/workspace/RULES.md"
         },
