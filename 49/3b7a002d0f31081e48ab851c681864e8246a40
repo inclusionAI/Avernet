@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/community/adapters/http/task/product_profiles.py
+  h_059e888e5e4e82 55
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/service.py
+  h_059e888e5e4e82 67
+apps/backend/tests/community/adapters/http/task/test_context_collab_products.py
+  h_059e888e5e4e82 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "493b7a002d0f31081e48ab851c681864e8246a40",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

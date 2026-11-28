@@ -1,0 +1,30 @@
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/delivery.md
+  h_059e888e5e4e82 3,179-218
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/spec.md
+  h_059e888e5e4e82 5,10
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/profile_publication.py
+  h_059e888e5e4e82 35-42
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/profile_use.py
+  h_059e888e5e4e82 7-9,22-28
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md
+  h_059e888e5e4e82 3-10,27-29,33-38,40-41,137-141,146-147
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/product_business_repository_adapter.py
+  h_059e888e5e4e82 1-181
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md
+  h_059e888e5e4e82 213-231,343,345-351,353-354
+apps/backend/src/agentclaw/community/di/modules/task/product_profile_runtime.py
+  h_059e888e5e4e82 8-13,30-34,101-107,112,114,119,121
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_service_adapter.py
+  h_059e888e5e4e82 1-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1dedb7a98596eb2d9ac79eaa550864306c5f86d3",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

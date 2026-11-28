@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md
+  h_059e888e5e4e82 92-101,270-271
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/service.py
+  h_059e888e5e4e82 52,122
+apps/backend/tests/community/core/task/context_collab/product_profile_service/test_http.py
+  h_059e888e5e4e82 126
+apps/backend/tests/community/core/task/context_collab/product_profile_service/test_service.py
+  h_059e888e5e4e82 178,183-188,190,192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "291622044670b722177fb15f0eaf133f753f998d",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
