@@ -96,6 +96,11 @@ COPY apps/backend/src /app/src
 # the loader skips a directory that holds only one of the pair.
 COPY apps/backend/src/agentclaw/community/configs /app/configs
 
+# Community application logs: the entrypoint writes daily-rotating
+# ``$HOME/logs/<app_name>/`` files by default (shipped config: app_name=agentclaw,
+# HOME=/home/admin), override with AGENTCLAW_LOG_DIR. Keep this path pod-local;
+# rotation and line timestamps use the process-local timezone (UTC unless the
+# deployment sets TZ externally).
 # data/: the community overlay's storage roots are relative paths
 # (./data/workspace/*, ./data/objstore, ./data/oss, ./data/nas), so they resolve
 # against WORKDIR and land here. Pre-create them owned by admin — the container

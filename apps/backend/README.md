@@ -122,6 +122,26 @@ exact refs and any missing enterprise evidence in the private work ledger.
 | Backend manager/Owner projection into BCS | [Manager sync](docs/flows/bot-manager-sync.md), [Owner sync](docs/bot-ownership-sync-operations.md) |
 | Bot capability configuration and apply | [Manifest guide](docs/bot-config-manifest/README.zh-CN.md), [apply-engine boundary](src/agentclaw/community/core/apply_engine/README.md) |
 
+### Community image file logs
+
+The community `docker/services/backend.dockerfile` entrypoint writes rotating
+application logs under `$HOME/logs/<app_name>/` (default
+`/home/admin/logs/agentclaw/`). Directory precedence is `AGENTCLAW_LOG_DIR`,
+then `log_config.log_dir`, then `$HOME/logs/<app_name>`. Files are created as
+`<app_name>.log`, `<app_name>-error.log`, `<app_name>-fatal.log`, and
+`common-error.log`, with daily rotation and seven backups. Uvicorn access
+records are included and can contain request paths or query strings; keep this
+directory pod-local and protect it accordingly. Line and rotation timezones
+follow the container process timezone (UTC unless the deployment sets `TZ`
+externally).
+
+Verify the logging path in a community checkout with:
+
+```bash
+cd apps/backend
+DEPLOY_PROFILE=test uv run --no-sync pytest tests/community/test_entrypoint.py -q
+```
+
 The [repository map](../../CONTEXT-MAP.md) selects the app; this README is its
 knowledge entry point. Detailed contracts, domain READMEs and existing runbooks
 remain the authoritative topic sources.
