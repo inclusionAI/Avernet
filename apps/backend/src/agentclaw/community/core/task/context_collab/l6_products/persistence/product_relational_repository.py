@@ -163,6 +163,72 @@ class SqlProductBusinessRepository:
         with self._transaction() as session:
             return self._profile(session, profile_id, self._axes())
 
+    def update_profile(
+        self,
+        profile_id: int,
+        composition,
+        context: ActorContext,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        stages: str | None = None,
+        status: ProductProfileStatus | None = None,
+    ) -> ProductProfileRecord:
+        """Apply one guarded Profile metadata/config/lifecycle patch.
+
+        The Profile row lock serializes this write with Collet creation. Once
+        a Profile is ONLINE its draft configuration is frozen; only the two
+        explicitly supported lifecycle transitions may write the same row.
+        """
+        positive_id(profile_id)
+        if name is not None:
+            text(name, maximum=256)
+        if description is not None and (
+            type(description) is not str or len(description) > 2048
+        ):
+            raise Invalid("description exceeds 2048 characters")
+        if type(status) is not ProductProfileStatus and status is not None:
+            raise Invalid("invalid Profile lifecycle status")
+        if all(value is None for value in (name, description, stages, status)):
+            raise Invalid("a Profile update requires at least one field")
+        axes = self._axes()
+        with self._transaction(write=True) as session:
+            row = (
+                self._query(session, ProductProfileRow, axes)
+                .filter(ProductProfileRow.id == profile_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                raise Missing("ProductProfile not found in this scope")
+            self._exact(row, axes)
+            current = profile_from_row(row)
+            if current.status is not ProductProfileStatus.DRAFT and any(
+                value is not None for value in (name, description, stages)
+            ):
+                raise Invalid("only DRAFT ProductProfiles accept content changes")
+            if status is not None:
+                if status == current.status and (
+                    name is None and description is None and stages is None
+                ):
+                    raise Invalid("Profile status update has no change")
+                if status != current.status and (current.status, status) not in {
+                    (ProductProfileStatus.DRAFT, ProductProfileStatus.ONLINE),
+                    (ProductProfileStatus.ONLINE, ProductProfileStatus.OFFLINE),
+                }:
+                    raise Invalid("unsupported Profile lifecycle transition")
+            if stages is not None:
+                row.config = encode_config(composition, stages)
+            if name is not None:
+                row.name = name
+            if description is not None:
+                row.description = description
+            if status is not None:
+                row.status = status.value
+            row.modifer = audit_identity(context)
+            session.flush()
+            return profile_from_row(row)
+
     def create_collet(
         self, profile_id: int, content: str, context: ActorContext
     ) -> ProductBusinessHistory:

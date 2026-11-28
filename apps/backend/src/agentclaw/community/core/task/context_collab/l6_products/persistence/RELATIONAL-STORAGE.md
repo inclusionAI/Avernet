@@ -44,14 +44,19 @@ routes, receipts or MultiRollout controller facts, and refuses to save such stat
   definition. Legacy snapshot reads do not invent this metadata.
   `encode_profile_response` is a future delivery encoder, not yet HTTP-wired.
 - New Profiles are explicitly `DRAFT`; reads reject unknown lifecycle values.
-  `creator` and `modifer` are trusted `principal_type:principal_id` audit strings,
-  not ACLs. Publication and [use authorization](../../g1_secure_govern/profile_use.py)
-  are independent; the default use policy denies. Runtime read authorization
-  is separately injected. Only `ONLINE` admits new business Collets, checked
-  under a Profile row lock. There is **no** new publish/update endpoint or
-  automatic `DRAFT -> ONLINE` path.
+  `creator` and `modifer` are trusted `principal_type:principal_id` audit strings;
+  `creator` is projected as the Profile owner for the service's update
+  authorization. `update_profile` locks the Profile row, validates the transition
+  and preserves `creator` while writing `modifer`. DRAFT Profiles may edit
+  name/description/stages and transition to ONLINE; ONLINE Profiles may only
+  transition to OFFLINE. `DRAFT -> OFFLINE` and `OFFLINE -> ONLINE` are rejected,
+  and ONLINE/OFFLINE content edits fail closed. There is no automatic
+  `DRAFT -> ONLINE` path and no versioned Profile history. Only `ONLINE` admits
+  new business Collets, checked under the same Profile-row lock order.
 - Configuration is closed, bounded [YAML](../product_profile_service/profile_config_yaml.py)
-  containing exact composition and the original stages string. Profile `config`
+  using `product-profile/config@2`. New writes normalize accepted stages into a
+  readable structured YAML list; existing `config@1` rows, where `stages` is a
+  string, remain readable. Profile `config`
   uses `TEXT`; its complete serialized YAML is limited to 65535 UTF-8 bytes on
   writes and reads, with no truncation. The non-unique scope/name index is
   `idx_cc_profile_scope_name` over `(avernet_tenant, env, name)`. Pure structural

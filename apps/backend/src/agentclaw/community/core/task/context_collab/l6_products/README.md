@@ -6,7 +6,7 @@ Use [ProductProfileService](product_profile_service/README.md) for new immutable
 ProductProfiles, product Collets, durable rollout queries/interactions and real
 session messages. It retains MethodCompositionTemplate and stages YAML together.
 The sections below describe the explicitly named `LegacyProductConfiguration`
-compatibility path, not the new four-field ProductProfile or five-method service.
+compatibility path, not the new four-field ProductProfile or six-method service.
 Legacy compatibility review/removal is due 2026-12-31; see the linked migration
 and storage boundaries before moving any existing product or execution history.
 
