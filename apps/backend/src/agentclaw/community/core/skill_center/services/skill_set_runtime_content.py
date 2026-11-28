@@ -221,25 +221,38 @@ class SkillSetRuntimeContent:
             else:
                 raise ValueError("unsupported skill source in runtime projection")
 
-        resolved_mappings = symlinks
-        if requested_paths:
-            # A single runtime link name cannot safely resolve to two corpora.
-            # Reject collisions before calling the device boundary; identical
-            # mappings are harmless duplicates and collapse in insertion order.
-            resolved_mappings = []
-            mappings_by_target: dict[str, SynlinkMappingInfo] = {}
-            for mapping in symlinks:
-                existing = mappings_by_target.get(mapping.target)
-                if existing is None:
-                    mappings_by_target[mapping.target] = mapping
-                    resolved_mappings.append(mapping)
-                    continue
-                if existing.source != mapping.source:
-                    raise ValueError(
-                        "Conflicting Skill mappings for runtime target "
-                        f"{mapping.target!r}: {existing.source!r} != "
-                        f"{mapping.source!r}"
-                    )
+        # The engine bindpath contract requires one mapping per target. Drop
+        # exact repeat links always, not only when this request added direct
+        # paths. When active rows collide on the same target with different
+        # sources and a caller has not additionally requested a direct variant,
+        # keep the deterministic first resolved source; the retained source may
+        # still be stale data, so make the suppressed mapping observable.
+        resolved_mappings: list[SynlinkMappingInfo] = []
+        mappings_by_target: dict[str, SynlinkMappingInfo] = {}
+        for mapping in symlinks:
+            existing = mappings_by_target.get(mapping.target)
+            if existing is None:
+                mappings_by_target[mapping.target] = mapping
+                resolved_mappings.append(mapping)
+                continue
+            if existing.source == mapping.source:
+                continue
+            if requested_paths:
+                # Explicit direct paths keep the historical caller-side contract:
+                # an unsafe target collision is not silently resolved by the
+                # caller's row order even though the engine contract cannot
+                # represent both mappings in one send.
+                raise ValueError(
+                    "Conflicting Skill mappings for runtime target "
+                    f"{mapping.target!r}: {existing.source!r} != "
+                    f"{mapping.source!r}"
+                )
+            logger.warning(
+                "[get_symlink_mappings] runtime target conflicts without "
+                "requested direct paths; keeping the first source "
+                f"and suppressing the later row: target={mapping.target!r}, "
+                f"kept={existing.source!r}, dropped={mapping.source!r}"
+            )
 
         logger.info(
             f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(resolved_mappings)}"
