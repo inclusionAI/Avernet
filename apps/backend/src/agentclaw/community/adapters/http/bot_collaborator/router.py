@@ -50,6 +50,7 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     BotNotFoundError,
     BotNotServiceTypeError,
 )
+from agentclaw.community.core.bot_collaborator.errors import InvalidCollaboratorRoleError
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     LockNotHeldError,
     LockReleaseDeniedError,
@@ -180,6 +181,10 @@ async def add_collaborator(
         logger.warning(f"[add_collaborator] Already exists: {e}")
         return ApiResponse(success=False, message=str(e), error_code=409, data=None)
 
+    except InvalidCollaboratorRoleError as e:
+        logger.warning(f"[add_collaborator] Invalid collaborator role: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+
     except CollaboratorServiceError as e:
         logger.error(f"[add_collaborator] Service error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500, data=None)
@@ -273,6 +278,10 @@ async def add_collaborator_for_others(
     except CollaboratorAlreadyExistsError as e:
         logger.warning(f"[add_collaborator_for_others] Already exists: {e}")
         return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+
+    except InvalidCollaboratorRoleError as e:
+        logger.warning(f"[add_collaborator_for_others] Invalid collaborator role: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except CollaboratorServiceError as e:
         logger.error(f"[add_collaborator_for_others] Service error: {e}")
@@ -496,6 +505,10 @@ async def update_collaborator(
     except CollaboratorAlreadyExistsError as e:
         logger.warning(f"[update_collaborator] Already exists: {e}")
         return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+
+    except InvalidCollaboratorRoleError as e:
+        logger.warning(f"[update_collaborator] Invalid collaborator role: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except CollaboratorServiceError as e:
         logger.error(f"[update_collaborator] Service error: {e}")
