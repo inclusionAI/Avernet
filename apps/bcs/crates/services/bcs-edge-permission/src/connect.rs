@@ -512,6 +512,14 @@ impl DbConnectService {
         // back to None (the adapter then renders the actor id) on any miss.
         let applicant_name = self.resolve_actor_display_name(applicant_actor_id).await;
         let target_bot_name = self.resolve_actor_display_name(target_bot_id).await;
+        // A Bot applicant's approval card names the Bot's owner first
+        // ("{owner}的 Bot「{bot}」…"). Humans have no owner element.
+        let applicant_bot_owner_name =
+            if actor_kind_of(applicant_actor_id) == ActorKind::Human {
+                None
+            } else {
+                self.resolve_bot_owner_display_name(applicant_actor_id).await
+            };
         // A Bot applicant carries NO Human applicant id: the
         // work-order intake derives the acting Human from the
         // verified principal forwarded with this notification (the
@@ -534,9 +542,26 @@ impl DbConnectService {
                 request_auth,
                 applicant_name,
                 target_bot_name,
+                applicant_bot_owner_name,
                 applicant_user_id,
             })
             .await
+    }
+
+    /// Resolve the display name of a Bot's owner/manager for the approval card.
+    ///
+    /// The owner work-no comes from the Bot's persisted `created_by`; the
+    /// display name comes from the user directory. Any miss degrades to
+    /// `None`, so the card keeps the Bot-name-only form.
+    async fn resolve_bot_owner_display_name(&self, bot_id: &str) -> Option<String> {
+        let owner_work_no = self.owner_work_no_from_bot_config(bot_id, &self.env).await?;
+        let user_directory = self.user_directory.as_ref()?;
+        let profile = user_directory
+            .lookup_by_staff_no(&owner_work_no)
+            .await
+            .ok()
+            .flatten()?;
+        profile.nick_name.filter(|name| !name.is_empty())
     }
 
     /// Resolve a display name for an actor id: a human's nick name (via the user

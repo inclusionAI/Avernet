@@ -134,7 +134,7 @@ class WorkOrderEventType(StrEnum):
     )
     HUMAN2BOT_FRIEND_APPLIED = (
         "HUMAN2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
-        "人机好友申请待审批", "有新的人机好友申请，请及时处理。",
+        "好友申请待审批", "有新的好友申请，请及时处理。",
     )
     HUMAN2BOT_FRIEND_REVIEWED = (
         "HUMAN2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
@@ -142,7 +142,7 @@ class WorkOrderEventType(StrEnum):
     )
     BOT2BOT_FRIEND_APPLIED = (
         "BOT2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
-        "Bot 好友申请待审批", "有新的 Bot 好友申请，请及时处理。",
+        "好友申请待审批", "有新的好友申请，请及时处理。",
     )
     BOT2BOT_FRIEND_REVIEWED = (
         "BOT2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
@@ -302,10 +302,10 @@ class WorkOrderMessageTitle(StrEnum):
     SKILL_COLLABORATOR_PENDING = "Skill 共同编辑申请待审批"
     SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
     SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
-    HUMAN_FRIEND_APPROVED = "人机好友申请已通过"
-    HUMAN_FRIEND_REJECTED = "人机好友申请未通过"
+    HUMAN_FRIEND_APPROVED = "Bot 好友申请已通过"
+    HUMAN_FRIEND_REJECTED = "Bot 好友申请已驳回"
     BOT_FRIEND_APPROVED = "Bot 好友申请已通过"
-    BOT_FRIEND_REJECTED = "Bot 好友申请未通过"
+    BOT_FRIEND_REJECTED = "Bot 好友申请已驳回"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -332,10 +332,77 @@ class WorkOrderMessageContent(StrEnum):
     SKILL_COLLABORATOR_REJECTED = (
         "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
-    HUMAN_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
-    HUMAN_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
-    BOT_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
-    BOT_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
+    HUMAN_FRIEND_APPROVED = (
+        "{approver}已通过你添加 Bot「{target_bot_name}」的好友申请。"
+    )
+    HUMAN_FRIEND_REJECTED = (
+        "{approver}已驳回你添加 Bot「{target_bot_name}」的好友申请。"
+    )
+    BOT_FRIEND_APPROVED = (
+        "{approver}已通过你的 Bot「{applicant_bot_name}」添加 Bot「{target_bot_name}」"
+        "为好友的申请。"
+    )
+    BOT_FRIEND_REJECTED = (
+        "{approver}已驳回你的 Bot「{applicant_bot_name}」添加 Bot「{target_bot_name}」"
+        "为好友的申请。"
+    )
+
+
+def friend_result_content(
+    *,
+    approved: bool,
+    applicant_is_bot: bool,
+    approver_name: str | None,
+    applicant_bot_name: str,
+    target_bot_name: str,
+    review_remark: str | None = None,
+) -> str:
+    """Render the friend-request result notice body (PRD v1.1 §3.2).
+
+    The approver name is the only omittable element: when its display name
+    cannot be resolved the sentence degrades to the applicant-facing form
+    (``你添加 Bot「…」的好友申请已通过。``) instead of leaking a raw user id.
+    Bot names fall back to their ids at the call site, so they are always
+    present. A rejection with a remark appends the reason on its own line.
+    """
+
+    approver = (approver_name or "").strip()
+    approved_verb = "已通过" if approved else "已驳回"
+    if applicant_is_bot:
+        template = (
+            WorkOrderMessageContent.BOT_FRIEND_APPROVED
+            if approved
+            else WorkOrderMessageContent.BOT_FRIEND_REJECTED
+        )
+        if approver:
+            text = template.value.format(
+                approver=approver,
+                applicant_bot_name=applicant_bot_name,
+                target_bot_name=target_bot_name,
+            )
+        else:
+            text = (
+                f"你的 Bot「{applicant_bot_name}」添加 Bot「{target_bot_name}」"
+                f"为好友的申请{approved_verb}。"
+            )
+    else:
+        template = (
+            WorkOrderMessageContent.HUMAN_FRIEND_APPROVED
+            if approved
+            else WorkOrderMessageContent.HUMAN_FRIEND_REJECTED
+        )
+        text = (
+            template.value.format(
+                approver=approver, target_bot_name=target_bot_name
+            )
+            if approver
+            else f"你添加 Bot「{target_bot_name}」的好友申请{approved_verb}。"
+        )
+
+    remark = (review_remark or "").strip()
+    if not approved and remark:
+        text = f"{text}\n拒绝原因：{remark}"
+    return text
 
 
 def skill_collaborator_applicant_display(

@@ -29,6 +29,7 @@ from agentclaw.community.core.repository.implementations.platform.task_queue imp
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.space_knowledge.membership_sync import (
     SpaceMembershipSynchronizer,
 )
@@ -220,7 +221,7 @@ def test_overlimit_approval_rolls_back_members_order_approver_and_notices(
                 env="pre",
             )
         )
-    repo = WorkOrderRepository(database, Mock(), effects=KnowledgeSpacePersistenceEffects())
+    repo = WorkOrderRepository(database, Mock(), effects=KnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     with pytest.raises(SpaceKnowledgeError, match="SPACE_MEMBERSHIP_LIMIT_EXCEEDED"):
         if entrypoint == "auto":
             repo.complete_auto_approval(

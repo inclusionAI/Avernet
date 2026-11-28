@@ -16,6 +16,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -404,7 +405,7 @@ def test_space_repository_accessible_scope_filters_by_active_membership_and_pagi
 
 def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
     spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
-    work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
+    work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     team = _team(spaces)
     other_team = _team(spaces, name="Other Team", creator="owner-2")
 

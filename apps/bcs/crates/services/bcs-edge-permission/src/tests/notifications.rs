@@ -85,6 +85,8 @@ use super::*;
         assert_eq!(events[0].applicant_name.as_deref(), Some("李四"));
         assert_eq!(events[0].target_bot_name.as_deref(), Some("本地代码专家"));
         assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
+        // A Human applicant has no Bot-owner element on the approval card.
+        assert_eq!(events[0].applicant_bot_owner_name, None);
     }
     #[tokio::test]
     async fn friend_connect_notification_falls_back_when_user_directory_absent() {
@@ -136,6 +138,40 @@ use super::*;
         // Approver/recipient = the target bot's owner.
         assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
     }
+
+    #[tokio::test]
+    async fn bot_to_bot_notification_resolves_applicant_bot_owner_name() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // Applicant Bot's persisted owner (created_by) is 152819; the target
+        // Bot stays owned by 85020.
+        seed_bot(&db, "x:owner_bot", "protected", "public", "APPROVAL", "online", Some("152819")).await;
+        seed_bot(&db, "x:target_bot", "protected", "public", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let user_directory: Arc<dyn UserDirectoryPlugin> =
+            Arc::new(FixedNickUserDirectoryPlugin { nick: "李四".to_string() });
+        let svc = DbConnectService::new(
+            eg.clone(),
+            pp.clone(),
+            rq.clone(),
+            bc.clone(),
+            Some(user_directory),
+            Arc::new(recorder),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
+            "dev".to_string(),
+        );
+        svc.create_connect("x:owner_bot", "x:target_bot", None, None)
+            .await
+            .expect("bot→bot manual pending connect");
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, FriendConnectNotificationKind::ApprovalRequested);
+        // The applicant Bot's owner display name is resolved through the user
+        // directory and travels to the card as "{owner}的 Bot「{bot}」".
+        assert_eq!(events[0].applicant_bot_owner_name.as_deref(), Some("李四"));
+        assert_eq!(events[0].applicant_actor_id, "x:owner_bot");
+    }
+
     /// Notification transport that always fails, standing in for a backend
     /// work-order API rejection (for example a 401 from the intake endpoint).
     struct FailingFriendConnectNotificationPort;
