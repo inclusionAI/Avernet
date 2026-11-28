@@ -43,6 +43,35 @@ def _is_standard_route_missing(response_text: str) -> bool:
     return payload == {"detail": "Not Found"}
 
 
+_TRANSIENT_API_KEY_CODE = "11-50005"
+_TRANSIENT_API_KEY_MARKERS = (
+    "ApiKey信息前置校验失败",
+    "apikey info not exist",
+)
+_TRANSIENT_API_KEY_RETRY_DELAY_SECS = 0.05
+
+
+def _is_transient_api_key_not_exist(exc: httpx.HTTPStatusError) -> bool:
+    """Match the observed BaaS/ARCA transient ``ApiKey`` signature.
+
+    The proxypass target rejected one successful route as HTTP 500 with this
+    JSON signature, then an identical GET succeeded immediately afterwards.
+    Match the JSON-only contract narrowly so unrelated errors fail immediately.
+    """
+    if exc.response.status_code != 500:
+        return False
+    try:
+        payload = json.loads(exc.response.text)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
+        return False
+    return (
+        payload.get("code") == _TRANSIENT_API_KEY_CODE
+        and all(marker in payload["message"] for marker in _TRANSIENT_API_KEY_MARKERS)
+    )
+
+
 def _binding_id(conn_info: dict[str, Any]) -> int:
     raw = conn_info.get("binding_id", conn_info.get("bind_id"))
     if isinstance(raw, bool):
@@ -98,6 +127,45 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
             )
         return DeviceAdapterHTTPStatusError(status_code, exc.response.text)
 
+    async def _invoke_http(
+        self,
+        conn_info: dict[str, Any],
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Issue one BaaS HTTP call, retrying one observed transient signature.
+
+        Only safe read-only ``GET`` calls participate, and only the exact
+        production JSON shape above. Every other HTTP status or method keeps
+        its existing fail-fast behavior.
+        """
+        kwargs = self._invoke_kwargs(conn_info, method, path, body, params, timeout)
+        try:
+            response = await asyncio.to_thread(self._baas_service.invoke_http, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as exc:
+            if (
+                method.upper() == "GET"
+                and _is_transient_api_key_not_exist(exc)
+            ):
+                logger.warning(
+                    "[CommunityDeviceAdapterTransport] transient ApiKey mismatch "
+                    "on GET %s; retrying once",
+                    path,
+                )
+                await asyncio.sleep(_TRANSIENT_API_KEY_RETRY_DELAY_SECS)
+                retry_response = await asyncio.to_thread(
+                    self._baas_service.invoke_http, **kwargs
+                )
+                retry_response.raise_for_status()
+                return retry_response
+            raise
+
     async def invoke(
         self,
         conn_info: dict[str, Any],
@@ -109,11 +177,9 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         timeout: float | None = None,
     ) -> dict[str, Any]:
         try:
-            response = await asyncio.to_thread(
-                self._baas_service.invoke_http,
-                **self._invoke_kwargs(conn_info, method, path, body, params, timeout),
+            response = await self._invoke_http(
+                conn_info, method, path, body=body, params=params, timeout=timeout,
             )
-            response.raise_for_status()
             result = response.json()
             if not isinstance(result, dict):
                 raise ValueError("Adapter returned a non-object JSON response")
