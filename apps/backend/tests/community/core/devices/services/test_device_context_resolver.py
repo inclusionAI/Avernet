@@ -59,11 +59,12 @@ def resolver(fake_binding_repo, fake_bot_repo, builders):
     )
 
 
-def _mock_binding(bid: int, provider: str):
+def _mock_binding(bid: int, provider: str, status: str = "ACTIVE"):
     b = MagicMock()
     b.id = bid
     b.device_provider = provider
     b.device_id = f"device-{bid}"
+    b.status = status
     return b
 
 
@@ -213,6 +214,62 @@ def test_resolve_for_binding_raises_on_unknown_provider(
 
     with pytest.raises(UnknownProviderError):
         resolver.resolve_for_binding(103, "user-1", bot_id="bot-103")
+
+
+def test_resolve_for_binding_raises_when_binding_stopped(
+    resolver, fake_binding_repo, builders
+):
+    """STOPPED binding is terminal: the chat path must not re-enter the provider."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(
+        104, "baas", status="STOPPED"
+    )
+
+    with pytest.raises(DeviceNotBoundError):
+        resolver.resolve_for_binding(104, "user-1", bot_id="bot-104")
+
+    builders["baas"].build.assert_not_called()
+
+
+def test_resolve_for_binding_raises_when_binding_released(
+    resolver, fake_binding_repo, builders
+):
+    """RELEASED binding is terminal: resolve as not bound, not as a retry."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(
+        105, "baas", status="RELEASED"
+    )
+
+    with pytest.raises(DeviceNotBoundError):
+        resolver.resolve_for_binding(105, "user-1", bot_id="bot-105")
+
+    builders["baas"].build.assert_not_called()
+
+
+def test_resolve_for_binding_still_resolves_pending_binding(
+    resolver, fake_binding_repo, builders
+):
+    """PENDING (mid-publish/verify) is not terminal and keeps the old path."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(
+        106, "baas", status="PENDING"
+    )
+
+    ctx = resolver.resolve_for_binding(106, "user-1", bot_id="bot-106")
+
+    assert ctx.binding_id == 106
+    builders["baas"].build.assert_called_once()
+
+
+def test_resolve_for_binding_allows_stopped_non_baas_binding(
+    resolver, fake_binding_repo, builders
+):
+    """The terminal guard is baas-only; ARCA/Local/Teclaw behavior is unchanged."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(
+        107, "teclaw", status="STOPPED"
+    )
+
+    ctx = resolver.resolve_for_binding(107, "user-1", bot_id="bot-107")
+
+    assert ctx.binding_id == 107
+    builders["teclaw"].build.assert_called_once()
 
 
 # ── resolve_for_binding_invoke(binding 路由入口) ──
