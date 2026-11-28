@@ -114,6 +114,9 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.state.authenticator = bs.authenticator
+    # None unless rate limiting is enabled; the forward path skips admission when
+    # it is None, preserving existing behaviour.
+    app.state.admission = bs.admission
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
     app.state.ws_forwarder = bs.forwarding.ws_forwarder

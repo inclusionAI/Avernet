@@ -54,6 +54,41 @@ user_config:
       app_token: "stub"
       tenant: "stub"
     database: "sqlite"
+    # Per-application distributed rate-limiter provider. Default ``noop`` wires
+    # no limiter (rate limiting stays off). Set ``rate_limiter: "redis"`` for the
+    # community token-bucket provider and configure ``rate_limit`` +
+    # ``rate_limit_redis`` below. Enterprise overlays register further options
+    # (e.g. ``tbase``) via the plugin registry. Enabling rate limiting with this
+    # left at ``noop`` is a startup error — there is no silent fallback.
+    rate_limiter: "noop"
+
+  # Per-application rate limiting (token bucket). Disabled by default so
+  # existing deployments are unchanged. When enabled, a ``default`` budget is
+  # required; ``overrides`` replaces it for specific apps, keyed by
+  # ``"<tenant>:<app_id>"``. ``rate`` is sustained QPS, ``burst`` is bucket
+  # capacity in requests (>= 1) — these are NOT the historical RPM/RPD fields.
+  # The example numbers below are illustrative only; pick real values per
+  # deployment.
+  rate_limit:
+    enabled: false
+    namespace: "default" # isolates buckets between deployments sharing a backend
+    # default:
+    #   rate: 50.0
+    #   burst: 100
+    # overrides:
+    #   "tenant-a:12345":
+    #     rate: 10.0
+    #     burst: 20
+
+  # Redis connection params for ``plugins.rate_limiter: "redis"``. Prefer a
+  # dedicated DB/instance so rate-limit keys are not evicted by cache pressure.
+  # Timeouts are small on purpose: the limiter fails open, so a slow backend
+  # gives up quickly and forwards rather than adding latency.
+  rate_limit_redis:
+    url: "redis://localhost:6379/0"
+    socket_timeout: 0.25
+    socket_connect_timeout: 0.25
+    key_prefix: "ratelimit"
 
   # Database plugin connection params for the plugin selected by
   # ``plugins.database`` (mirrors BaaS: a sibling top-level section).

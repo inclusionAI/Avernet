@@ -16,6 +16,7 @@ principal at the forwarder seam.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import replace
@@ -47,9 +48,15 @@ logger = get_logger("forward")
 _ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 
-def _error(request: Request, status: int, subcode: int, message: str) -> JSONResponse:
+def _error(
+    request: Request,
+    status: int,
+    subcode: int,
+    message: str,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     """A gateway-generated error in the standard envelope shape."""
-    return error_response(request, status, message, subcode=subcode)
+    return error_response(request, status, message, subcode=subcode, headers=headers)
 
 
 def _bundle(connection: HTTPConnection) -> CredentialBundle:
@@ -226,6 +233,37 @@ async def forward_request(request: Request) -> Response:
     except AuthError as exc:
         logger.warning("auth failed for %s %s: %s", request.method, path, exc)
         return _error(request, 401, 1, str(exc))
+
+    # Admission control (per-application rate limiting) sits here by design:
+    # after the domain is known and authentication has succeeded (so a rejected
+    # or anonymous caller never consumes an application's budget), and before any
+    # byte is sent upstream or any response header is committed. It is skipped
+    # entirely when rate limiting is disabled (``admission is None``) or the
+    # caller carries no eligible application identity, so existing behaviour is
+    # untouched. A confirmed rejection is the only outcome that blocks the call;
+    # a storage failure fails open and falls through to the forward below.
+    admission = getattr(request.app.state, "admission", None)
+    if admission is not None:
+        outcome = await admission.admit(identities)
+        if outcome.should_reject:
+            # Retry-After in whole seconds, rounded up and never below 1 so the
+            # header never recommends an immediate retry that would just be
+            # rejected again.
+            retry_after = max(1, math.ceil(outcome.retry_after_seconds))
+            logger.info(
+                "rate limited %s %s retry_after=%ds request_id=%s",
+                request.method,
+                path,
+                retry_after,
+                request_id(request),
+            )
+            return _error(
+                request,
+                429,
+                1,
+                "rate limit exceeded",
+                {"Retry-After": str(retry_after)},
+            )
 
     try:
         forward = await _attach_identities(

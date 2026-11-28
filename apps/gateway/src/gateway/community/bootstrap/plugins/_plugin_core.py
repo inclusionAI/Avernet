@@ -17,6 +17,7 @@ from gateway.community.plugins.cache.redis import RedisCachePlugin
 from gateway.community.plugins.database.mariadb import MariaDbOrmPlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
+from gateway.community.plugins.rate_limiter.redis import RedisTokenBucketRateLimiter
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
 from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
@@ -84,6 +85,26 @@ class PluginContainer(containers.DeclarativeContainer):
     auth = providers.Selector(
         config.plugins.auth,
         stub=providers.Singleton(StubAuthPlugin),
+    )
+
+    # ApplicationRateLimiter provider. ``noop`` wires no limiter (the default,
+    # so rate limiting is off unless explicitly configured); ``redis`` is the
+    # community distributed token-bucket provider. Enterprise registers further
+    # options (e.g. ``tbase``) via
+    # ``plugin_registry.register_plugin_option_provider("rate_limiter", …)``,
+    # with no community import of enterprise code. The composition root fails
+    # startup if rate limiting is enabled while this selects ``noop``.
+    rate_limiter = providers.Selector(
+        config.plugins.rate_limiter,
+        noop=providers.Object(None),
+        redis=providers.Singleton(
+            RedisTokenBucketRateLimiter,
+            url=config.rate_limit_redis.url,
+            namespace=config.rate_limit.namespace,
+            socket_timeout=config.rate_limit_redis.socket_timeout,
+            socket_connect_timeout=config.rate_limit_redis.socket_connect_timeout,
+            key_prefix=config.rate_limit_redis.key_prefix,
+        ),
     )
 
     bot_registry = providers.Factory(
