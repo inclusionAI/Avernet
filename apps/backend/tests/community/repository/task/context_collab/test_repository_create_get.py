@@ -16,6 +16,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.event_payload_codec import (
+    decode_event_payload,
+)
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
@@ -123,7 +126,10 @@ class TestCreateContext:
                 "principal_id": "u_1001",
             }
             assert evt.visibility == "public"
-            assert json.loads(evt.payload) == _context_spec()
+            stored_payload, subject = decode_event_payload(evt.payload)
+            assert stored_payload == _context_spec()
+            assert subject.task_ref == record.task.task_id
+            assert subject.task_version_after == 1
             assert evt.context_version_after == 1
             assert isinstance(evt.occurred_at, datetime)
             assert evt.env == get_current_env()

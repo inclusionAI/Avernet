@@ -40,8 +40,8 @@ class EventRecord:
     # 可空列(spec 作者裁决):Message | Task | Activity;外部部分行可为 NULL
     # (读路径照常投影;不把事件当作 Task 计数)。
     primitive_type: str | None
-    # 以下同为可空列(spec 作者裁决):允许外部写入部分字段的事件行;
-    # P1 追加路径总是写满这些值。
+    # 以下同为可空物理列(spec 作者裁决):允许外部写入部分字段的
+    # 事件行;P1 追加路径总是写满这些值。
     actor_ref: PrincipalRef | None
     visibility: str | None  # public | workspace | private;NULL 按 private 处理
     payload: dict | None
@@ -49,13 +49,16 @@ class EventRecord:
     occurred_at: datetime
 
     # Explicit L4 Work subject; absent on messages and pre-Task legacy events.
+    # These facts have no Event physical columns and are encoded in the reserved
+    # payload envelope at the SQL boundary.
+    # SQL 边界将它们序列化进 payload 的保留 __task_subject 信封。
     task_ref: str | None = None
     task_version_after: int | None = None
 
     def to_envelope(self) -> "EventEnvelope":
         """Export the existing Collet-aggregate envelope mapping.
 
-        Local Task subject/revision columns are not serialized by this adapter;
+        Local Task subject/revision facts are not serialized by this adapter;
         this is not a lossless Task-authority replication format. A receiver
         must not reconstruct independent Task state from this envelope alone.
         """

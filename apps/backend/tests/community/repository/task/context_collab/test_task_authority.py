@@ -50,7 +50,9 @@ from tests.community.core.task.context_collab.creation_facts import (
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 from tests.community.repository.task.context_collab.context_spec_test_support import (
     store_context_value,
+    store_event_subject,
     stored_context_value,
+    stored_event_subject,
 )
 
 OWNER = PrincipalRef("human", "u_task_owner")
@@ -150,8 +152,7 @@ def _storage(db):
         events = [
             (
                 r.event_id,
-                r.task_ref,
-                r.task_version_after,
+                *stored_event_subject(r),
                 r.context_version_after,
                 r.payload,
             )
@@ -173,8 +174,7 @@ def _make_legacy(db, repository, context_id):
         store_context_value(row, "root_task_ref", None)
         row.current_snapshot = json.dumps(snapshot)
         for event in session.query(ContextCollabEventModel):
-            event.task_ref = None
-            event.task_version_after = None
+            store_event_subject(event)
 
 
 def test_independent_task_identity_revision_and_work_subject(repository, db):
@@ -368,7 +368,11 @@ def test_invalid_task_authority_fails_closed_without_snapshot_fallback(
                 replace(created.task, last_event_ref="missing-event").to_dict()
             )
         elif corruption == "wrong_subject":
-            session.query(ContextCollabEventModel).one().task_ref = "different-task"
+            store_event_subject(
+                session.query(ContextCollabEventModel).one(),
+                task_ref="different-task",
+                task_version_after=1,
+            )
         elif corruption == "orphan":
             store_context_value(row, "root_task_ref", None)
         else:

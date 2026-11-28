@@ -666,8 +666,9 @@ Collet.context_spec.root_task_ref ──→ Task.task_id
   decomposition, reassignment or recursive-completion API. Parent links model
   recursion, but do not automatically complete parents or execute child Tasks.
 - The existing EventEnvelope adapter continues to export a **Collet aggregate**
-  envelope. Local Task subject/version columns are not included. That adapter
-  is not a lossless Task-state replication format or a remote Task import API.
+  envelope. Local Task subject/version facts are not user payload and are not
+  exported. That adapter is not a lossless Task-state replication format or a
+  remote Task import API.
 
 ### Database cutover
 
@@ -688,10 +689,13 @@ No request-path table creation or seed fallback is supplied.
 
 Apply [the Task migration](sql/2026_11_13_context_collab_task.sql) **after**
 [the single-context_spec baseline](sql/2026_11_11_context_collab.sql). It adds
-Event subject/revision and independent Task storage; the root-Task pointer
-belongs inside `context_spec`, not a physical Collet column. The script targets
-OceanBase MySQL mode and is applied once by the normal deployment process;
-SQLite tests create ORM metadata, not this DDL.
+independent Task storage; the root-Task pointer belongs inside `context_spec`,
+not a physical Collet column. Event Work subject/revision is serialized inside
+the existing `payload.__task_subject` JSON envelope by
+[`event_payload_codec.py`](l4_context_primitives/persistence/event_payload_codec.py);
+the Event table does not have physical `task_ref` or `task_version_after`
+columns. The script targets OceanBase MySQL mode and is applied once by the
+normal deployment process; SQLite tests create ORM metadata, not this DDL.
 
 Do not apply any historical migration that adds the removed split Collet
 columns. Current fresh-install SQL does not create them, and the new runtime

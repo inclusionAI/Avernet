@@ -20,6 +20,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
     ContextCollabEventModel,
     ContextCollabTaskModel,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
+    _event_from_row,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -164,13 +167,16 @@ def _validate_task_evidence(db, row, tasks) -> None:
     }
     events = {
         event.event_id: event
-        for event in db.query(ContextCollabEventModel)
-        .filter(
-            ContextCollabEventModel.collab_context_id == row.collab_context_id,
-            ContextCollabEventModel.env == get_current_env(),
-            ContextCollabEventModel.event_id.in_(refs),
+        for event in (
+            _event_from_row(stored)
+            for stored in db.query(ContextCollabEventModel)
+            .filter(
+                ContextCollabEventModel.collab_context_id == row.collab_context_id,
+                ContextCollabEventModel.env == get_current_env(),
+                ContextCollabEventModel.event_id.in_(refs),
+            )
+            .all()
         )
-        .all()
     }
     for task in tasks:
         for ref, kind in (
@@ -214,7 +220,7 @@ def _validate_task_evidence(db, row, tasks) -> None:
                     "Task update evidence revision mismatch"
                 )
             if kind == "progress":
-                payload = json.loads(event.payload) if event.payload is not None else {}
+                payload = event.payload or {}
                 if (
                     event.event_kind != "task.progress.updated"
                     or type(payload.get("percent")) is not int

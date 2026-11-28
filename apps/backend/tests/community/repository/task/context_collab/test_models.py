@@ -69,8 +69,6 @@ def test_event_columns_match_ddl(engine):
         "event_id",
         "collet_rollout_id",
         "collet_stage_rollout_id",
-        "task_ref",
-        "task_version_after",
         "parent_event",
         "event_kind",
         "primitive_type",
