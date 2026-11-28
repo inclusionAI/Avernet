@@ -78,61 +78,81 @@ pub enum CancelOutcome {
 
 #[async_trait]
 pub trait DistAgentClientPort: Send + Sync {
+    /// Current transport capabilities for a logical agent, used for safe retry and recovery.
+    async fn capabilities(&self, target: &AgentId) -> Result<DownstreamCapabilities, AgentReadError>;
+
     /// No blind retry. Once submission may have happened, errors are OutcomeUnknown.
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome;
+    async fn start(&self, target: &AgentId, request: StableSendRequest) -> SendOutcome;
     async fn send_input(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         request: StableSendRequest,
     ) -> SendOutcome;
-    async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome;
+    async fn query(&self, target: &AgentId, query: RemoteQuery) -> QueryOutcome;
     async fn subscribe(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError>;
     /// RequestAccepted is not ConfirmedCanceled. Unknown remains supervised.
     async fn cancel(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         request_id: RequestId,
     ) -> CancelOutcome;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrozenGroupDefinition {
-    pub group: GroupId,
-    pub workflow: WorkflowRef,
-    pub participants: Vec<ParticipantBinding>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrozenSessionProposal {
+    pub target: SessionTarget,
+    pub mode_envelope: ModeConfigEnvelope,
+    pub authorized_agents: Vec<AuthorizedAgent>,
     pub limits: SessionLimits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum GroupDirectoryError {
-    #[error("group not found or not accessible")]
+pub enum DirectoryError {
+    #[error("session target not found or not accessible")]
     NotFound,
-    #[error("group directory unavailable")]
+    #[error("access denied")]
+    AccessDenied,
+    #[error("session directory unavailable")]
     Unavailable,
-    #[error("frozen workflow revision or digest mismatch")]
+    #[error("frozen mode configuration revision or digest mismatch")]
     InvalidRevision,
 }
 
 #[async_trait]
-pub trait DistGroupDirectoryPort: Send + Sync {
-    /// Resolve/freeze only for a new session, scoped by the trusted caller identity.
-    /// Success makes the exact workflow revision retrievable for session recovery.
+pub trait DistSessionAuthorizerPort: Send + Sync {
+    /// Host-supplied authorization. The caller identity and target are passed
+    /// unchanged; this interface defines no Bot, friendship or organization rules.
+    async fn authorize(
+        &self,
+        scope: &TaskScope,
+        target: &SessionTarget,
+    ) -> Result<(), DirectoryError>;
+}
+
+#[async_trait]
+pub trait DistSessionDirectoryPort: Send + Sync {
+    /// Gateway checks every external send before durable admission, including replies.
+    /// The host supplies the policy; the Gateway passes its existing authenticated
+    /// scope unchanged. No authorization policy or default allow is provided here.
+    async fn authorize(
+        &self,
+        scope: &TaskScope,
+        target: &SessionTarget,
+    ) -> Result<(), DirectoryError>;
+
+    /// Freeze target configuration once, after caller authorization. Worker
+    /// resolves the immutable payload through its existing Blob reference reader.
     async fn resolve(
         &self,
         scope: &TaskScope,
-        group: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError>;
-    /// Load the exact immutable revision and verify its digest, never current group config.
-    async fn load_workflow(
-        &self,
-        scope: &TaskScope,
-        reference: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError>;
+        target: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError>;
+
 }

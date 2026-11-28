@@ -197,7 +197,7 @@ impl Call {
 
     /// Between retries: stop when another holder took the call. Any other
     /// read error is ignored here; the retry loop goes on.
-    async fn still_holder(&mut self) -> Flow {
+    pub(super) async fn still_holder(&mut self) -> Flow {
         match self.held.refresh().await {
             Err(HolderError::Lost) => Err(Stop::Lost),
             _ => Ok(()),
@@ -263,6 +263,10 @@ impl Call {
         loop {
             match self.ports.blobs.get(reference).await {
                 Ok(Some(bytes)) => {
+                    if bcs_dist_encoding::blob_reference(&reference.key, &bytes).digest != reference.digest {
+                        tracing::error!(did = %self.did().0, "request blob digest mismatch");
+                        return Ok(None);
+                    }
                     return Ok(serde_json::from_slice(&bytes).ok().map(Payload::Inline));
                 }
                 Ok(None) => return Ok(None),

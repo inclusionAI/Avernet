@@ -1,15 +1,11 @@
 //! A static agent registry read from a YAML file, and the `DistAgentResolver`
 //! built on it.
 //!
-//! MVP stand-in until the long-term resolver is settled (what `AgentBinding`'s
-//! `binding_version` and `credential_ref` mean, and which store resolves
-//! credentials). Each entry mirrors the payload a Provider sends when its
-//! agent registers with BCS, so the same declarations can later move to the
-//! real registry unchanged:
+//! Each entry mirrors a Provider's registration payload:
 //!
 //! ```text
 //! agents:
-//!   - provider_bot_ref: order-agent-001   # stable agent id; AgentBinding.agent
+//!   - provider_bot_ref: order-agent-001   # stable agent id; AgentId
 //!     owners: ["410025"]                  # kept for parity, not used here
 //!     visibility: protected               # private | protected | public
 //!     bearer_env: ORDER_AGENT_TOKEN       # optional: env var holding the token
@@ -28,8 +24,7 @@
 //! ```
 //!
 //! Rules:
-//! - Lookup: `AgentBinding.agent` must equal a `provider_bot_ref`;
-//!   `binding_version` and `credential_ref` are not interpreted yet.
+//! - Lookup: `AgentId` must equal a `provider_bot_ref`.
 //! - Every card is validated when the file is loaded, with the same rules as
 //!   registration (`crate::card::select_card_with_bindings`): text modes, a
 //!   supported interface, required extensions, authentication. A custom
@@ -39,16 +34,13 @@
 //! - No secret is stored in the file: `bearer_env` names an environment
 //!   variable, read once at load. A card that requires a Bearer scheme needs
 //!   it; an anonymous card should omit it.
-//! - Extensions sent to the agent are the ones its card declares that this
-//!   client implements (today our tools extension, `crate::tools::EXTENSION`),
-//!   and only for a streaming agent: like registration and the existing
-//!   delivery, the tools extension is streaming-only.
+//! - The client negotiates declared deduplication and, for streaming agents, tools extensions.
 //! - URLs still pass the outbound guard on every call (`A2aDistAgentClient`).
 
 use super::{DistAgentResolver, ResolvedAgent};
 use crate::grpc_mesh::GrpcMeshConfig;
 use async_trait::async_trait;
-use bcs_dist_model::AgentBinding;
+use bcs_dist_model::AgentId;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode, http_interface_address_allowed};
 use serde::Deserialize;
@@ -57,7 +49,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Extensions this client can take part in; a card may declare more.
-const SUPPORTED_EXTENSIONS: &[&str] = &[crate::tools::EXTENSION, crate::tools::EXTENSION_V2];
+const SUPPORTED_EXTENSIONS: &[&str] = &[crate::delivery::DEDUP_EXTENSION, crate::tools::EXTENSION, crate::tools::EXTENSION_V2];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -208,7 +200,7 @@ fn resolved(
         .into_iter()
         .flatten()
         .filter_map(|extension| extension.get("uri").and_then(Value::as_str))
-        .filter(|uri| streaming && SUPPORTED_EXTENSIONS.contains(uri))
+        .filter(|uri| *uri == crate::delivery::DEDUP_EXTENSION || (streaming && crate::tools::is_extension(uri)))
         .map(str::to_owned)
         .collect();
     Ok(ResolvedAgent {
@@ -226,9 +218,9 @@ fn resolved(
 
 #[async_trait]
 impl DistAgentResolver for YamlAgentResolver {
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String> {
+    async fn resolve(&self, target: &AgentId) -> Result<ResolvedAgent, String> {
         self.agents
-            .get(&target.agent.0)
+            .get(&target.0)
             .cloned()
             .ok_or_else(|| "agent_not_registered".to_owned())
     }

@@ -57,6 +57,8 @@ async fn owner(store: &Recorder, p: &StoreInboxProducer) -> SessionOwnership {
             commit_seq: CommitSeq(0),
             consumed: None,
             tasks: Default::default(),
+            downstream_generation: 0,
+            pending_cancel_did: None,
             runner_state: None,
             dispatch_seq: Default::default(),
             deadlines: vec![],

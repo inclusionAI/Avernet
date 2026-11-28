@@ -1,4 +1,4 @@
-//! Distributed coordination data contracts, version 1.
+//! Distributed coordination data contracts.
 //!
 //! Declarations only: no storage, transport, identity generation or runtime policy.
 //! Backend cursor encoding is opaque; stable business identities survive backend

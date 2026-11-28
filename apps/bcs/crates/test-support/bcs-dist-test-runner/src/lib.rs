@@ -6,35 +6,37 @@ use bcs_service_api::{core::dist_runner::*, port::dist_agent::*};
 use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct Directory;
 #[async_trait]
-impl DistGroupDirectoryPort for Directory {
+impl DistSessionDirectoryPort for Directory {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
+        Ok(())
+    }
     async fn resolve(
         &self,
         _: &TaskScope,
-        _: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::NotFound)
+        _: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError> {
+        Err(DirectoryError::NotFound)
     }
-    async fn load_workflow(
-        &self,
-        _: &TaskScope,
-        _: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        serde_json::from_value(serde_json::json!({}))
-            .map_err(|_| GroupDirectoryError::InvalidRevision)
-    }
+
 }
 #[derive(Default)]
 pub struct Runner {
     pub calls: AtomicUsize,
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for Runner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(std::sync::Arc::new(()))
+    }
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         context: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -62,7 +64,8 @@ impl DistRunnerCoreService for Runner {
                                 status: TaskStatus::InputRequired,
                                 interactions: vec![Interaction {
                                     id: InteractionId("confirm".into()),
-                                    did: dispatch_id(tid),
+                                    origin: InteractionOrigin::Dispatch { did: dispatch_id(tid) },
+                                    prompt: None,
                                     kind: InteractionKind::HumanInput,
                                 }],
                             });
@@ -86,7 +89,7 @@ impl DistRunnerCoreService for Runner {
                         let payload = Payload::Inline(serde_json::json!("x".repeat(size)));
                         actions.push(ActionIntent::Show {
                             tid: tid.clone(),
-                            node: NodeId("answer".into()),
+                            source: CorrelationKey("answer".into()),
                             artifact_id: ArtifactId("answer".into()),
                             class: OutputClass::Output,
                             update: if mode == "append" {
@@ -134,38 +137,24 @@ impl DistRunnerCoreService for Runner {
 pub fn dispatch_id(tid: &Tid) -> Did {
     Did(format!("{}.dispatch", tid.0))
 }
-pub fn participant() -> ParticipantBinding {
-    ParticipantBinding {
-        node: NodeId("answer".into()),
-        target: AgentBinding {
-            agent: AgentId("fixture-agent".into()),
-            binding_version: BindingVersion("1".into()),
-            credential_ref: CredentialRef("fixture-reference".into()),
-        },
+pub fn participant() -> AuthorizedAgent {
+    AuthorizedAgent {
+        agent: AgentId("fixture-agent".into()),
         pool: PoolId("fixture-pool".into()),
-        capabilities: DownstreamCapabilities {
-            idempotent_start: true,
-            idempotent_input: true,
-            query_by_request: true,
-            query_by_task: true,
-            subscribe: true,
-            resume_events: true,
-            cancel: true,
-        },
     }
 }
 fn dispatch_spec(c: &EvaluationContext<'_>, tid: &Tid) -> DispatchSpec {
-    let p = &c.spec.participants[0];
+    let p = &c.spec.authorized_agents[0];
     DispatchSpec {
         schema_version: 1,
         sid: c.spec.sid.clone(),
         tid: tid.clone(),
         did: dispatch_id(tid),
-        node: p.node.clone(),
+        source: CorrelationKey("answer".into()),
         attempt: 1,
-        target: p.target.clone(),
+        agent: p.agent.clone(),
         pool: p.pool.clone(),
-        capabilities: p.capabilities.clone(),
+        downstream_context: None,
         request: Payload::Inline(serde_json::json!("fixture request")),
         deadline: TimestampMillis(c.now.0 + 60_000),
     }
@@ -173,7 +162,7 @@ fn dispatch_spec(c: &EvaluationContext<'_>, tid: &Tid) -> DispatchSpec {
 fn show(tid: &Tid, delta: Payload) -> ActionIntent {
     ActionIntent::Show {
         tid: tid.clone(),
-        node: NodeId("answer".into()),
+        source: CorrelationKey("answer".into()),
         artifact_id: ArtifactId("answer".into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::AppendText { delta },
@@ -185,6 +174,8 @@ pub fn initial() -> Checkpoint {
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
@@ -206,14 +197,15 @@ pub fn specification(sid: Sid) -> SessionSpec {
         sid,
         shard: ShardId(1),
         scope: scope(),
-        kind: SessionKind::FsmGroup,
-        group: GroupId("fixture".into()),
-        workflow: WorkflowRef {
-            definition_id: "fixture".into(),
+        target: SessionTarget::Group { group: GroupId("fixture".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "1".into(),
             digest: Digest("fixture".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![participant()],
+        authorized_agents: vec![participant()],
         limits: SessionLimits {
             max_queued_tasks: 32,
             max_task_steps: 100,

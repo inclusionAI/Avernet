@@ -21,6 +21,7 @@ mod content;
 pub mod cursor;
 mod error;
 mod mapping;
+mod request;
 mod rpc;
 mod stream;
 
@@ -65,6 +66,7 @@ impl GatewayHttpConfig {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub gateway: Arc<dyn DistGatewayService>,
+    pub direct: bool,
     pub config: Arc<GatewayHttpConfig>,
 }
 
@@ -72,6 +74,8 @@ pub(crate) struct AppState {
 ///
 /// - `POST /a2a/{group}`: A2A JSON-RPC (`A2A-Version: 1.0`);
 /// - `GET /a2a/{group}/.well-known/agent-card.json`: the group's agent card.
+///
+/// Direct agents expose the same methods and card under `/a2a/agents/{target}`.
 ///
 /// The caller is read from a [`GatewayCaller`] request extension, set by the
 /// authentication layer in front of this router; a JSON-RPC request without
@@ -81,10 +85,16 @@ pub fn router(gateway: Arc<dyn DistGatewayService>, config: GatewayHttpConfig) -
     let state = AppState {
         gateway,
         config: Arc::new(config),
+        direct: false,
     };
+    let direct = Router::new()
+        .route("/a2a/agents/{target}", post(rpc::handle))
+        .route("/a2a/agents/{target}/.well-known/agent-card.json", get(card::handle))
+        .with_state(AppState { direct: true, ..state.clone() });
     Router::new()
         .route("/a2a/{group}", post(rpc::handle))
         .route("/a2a/{group}/.well-known/agent-card.json", get(card::handle))
-        .layer(DefaultBodyLimit::max(limit))
         .with_state(state)
+        .merge(direct)
+        .layer(DefaultBodyLimit::max(limit))
 }

@@ -54,7 +54,7 @@ pub trait OutputProjectionCoreService: Send + Sync {
         snapshot: &TaskSnapshot,
         frozen: &OutputLimits,
     ) -> Result<(), ProjectionError>;
-    /// New uncommitted changes only: charge full Upsert values / AppendText deltas
+    /// New uncommitted changes only: charge complete replacements / text or parts deltas
     /// once in the candidate usage. Caller commits usage with state and consumed.
     /// Keep the candidate on an unknown commit; do not reapply to confirmed state.
     fn project_candidate(
@@ -67,7 +67,7 @@ pub trait OutputProjectionCoreService: Send + Sync {
     /// Read-side replay of already committed events. Reuse the same transform and
     /// format/identity/count checks, without counting cumulative usage again.
     /// The caller selects events strictly after snapshot coverage and deduplicates
-    /// stable event identities; repeated AppendText is not intrinsically idempotent.
+    /// stable event identities; repeated text/parts append is not intrinsically idempotent.
     fn fold_committed(
         &self,
         current: &DisplaySnapshot,

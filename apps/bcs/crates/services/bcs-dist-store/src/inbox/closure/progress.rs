@@ -239,7 +239,7 @@ impl StoreAdmissionControl {
                             .load::<SessionSpec>(&key)
                             .await?
                             .ok_or_else(|| unknown("closure_spec"))?;
-                        if stored.scope != spec.scope || stored.group != spec.group {
+                        if stored.scope != spec.scope || stored.target != spec.target {
                             return Err(invalid("closure_spec_conflict"));
                         }
                     }

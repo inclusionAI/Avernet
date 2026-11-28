@@ -1,5 +1,5 @@
 //! Versioned display data and the frozen phase-one output safety profile.
-use crate::{ArtifactId, Deadline, EventId, NodeId, OutputClass, Payload};
+use crate::{ArtifactId, Deadline, EventId, CorrelationKey, OutputClass, Payload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -17,13 +17,30 @@ pub enum ArtifactUpdate {
     AppendText {
         delta: Payload,
     },
+    /// Complete ordered part objects, preserved without interpreting their fields.
+    UpsertParts {
+        content: Payload,
+    },
+    /// Append part objects, creating a unit if absent. Existing plain text is
+    /// promoted to a text part; other ordinary JSON cannot be appended to.
+    AppendParts {
+        delta: Payload,
+    },
+}
+
+/// Distinguishes ordinary application JSON from protocol part objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayContentFormat {
+    Json,
+    Parts,
 }
 
 /// Stable identity is computed from task/workflow data, never random IDs or
 /// retry counts. Node, artifact ID and class together identify the display unit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactChange {
-    pub node: NodeId,
+    pub source: CorrelationKey,
     pub artifact_id: ArtifactId,
     pub class: OutputClass,
     pub update: ArtifactUpdate,
@@ -33,9 +50,10 @@ pub struct ArtifactChange {
 /// through TaskContent.snapshot; references never change this inner encoding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayUnit {
-    pub node: NodeId,
+    pub source: CorrelationKey,
     pub artifact_id: ArtifactId,
     pub class: OutputClass,
+    pub content_format: DisplayContentFormat,
     pub content: Value,
 }
 

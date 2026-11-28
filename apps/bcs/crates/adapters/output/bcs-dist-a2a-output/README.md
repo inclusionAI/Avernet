@@ -9,7 +9,11 @@ can implement the same port and be selected by the host composition root.
 ## Encoding
 
 A format-1 `DisplaySnapshot` becomes an ordered A2A artifact list. JSON strings
-become text parts; all other JSON values become data parts without flattening.
+with content_format=json become text parts; all other ordinary JSON values become
+data parts without flattening. content_format=parts is emitted as the original
+ordered part objects, including file and per-part metadata. UpsertParts emits
+append=false; AppendParts emits only the new parts with append=true. Ordinary
+application JSON arrays are never guessed to be protocol parts.
 Artifact identity length-frames the node name and includes the neutral
 `(node, artifact_id, class)` tuple. Full views, Upsert replacements and AppendText
 deltas therefore address the same artifact, including when node names contain
@@ -22,6 +26,13 @@ The adapter rejects unknown display versions, unresolved references and non-text
 AppendText values. It performs no storage, network, identity generation or quota
 accounting. Formatting does not modify the neutral snapshot or event, and its
 JSON result is never used as a persisted `ArtifactUpdate`.
+
+Explicit parts are also validated with the same a2a-lf Part decoder as the HTTP
+consumer. Missing content fields, wrong content types and invalid raw encoding
+return an output adapter error before HTTP could silently drop artifacts. The
+original objects are preserved after validation, including extension fields.
+An empty parts array remains accepted by that SDK. Shared projection performs
+only protocol-neutral object checks and imports no A2A schema.
 
 ## Message sources and limits
 

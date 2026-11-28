@@ -34,6 +34,7 @@ fn reply(input_id: &str, interaction: &str) -> AdmitTaskCommand {
             TID,
             input_id,
             InputBody::HumanReply {
+                responder: scope().principal,
                 interaction: InteractionId(interaction.into()),
                 payload: Payload::Inline(serde_json::json!({ "approve": true })),
             },
@@ -83,7 +84,7 @@ async fn a_new_session_uses_the_trusted_scope_and_requires_a_start() {
     let p = ports();
     let c = core(&p);
     c.admit(&scope(), new_session("in-1", "hello")).await.unwrap();
-    assert_eq!(c.session_group(&other_scope(), &Sid(SID.into())).await, Err(DistGatewayCoreError::NotFound));
+    assert_eq!(c.session_target(&other_scope(), &Sid(SID.into())).await, Err(DistGatewayCoreError::NotFound));
     let mut only_session = new_session("in-2", "hello");
     only_session.start_task = false;
     assert_eq!(c.admit(&scope(), only_session).await, Err(DistGatewayCoreError::InvalidTransition));
@@ -209,7 +210,7 @@ async fn restore_inlines_a_referenced_snapshot() {
     let c = core(&p);
     assert_eq!(c.restore_task(&scope(), &Tid(TID.into())).await, Err(DistGatewayCoreError::NotFound));
     let mut task = snapshot(TID, TaskStatus::Working, Some(eid(2, 1)), NOW);
-    task.content.snapshot = Payload::Ref(p.blobs.put("snap/b21e", br#"{"format_version":1,"units":[{"node":"n1","artifact_id":"a-1","class":"output","content":"big"}]}"#));
+    task.content.snapshot = Payload::Ref(p.blobs.put("snap/b21e", br#"{"format_version":1,"units":[{"source":"n1","artifact_id":"a-1","class":"output","content_format":"json","content":"big"}]}"#));
     p.worker.create(&task).await;
     let cut = c.restore_task(&scope(), &Tid(TID.into())).await.unwrap();
     let Payload::Inline(display) = cut.view.content.snapshot else { panic!("expected inline output"); };
@@ -286,7 +287,7 @@ async fn list_checks_the_session_before_listing() {
     assert_eq!(page.tasks[0].tid.0, TID);
 }
 
-fn group_definition() -> bcs_service_api::port::dist_agent::FrozenGroupDefinition {
+fn group_definition() -> bcs_service_api::port::dist_agent::FrozenSessionProposal {
     let s = session_spec(SID, scope());
-    bcs_service_api::port::dist_agent::FrozenGroupDefinition { group:s.group,workflow:s.workflow,participants:s.participants,limits:s.limits }
+    bcs_service_api::port::dist_agent::FrozenSessionProposal { target:s.target,mode_envelope:s.mode_envelope,authorized_agents:s.authorized_agents,limits:s.limits }
 }

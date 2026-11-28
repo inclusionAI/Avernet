@@ -187,7 +187,7 @@ impl SessionStorePort for CoordinationStore {
     async fn commit(&self, request: CommitRequest) -> Result<CommitOutcome, StoreError> {
         owner_valid(&request.owner)?;
         if request.expected_commit_seq.0.checked_add(1) != Some(request.candidate.commit_seq.0)
-            || request.candidate.format_version != 1
+            || request.candidate.format_version != Checkpoint::FORMAT_VERSION
         {
             return Err(invalid("commit_sequence_or_format"));
         }
@@ -381,7 +381,7 @@ impl CoordinationStore {
         if KeyLayout::shard_of(sid)? != claim.shard
             || initial.commit_seq != CommitSeq(0)
             || initial.outbox.is_some()
-            || initial.format_version != 1
+            || initial.format_version != Checkpoint::FORMAT_VERSION
             || initial.consumed.as_ref().is_some_and(|p| p.sid != *sid)
         {
             return Err(invalid("acquire_input"));

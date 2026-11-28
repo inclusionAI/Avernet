@@ -3,7 +3,7 @@
     clippy::unwrap_used,
     reason = "shared lifecycle integration fixtures"
 )]
-use crate::processor_support::{self, ClockAt, Directory, Fixture};
+use crate::processor_support::{self, ClockAt, Fixture};
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_projection::OutputProjectionService;
@@ -48,37 +48,29 @@ impl Runner {
 pub fn session() -> SessionSpec {
     let mut s = processor_support::spec();
     s.limits.max_task_steps = 1024;
-    s.participants = vec![ParticipantBinding {
-        node: NodeId("n".into()),
-        target: AgentBinding {
-            agent: AgentId("agent".into()),
-            binding_version: BindingVersion("1".into()),
-            credential_ref: CredentialRef("fixture".into()),
-        },
+    s.authorized_agents = vec![AuthorizedAgent {
+        agent: AgentId("agent".into()),
         pool: PoolId("pool".into()),
-        capabilities: DownstreamCapabilities {
-            idempotent_start: true,
-            idempotent_input: true,
-            query_by_request: true,
-            query_by_task: true,
-            subscribe: true,
-            resume_events: true,
-            cancel: true,
-        },
     }];
     s
 }
 pub fn dispatch_id(tid: &Tid) -> Did {
     Did(format!("{}.dispatch", tid.0))
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for Runner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::json!(0),
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         c: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -89,17 +81,17 @@ impl DistRunnerCoreService for Runner {
         match &inputs[0] {
             RunnerInput::Start { tid, .. } => {
                 if !matches!(self.mode, Mode::Finish) {
-                    let p = &c.spec.participants[0];
+                    let p = &c.spec.authorized_agents[0];
                     actions.push(ActionIntent::StartDispatch(DispatchSpec {
                         schema_version: 1,
                         sid: c.spec.sid.clone(),
                         tid: tid.clone(),
                         did: dispatch_id(tid),
-                        node: p.node.clone(),
+                        source: CorrelationKey("answer".into()),
                         attempt: 1,
-                        target: p.target.clone(),
+                        agent: p.agent.clone(),
                         pool: p.pool.clone(),
-                        capabilities: p.capabilities.clone(),
+                        downstream_context: None,
                         request: Payload::Inline(serde_json::json!("request")),
                         deadline: TimestampMillis(c.now.0 + 60_000),
                     }));
@@ -117,7 +109,8 @@ impl DistRunnerCoreService for Runner {
                         status: TaskStatus::InputRequired,
                         interactions: vec![Interaction {
                             id: InteractionId("confirm".into()),
-                            did: dispatch_id(tid),
+                            origin: InteractionOrigin::Dispatch { did: dispatch_id(tid) },
+                            prompt: None,
                             kind: InteractionKind::HumanInput,
                         }],
                     }),
@@ -162,7 +155,7 @@ impl DistRunnerCoreService for Runner {
 fn show(tid: &Tid, delta: Payload) -> ActionIntent {
     ActionIntent::Show {
         tid: tid.clone(),
-        node: NodeId("n".into()),
+        source: CorrelationKey("n".into()),
         artifact_id: ArtifactId("answer".into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::AppendText { delta },
@@ -312,7 +305,6 @@ pub fn processor_with_blob(
             )),
             runner,
             projection: Arc::new(OutputProjectionService),
-            directory: Arc::new(Directory),
             tasks: f.feed.clone(),
             output,
             blobs,

@@ -206,14 +206,15 @@ fn spec() -> SessionSpec {
         sid: Sid(SID.into()),
         shard: ShardId(42),
         scope: scope(),
-        kind: SessionKind::FsmGroup,
-        group: GroupId("grp-research-01".into()),
-        workflow: WorkflowRef {
-            definition_id: "wf".into(),
+        target: SessionTarget::Group { group: GroupId("grp-research-01".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "7".into(),
             digest: Digest("sha256:ab12".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 16,
             max_task_steps: 200,

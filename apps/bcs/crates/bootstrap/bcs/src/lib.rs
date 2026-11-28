@@ -121,6 +121,10 @@ pub use bcs_group_store::GroupBuilder;
 pub use bcs_routing::MessageRouter;
 
 // Server modules
+#[cfg(feature = "dist-direct-a2a")]
+pub mod dist_agent_registry;
+#[cfg(feature = "dist-direct-a2a")]
+pub mod dist_direct_a2a;
 pub mod api_auth_registry;
 pub mod api_auth_wiring;
 pub mod api_auth_ports;

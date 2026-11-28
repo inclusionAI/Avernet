@@ -17,12 +17,8 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
-fn binding(agent: &str) -> AgentBinding {
-    AgentBinding {
-        agent: AgentId(agent.into()),
-        binding_version: BindingVersion("1".into()),
-        credential_ref: CredentialRef("none".into()),
-    }
+fn binding(agent: &str) -> AgentId {
+    AgentId(agent.into())
 }
 
 /// One entry in the registration shape; `extra` is appended to the entry.

@@ -97,7 +97,9 @@ impl StoreDispatch {
             )
             .await?;
         if let Some(d) = &doc {
-            format(d.value.view.spec.schema_version)?;
+            if d.value.view.spec.schema_version != DISPATCH_SCHEMA_VERSION {
+                return Err(StoreError::UnsupportedFormat { format: d.value.view.spec.schema_version });
+            }
             if d.value.view.spec.did != *did {
                 return Err(invalid("dispatch_identity"));
             }

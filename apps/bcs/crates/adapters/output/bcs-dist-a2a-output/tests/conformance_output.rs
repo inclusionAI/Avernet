@@ -8,7 +8,7 @@ use serde_json::json;
 #[test]
 fn conformance_a2a_output_adapter() {
     let snapshot = json!({ "format_version": 1, "units": [
-        { "node": "n1", "artifact_id": "answer", "class": "output", "content": "hello" }
+        { "source": "n1", "artifact_id": "answer", "class": "output", "content_format": "json", "content": "hello" }
     ] });
     let artifact = json!({
         "artifactId": "dist:output:2:n1:answer",
@@ -19,7 +19,7 @@ fn conformance_a2a_output_adapter() {
         &A2aOutputAdapter,
         &snapshot,
         &ArtifactChange {
-            node: NodeId("n1".into()), artifact_id: ArtifactId("answer".into()), class: OutputClass::Output,
+            source: CorrelationKey("n1".into()), artifact_id: ArtifactId("answer".into()), class: OutputClass::Output,
             update: ArtifactUpdate::Upsert { content: Payload::Inline(json!("hello")) },
         },
         &json!({ "artifacts": [artifact.clone()] }),

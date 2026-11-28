@@ -9,27 +9,32 @@ impl StoreTaskFeed {
     ) -> Result<(), StoreError> {
         match &event.body {
             OutputBody::Artifact {
-                node,
+                source,
                 artifact_id,
                 update,
                 ..
             } => {
-                if node.0.is_empty()
+                if source.0.is_empty()
                     || artifact_id.0.is_empty()
-                    || node.0.len() > 256
+                    || source.0.len() > 256
                     || artifact_id.0.len() > 256
                 {
                     return Err(invalid("artifact_identity"));
                 }
                 let (payload, text) = match update {
-                    ArtifactUpdate::Upsert { content } => (content, false),
+                    ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => (content, false),
                     ArtifactUpdate::AppendText { delta } => (delta, true),
+                    ArtifactUpdate::AppendParts { delta } => (delta, false),
                 };
                 let value = self
                     .payload(payload)
                     .await?;
                 if text && !value.is_string() {
                     return Err(invalid("append_text_type"));
+                }
+                if matches!(update, ArtifactUpdate::UpsertParts { .. } | ArtifactUpdate::AppendParts { .. })
+                    && !value.as_array().is_some_and(|parts| parts.iter().all(serde_json::Value::is_object)) {
+                    return Err(invalid("parts_require_objects"));
                 }
                 if let Payload::Inline(_) = payload {
                     bounded_bytes(&value, task.output_limits.inline_threshold_bytes as usize)?;
@@ -42,7 +47,7 @@ impl StoreTaskFeed {
                 if terminal_status(*status).is_some() {
                     return Err(invalid("terminal_requires_archive"));
                 }
-                if interactions.len() > 64 || bounded_bytes(interactions, 64 * 1024).is_err() {
+                if interactions.len() > 64 || bounded_bytes(interactions, MAX_INTERACTION_METADATA_BYTES).is_err() {
                     return Err(invalid("interaction_bound"));
                 }
             }

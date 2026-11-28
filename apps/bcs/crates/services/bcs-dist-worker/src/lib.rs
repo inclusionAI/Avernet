@@ -24,3 +24,6 @@ mod admission;
 pub use admission::WorkerTaskAdmission;
 mod output;
 pub use output::WorkerOutputReader;
+
+mod runner_registry;
+pub use runner_registry::RunnerRegistry;

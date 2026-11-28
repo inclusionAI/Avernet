@@ -227,7 +227,7 @@ async fn repeated_creation_preserves_the_first_spec_and_task() {
     let mut retry = new_task_request("adm-2", "again");
     // Rebuilding a request from newer configuration cannot change a frozen
     // session, nor reset the task under the same identity.
-    retry.create_session.as_mut().unwrap().workflow.revision = "4".into();
+    retry.create_session.as_mut().unwrap().mode_envelope.revision = "4".into();
     assert!(matches!(
         p.admit(retry).await.unwrap(),
         AdmitOutcome::Accepted(_)
@@ -525,16 +525,16 @@ async fn an_existing_task_of_another_scope_is_a_conflict() {
 
 #[tokio::test]
 async fn documents_of_an_unsupported_version_are_never_written() {
-    for which in ["spec", "task"] {
+    for (which, format) in [("spec", 2), ("task", 2)] {
         let store = Arc::new(Recorder::default());
         let mut request = new_task_request("adm-9c41e7", "hello");
         match which {
-            "spec" => request.create_session.as_mut().unwrap().schema_version = 2,
-            _ => request.create_task.as_mut().unwrap().schema_version = 2,
+            "spec" => request.create_session.as_mut().unwrap().schema_version = format,
+            _ => request.create_task.as_mut().unwrap().schema_version = format,
         }
         assert_eq!(
             producer(&store).admit(request).await,
-            Err(StoreError::UnsupportedFormat { format: 2 }),
+            Err(StoreError::UnsupportedFormat { format }),
             "{which}"
         );
         assert!(store.calls().is_empty(), "{which}: nothing read or written");

@@ -67,7 +67,7 @@ pub(super) fn finalize_independently(
     for (did, _) in candidate
         .dispatch_seq
         .iter()
-        .filter(|(_, sequence)| sequence.tid == metadata.tid)
+        .filter(|(_, sequence)| sequence.tid == metadata.tid && !sequence.terminal_seen)
     {
         let identity = digest_fields(&[
             b"finalizer-cancel:v1",
@@ -114,6 +114,7 @@ pub(super) fn retire_published(
     candidate
         .deadline_history
         .retain(|_, deadline| match &deadline.kind {
+            DeadlineKind::CancelGrace { .. } => false,
             DeadlineKind::Task { tid }
             | DeadlineKind::Snapshot { tid }
             | DeadlineKind::Dispatch { tid, .. } => !done.contains(tid),

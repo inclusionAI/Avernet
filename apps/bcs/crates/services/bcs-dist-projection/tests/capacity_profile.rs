@@ -29,7 +29,7 @@ fn task_profiles_cannot_shrink_the_shared_physical_envelope_or_reference_frame()
 #[test]
 fn escaped_artifact_identity_is_charged_by_its_json_encoding() {
     let change = ArtifactChange {
-        node: NodeId("\0".repeat(256)),
+        source: CorrelationKey("\0".repeat(256)),
         artifact_id: ArtifactId("a".into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {

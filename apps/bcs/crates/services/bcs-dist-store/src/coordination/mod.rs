@@ -349,7 +349,7 @@ fn decode_checkpoint(value: serde_json::Value) -> Result<StoredCheckpoint, Store
         runner.contains_key("format_version") && runner.contains_key("value")
             && !runner.contains_key("tid") && !runner.contains_key("state")
     });
-    if format != 1 || legacy_runner {
+    if format != Checkpoint::FORMAT_VERSION || legacy_runner {
         return Err(StoreError::UnsupportedFormat { format });
     }
     decode_json(value)

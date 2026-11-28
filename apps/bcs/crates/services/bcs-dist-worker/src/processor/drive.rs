@@ -95,6 +95,9 @@ impl WorkerProcessor {
                 .prepared
                 .as_mut()
                 .ok_or_else(|| err("prepared_missing"))?;
+            if prepared.finalizing && slot.spec.as_ref().is_some_and(|s| self.ports.runner.shares_session_downstream_context(s)) {
+                super::cancel_fence::arm(&mut prepared.candidate, self.config.cancel_grace)?;
+            }
             if let Some(batch) = prepared.candidate.outbox.as_mut() {
                 batch.created_at.get_or_insert_with(|| (self.ports.now)());
             }

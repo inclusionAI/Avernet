@@ -104,8 +104,8 @@ def run(h, checks):
     snapshot = h.call('snapshot', tid=tid)
     assert snapshot['content']['snapshot']['kind'] == 'ref'
     expected = {'format_version': 1, 'units': [
-        {'node': 'answer', 'artifact_id': 'answer', 'class': 'output',
-         'content': 'seed' + 'a' * 33_000 + 'b' * 33_000}]}
+        {'source': 'answer', 'artifact_id': 'answer', 'class': 'output',
+         'content_format': 'json', 'content': 'seed' + 'a' * 33_000 + 'b' * 33_000}]}
     assert h.call('restore', tid=tid)['view']['content']['snapshot'] == {'kind': 'inline', 'value': expected}
     assert call('trim', sid=sid, keep_from=snapshot['snapshot_event_id']) in ('Trimmed', 'AlreadyTrimmed')
     assert call('validate_cursor', cursor=old_cursor) == 'Gap'

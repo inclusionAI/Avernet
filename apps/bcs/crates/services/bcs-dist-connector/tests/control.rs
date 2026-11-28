@@ -91,8 +91,8 @@ async fn an_input_with_an_unknown_outcome_is_not_confirmed_or_resent() {
 #[tokio::test]
 async fn an_idempotent_input_is_resent_until_accepted() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.idempotent_input = true;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.idempotent_input = true);
     let events = rig.agent.start_stream();
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;
@@ -204,8 +204,8 @@ async fn a_cancel_with_an_unknown_outcome_is_tried_again() {
 #[tokio::test]
 async fn a_cancel_the_agent_cannot_carry_out_is_recorded_as_refused() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.cancel = false;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.cancel = false);
     let events = rig.agent.start_stream();
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;
@@ -402,9 +402,9 @@ async fn a_cancel_accepted_while_a_question_is_open_is_followed_to_the_end() {
 async fn a_call_that_cannot_be_observed_still_gets_its_cancel() {
     // The agent offers neither subscribe nor a task query, but it can cancel.
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.subscribe = false;
-    spec.capabilities.query_by_task = false;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.subscribe = false);
+    rig.agent.change_capabilities(|c| c.query_by_task = false);
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Accepted);
@@ -445,8 +445,8 @@ async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
 }
 
 fn polled_call(rig: &Rig) -> DispatchSpec {
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.subscribe = false;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.subscribe = false);
     rig.agent.on_start(Reply::Accepted);
     rig.agent.on_input(Reply::Accepted);
     spec
@@ -521,8 +521,8 @@ async fn an_unknown_cancel_is_not_resent_on_every_tick() {
 #[tokio::test]
 async fn an_idempotent_input_is_resent_a_bounded_number_of_times() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.idempotent_input = true;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.idempotent_input = true);
     let _events = rig.agent.start_stream();
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;

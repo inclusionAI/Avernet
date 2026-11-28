@@ -23,15 +23,11 @@ pub fn spec() -> DispatchSpec {
         sid: Sid("s0042.7f3a9c".into()),
         tid: Tid("s0042.7f3a9c.b21e".into()),
         did: Did(DID.into()),
-        node: NodeId("n2".into()),
+        source: CorrelationKey("n2".into()),
         attempt: 1,
-        target: AgentBinding {
-            agent: AgentId("agent-analyst".into()),
-            binding_version: BindingVersion("3".into()),
-            credential_ref: CredentialRef("cred://agent-analyst/v3".into()),
-        },
+        agent: AgentId("agent-analyst".into()),
         pool: PoolId("a2a".into()),
-        capabilities: caps(),
+        downstream_context: None,
         request: Payload::Inline(serde_json::json!({"parts": [{"text": "compare"}]})),
         deadline: TimestampMillis(1_794_371_505_000),
     }

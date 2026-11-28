@@ -4,7 +4,7 @@ use crate::runtime::err;
 use bcs_dist_encoding::{digest_fields, digest_json, hex_of};
 use bcs_dist_model::*;
 use bcs_service_api::{
-    core::dist_runner::{EvaluationContext, RunnerInput},
+    core::dist_runner::RunnerInput,
     port::repo::distributed::{control::*, session::Checkpoint},
     types::dist_runtime::RuntimeError,
 };
@@ -25,20 +25,21 @@ impl WorkerProcessor {
         slot: &mut Slot,
         base: &Checkpoint,
         inputs: &[RunnerInput],
-        context: &EvaluationContext<'_>,
+        spec: &SessionSpec,
+        now: TimestampMillis,
         initialize: bool,
     ) -> Result<AttemptIdentity, RuntimeError> {
         let input_digest =
             digest_json(&serde_json::to_value(inputs).map_err(|_| err("attempt_encoding"))?);
         let context_digest = digest_json(
-            &serde_json::json!({"spec":context.spec,"workflow":context.workflow,"initialize":initialize,"base":base}),
+            &serde_json::json!({"spec":spec,"initialize":initialize,"base":base}),
         );
         self.begin_risk(
             slot,
             "runner",
             input_digest,
             context_digest,
-            context.now,
+            now,
             None,
         )
         .await

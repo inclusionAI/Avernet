@@ -12,7 +12,7 @@ fn empty() -> DisplaySnapshot {
 }
 fn upsert(id: &str, value: Value) -> ArtifactChange {
     ArtifactChange {
-        node: NodeId("node".into()),
+        source: CorrelationKey("source".into()),
         artifact_id: ArtifactId(id.into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {
@@ -39,6 +39,38 @@ fn project(changes: &[ArtifactChange]) -> OutputProjection {
 }
 
 #[test]
+fn parts_append_promotes_text_but_never_interprets_application_json() {
+    let mut parts = upsert("a", Value::Null);
+    parts.update = ArtifactUpdate::AppendParts { delta: Payload::Inline(json!([{"data":{"n":1}}])) };
+    let mixed = project(&[upsert("a", json!("before")), parts.clone()]).snapshot;
+    assert_eq!(mixed.units[0].content_format, DisplayContentFormat::Parts);
+    assert_eq!(mixed.units[0].content, json!([{"text":"before"},{"data":{"n":1}}]));
+    for value in [json!([{"text":"ordinary JSON"}]), json!({"parts":[]}), Value::Null] {
+        let current = project(&[upsert("a", value)]).snapshot;
+        assert!(OutputProjectionService.fold_committed(&current, &[parts.clone()], &PHASE_ONE_OUTPUT_LIMITS).is_err());
+    }
+    assert!(OutputProjectionService.fold_committed(&mixed, &[append("a", "wrong format")], &PHASE_ONE_OUTPUT_LIMITS).is_err());
+    let replaced = OutputProjectionService.fold_committed(&mixed, &[upsert("a", json!("replacement"))], &PHASE_ONE_OUTPUT_LIMITS).unwrap();
+    assert_eq!(replaced.units[0].content_format, DisplayContentFormat::Json);
+    assert_eq!(replaced.units[0].content, json!("replacement"));
+}
+
+#[test]
+fn malformed_parts_fail_atomically_in_changes_and_saved_snapshots() {
+    for value in [json!("wrong"), json!(["wrong"]), json!([null])] {
+        for update in [ArtifactUpdate::UpsertParts { content: Payload::Inline(value.clone()) },
+            ArtifactUpdate::AppendParts { delta: Payload::Inline(value.clone()) }] {
+            let mut change = upsert("a", Value::Null);
+            change.update = update;
+            assert!(OutputProjectionService.fold_committed(&empty(), &[change], &PHASE_ONE_OUTPUT_LIMITS).is_err());
+        }
+        let mut snapshot = project(&[upsert("a", value)]).snapshot;
+        snapshot.units[0].content_format = DisplayContentFormat::Parts;
+        assert!(OutputProjectionService.fold_committed(&snapshot, &[], &PHASE_ONE_OUTPUT_LIMITS).is_err());
+    }
+}
+
+#[test]
 fn stable_identity_and_first_appearance_order_survive_replacement() {
     let state = project(&[
         upsert("a", json!({"old":true})),
@@ -57,8 +89,8 @@ fn stable_identity_and_first_appearance_order_survive_replacement() {
     assert_eq!(state.snapshot.units[0].content, Value::Null);
     assert_eq!(state.snapshot.units[1].content, json!(2));
     assert_eq!(state.usage.cumulative_bytes, 12 + 1 + 4);
-    let mut by_node = upsert("a", json!("other node"));
-    by_node.node = NodeId("other".into());
+    let mut by_node = upsert("a", json!("other source"));
+    by_node.source = CorrelationKey("other".into());
     let mut by_class = upsert("a", json!("tool"));
     by_class.class = OutputClass::Tool;
     let expanded = OutputProjectionService

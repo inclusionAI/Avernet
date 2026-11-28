@@ -21,7 +21,7 @@ pub async fn task_admission_core_service_contract_tests(
     let mut retry = command.clone();
     if let Some(definition) = &mut retry.create_session {
         definition
-            .workflow
+            .mode_envelope
             .revision
             .push_str("-changed-after-acceptance");
     }

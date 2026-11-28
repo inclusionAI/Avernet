@@ -6,9 +6,9 @@
 //!
 //! | Id | Form | Derived from |
 //! | --- | --- | --- |
-//! | session | `s<shard:04>.<16 hex>` | tenant, principal, group, message id; shard = hash mod shard count |
+//! | session | `s<shard:04>.<16 hex>` | tenant, principal, target kind and id, message id; shard = hash mod shard count |
 //! | task | `<session>.<16 hex>` | session, message id |
-//! | input (user) | `in-<32 hex>` | tenant, principal, group, session, message id |
+//! | input (user) | `in-<32 hex>` | tenant, principal, target kind and id, session, message id |
 //! | input (reply) | `in-<32 hex>` | principal, session, task, message id |
 //! | input (cancel) | `in-<32 hex>` | principal, session, task, request id |
 //!
@@ -32,8 +32,9 @@ fn hash(fields: &[&str]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId, shards: u32) -> Sid {
-    let digest = hash(&["sid", &scope.tenant.0, &scope.principal.0, &group.0, &message.0]);
+pub(crate) fn session_id(scope: &TaskScope, target: &SessionTarget, message: &RequestId, shards: u32) -> Sid {
+    let namespace = match target { SessionTarget::Group { .. } => "sid", SessionTarget::DirectAgent { .. } => "direct_sid" };
+    let digest = hash(&[namespace, &scope.tenant.0, &scope.principal.0, target.id(), &message.0]);
     let mut head = [0u8; 8];
     head.copy_from_slice(&digest[..8]);
     let shard = u64::from_be_bytes(head) % u64::from(shards.max(1));
@@ -49,8 +50,9 @@ fn input_id(fields: &[&str]) -> InputId {
     InputId(format!("in-{}", hex::encode(&hash(fields)[..16])))
 }
 
-pub(crate) fn user_input_id(scope: &TaskScope, group: &GroupId, sid: &Sid, message: &RequestId) -> InputId {
-    input_id(&["user", &scope.tenant.0, &scope.principal.0, &group.0, &sid.0, &message.0])
+pub(crate) fn user_input_id(scope: &TaskScope, target: &SessionTarget, sid: &Sid, message: &RequestId) -> InputId {
+    let namespace = match target { SessionTarget::Group { .. } => "user", SessionTarget::DirectAgent { .. } => "direct_user" };
+    input_id(&[namespace, &scope.tenant.0, &scope.principal.0, target.id(), &sid.0, &message.0])
 }
 
 pub(crate) fn reply_input_id(scope: &TaskScope, tid: &Tid, sid: &Sid, message: &RequestId) -> InputId {

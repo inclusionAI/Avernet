@@ -116,7 +116,7 @@ impl DistConnectorCoreService for DistConnectorRules {
     }
 
     /// How to follow a remote task when no stream is open, from the
-    /// capabilities the Worker wrote into `/spec/capabilities`: subscribe
+    /// capabilities the Connector resolved for the agent: subscribe
     /// (reading the task first when it can be queried), else poll by task
     /// query, else the task cannot be followed (the actor goes blind).
     fn reattach(&self, capabilities: &DownstreamCapabilities) -> Reattach {

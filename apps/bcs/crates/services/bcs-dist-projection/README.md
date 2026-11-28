@@ -9,12 +9,21 @@ no storage, transport, clock, random IDs, background tasks or default Runner.
 ## Encoding and state
 
 [`DisplaySnapshot`](../../contracts/bcs-dist-model/src/output.rs) format 1 is an
-ordered list of resolved display units identified by `(node, artifact_id, class)`.
+ordered list of resolved display units identified by `(source, artifact_id, class)`.
 Upsert replaces the complete JSON value and preserves the unit's first position.
 AppendText creates a missing text unit or appends to an existing string; a
 non-string target/delta rejects the entire candidate. Null remains a JSON value,
 not a deletion. No implicit JSON merge is performed. Thinking is excluded from
 display, persistent accounting and publication cadence. A persisted Thinking unit is corrupt input.
+
+Each unit explicitly declares content_format (`json` or `parts`). UpsertParts
+replaces an array of opaque part objects; AppendParts appends objects in order,
+creating a missing parts unit or promoting an existing JSON string to a text
+part first. Other ordinary JSON values cannot be appended to as parts. A plain
+Upsert can replace a parts unit with JSON again. This keeps application arrays
+distinct from wire parts and preserves file/data/text metadata. Non-array or
+non-object parts reject the entire candidate. Both operations support immutable
+Payload references through the same resolution and publication paths.
 
 `ArtifactUpdate` is shared by Show and Artifact events. Its Payload may be a Ref
 for durable transport; projection accepts only resolved Inline values. The
@@ -70,7 +79,7 @@ immutable chunking or eliminate that IO.
 
 These changes refine the unpublished distributed v1 declarations. They require
 a fresh phase-one namespace: old implicit Artifact content, unbound RunnerState,
-or records without frozen profiles are not silently migrated/defaulted. Existing
+or records without frozen profiles/content_format are not silently migrated/defaulted. Existing
 HTTP protocols and deployed legacy coordination formats are unchanged. Runtime
 integration and provider durability are separate from this pure service's tests.
 

@@ -79,7 +79,10 @@ Running state preserved while another task finishes, and immutable inline final
 content. The 64–128 KiB configured envelope reserve must cover the provider's
 declaration; it includes the backend wrapper. Each Decision permits at most one
 `SetStatus`, so repeated unexternalizable interaction/status metadata cannot bypass
-the outbox bound. Retry delay must be between 5 ms and 5 seconds.
+the outbox bound. The serialized interaction list, including prompts, is capped
+at 40 KiB because an ordinary commit carries it in both the status event and
+the published snapshot. Exceeding this limit fails the task with an output
+quota error. Retry delay must be between 5 ms and 5 seconds.
 
 `observations()` exposes body-free local gauges: unknown commits/age, persisted
 outbox age (None for older unstamped batches), archive wait, resident isolation,

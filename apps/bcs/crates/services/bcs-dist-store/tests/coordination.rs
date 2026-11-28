@@ -44,6 +44,8 @@ fn initial() -> Checkpoint {
             finalization: None,
         }]
         .into(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: Some(TaskRunnerState {
             tid: Tid("s0042.session.task".into()),
             state: RunnerState {
@@ -564,6 +566,7 @@ async fn unknown_checkpoint_format_is_rejected_before_sealing() {
 #[tokio::test]
 async fn unsupported_checkpoint_layout_is_classified_before_typed_decode() {
     for (format, runner) in [
+        (2, json!({"future_state": true})),
         (99, json!({"future_state": true})),
         (1, json!({"format_version": 1, "value": {"legacy": true}})),
     ] {

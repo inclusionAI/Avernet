@@ -115,7 +115,7 @@ impl CoordinationStore {
             .await?;
         if let Some(version) = version
             && let Ok(value) = serde_json::from_value::<StoredCheckpoint>(header.raw.clone())
-            && value.checkpoint.format_version == 1
+            && value.checkpoint.format_version == Checkpoint::FORMAT_VERSION
         {
             self.remember(sid, Versioned { version, value })?;
         }

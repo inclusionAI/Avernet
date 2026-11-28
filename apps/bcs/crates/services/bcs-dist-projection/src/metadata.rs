@@ -17,16 +17,15 @@ pub(super) fn session(spec: &SessionSpec, limits: &OutputLimits) -> Result<(), P
         &spec.sid.0,
         &spec.scope.tenant.0,
         &spec.scope.principal.0,
-        &spec.group.0,
-        &spec.workflow.definition_id,
-        &spec.workflow.revision,
-        &spec.workflow.digest.0,
+        spec.target.id(),
+        &spec.mode_envelope.revision,
+        &spec.mode_envelope.digest.0,
         &spec.digest.0,
     ] {
         identity(value, limits)?;
     }
-    if spec.schema_version != 1
-        || spec.participants.len() > PHASE_ONE_OUTPUT_LIMITS.max_dispatches as usize
+    if spec.schema_version != SESSION_SCHEMA_VERSION
+        || spec.authorized_agents.len() > PHASE_ONE_OUTPUT_LIMITS.max_dispatches as usize
         || spec.limits.max_queued_tasks == 0
         || spec.limits.max_queued_tasks > PHASE_ONE_OUTPUT_LIMITS.max_queued_tasks
         || spec.limits.max_task_steps == 0
@@ -39,14 +38,8 @@ pub(super) fn session(spec: &SessionSpec, limits: &OutputLimits) -> Result<(), P
             code: "session_capacity_profile",
         });
     }
-    for binding in &spec.participants {
-        for value in [
-            &binding.node.0,
-            &binding.target.agent.0,
-            &binding.target.binding_version.0,
-            &binding.target.credential_ref.0,
-            &binding.pool.0,
-        ] {
+    for binding in &spec.authorized_agents {
+        for value in [&binding.agent.0, &binding.pool.0] {
             identity(value, limits)?;
         }
     }

@@ -11,7 +11,7 @@
 //! ```text
 //! key:   bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
 //! value: {"spec": {"schema_version": 1, "did": "s0042.7f3a9c.b21e.n2.a1",
-//!                  "capabilities": {"subscribe": true, ...}, ...},
+//!                  "agent": "agent-analyst", "downstream_context": "s0042.7f3a9c:0", ...},
 //!         "control": {"cancel": null, "pending_input": [{"seq": 1, ...}]},
 //!         "execution": {"holder": {"instance": {"node": "conn-03",
 //!                       "incarnation": "1794370950"}, "epoch": 1},
@@ -41,7 +41,6 @@
 use bcs_dist_model::{
     DispatchControlState, DispatchExecution, DispatchSpec, DispatchView, InputSeq,
 };
-use bcs_dist_store::codec::SCHEMA_VERSION;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_store_api::json::JsonMutation;
 use bcs_store_api::{Version, Versioned};
@@ -106,7 +105,7 @@ pub fn decode(stored: Versioned<Value>) -> Result<DispatchDoc, StoreError> {
         .and_then(Value::as_u64)
         .and_then(|v| u32::try_from(v).ok())
         .ok_or_else(|| invalid("disp_schema_version"))?;
-    if format != SCHEMA_VERSION {
+    if format != bcs_dist_model::DISPATCH_SCHEMA_VERSION {
         return Err(StoreError::UnsupportedFormat { format });
     }
     let doc: Stored = serde_json::from_value(stored.value).map_err(|_| invalid("disp_decode"))?;

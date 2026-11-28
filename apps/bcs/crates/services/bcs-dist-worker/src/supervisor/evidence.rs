@@ -18,7 +18,7 @@ impl Facts {
         record: DispatchRecord,
     ) -> Result<Self, StoreError> {
         let spec = &record.view.spec;
-        if spec.schema_version != 1
+        if spec.schema_version != DISPATCH_SCHEMA_VERSION
             || spec.did != *did
             || !identifier(&spec.sid.0)
             || !identifier(&spec.tid.0)
@@ -81,7 +81,7 @@ impl Facts {
         shard: ShardId,
         spec: SessionSpec,
     ) -> Result<AdmitRequest, StoreError> {
-        if spec.schema_version != 1
+        if spec.schema_version != SESSION_SCHEMA_VERSION
             || spec.sid != self.sid
             || spec.shard != shard
             || shard_of(&spec.sid) != Some(shard)

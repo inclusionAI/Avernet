@@ -35,13 +35,23 @@ test = false
 
 [features]
 default = ["prometheus-metrics"]
-worker-runtime-e2e = ["dep:bcs-dist-connector-store", "dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
+dist-direct-a2a = [
+    "dep:bcs-dist-encoding",
+    "dep:bcs-dist-model", "dep:bcs-dist-worker", "dep:bcs-direct-a2a-runner",
+    "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-a2a-output",
+    "dep:bcs-dist-connector", "dep:bcs-dist-connector-store", "dep:bcs-app-dist-gateway",
+    "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "bcs-a2a-http/dist-agent",
+]
+worker-runtime-e2e = ["dist-direct-a2a", "dep:bcs-dist-connector-store", "dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
 metrics = ["prometheus-metrics"]
 a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
+bcs-dist-encoding = { workspace = true, optional = true }
+bcs-direct-a2a-runner = { workspace = true, optional = true }
+bcs-dist-connector = { workspace = true, optional = true }
 bcs-dist-model = { workspace = true, optional = true }
 bcs-app-dist-gateway = { workspace = true, optional = true }
 bcs-dist-gateway = { workspace = true, optional = true }

@@ -73,7 +73,7 @@ impl WorkerProcessor {
             hex_of(&digest_fields(&[b"thinking:v1", event.did.0.as_bytes()]))
         ));
         let change = ArtifactChange {
-            node: dispatch.view.spec.node,
+            source: dispatch.view.spec.source,
             artifact_id,
             class: OutputClass::Thinking,
             update: ArtifactUpdate::Upsert {
@@ -109,7 +109,7 @@ impl WorkerProcessor {
                     tid: metadata.tid.clone(),
                     id,
                     body: OutputBody::Artifact {
-                        node: change.node,
+                        source: change.source,
                         artifact_id: change.artifact_id,
                         class: change.class,
                         update: change.update,

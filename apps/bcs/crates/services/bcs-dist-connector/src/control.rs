@@ -46,8 +46,8 @@ impl Call {
     /// Returns without sending when no remote task id is stored yet.
     pub async fn send_input(&mut self, input: PendingInput) -> Flow {
         let did = self.did().clone();
-        let target = self.spec().target.clone();
-        let capabilities = self.spec().capabilities.clone();
+        let target = self.spec().agent.clone();
+        let Some(capabilities) = self.capabilities().await else { return Ok(()) };
         let Some(remote) = self.held.view().execution.remote.clone() else {
             return Ok(());
         };
@@ -196,8 +196,9 @@ impl Call {
         if view.execution.cancellation != CancelObservation::NotSent && self.backing_off() {
             return Ok(());
         }
-        let target = view.spec.target.clone();
-        if !view.spec.capabilities.cancel {
+        let target = view.spec.agent.clone();
+        let Some(caps) = self.capabilities().await else { return Ok(()) };
+        if !caps.cancel {
             let refused = CancelObservation::Rejected {
                 code: "cancel_unsupported".into(),
             };
@@ -242,7 +243,7 @@ impl Call {
     /// reported: `completed` as a final event, `failed` / `canceled` as an
     /// error event. `finished_reads = u32::MAX` marks the reads as used up.
     async fn end_already_finished(&mut self, finished: FinalDispatchOutcome) -> Flow {
-        if self.spec().capabilities.query_by_task && self.finished_reads <= self.config.not_sent_retries {
+        if self.finished_reads <= self.config.not_sent_retries && self.capabilities().await.is_some_and(|caps| caps.query_by_task) {
             // The task's real result (message, artifacts) is preferred over
             // an empty one under the same identity, so the task is read: a
             // bounded number of times, spaced by the per-call backoff.

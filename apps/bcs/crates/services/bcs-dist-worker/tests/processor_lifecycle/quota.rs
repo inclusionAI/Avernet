@@ -14,12 +14,18 @@ struct QuotaRunner {
     initializations: AtomicUsize,
     calls: AtomicUsize,
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for QuotaRunner {
-    fn init(&self, c: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
-        self.initializations.fetch_add(1, Ordering::SeqCst);
-        Runner::new(Mode::Stream).init(c)
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
     }
-    fn reduce(
+    async fn init(&self, c: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+        self.initializations.fetch_add(1, Ordering::SeqCst);
+        Runner::new(Mode::Stream).init(c).await
+    }
+    async fn reduce(
         &self,
         c: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -32,9 +38,9 @@ impl DistRunnerCoreService for QuotaRunner {
                     text: 8,
                     ..Default::default()
                 }
-                .reduce(c, state, input);
+                .reduce(c, state, input).await;
             }
-            let mut decision = Runner::new(Mode::Stream).reduce(c, state, input)?;
+            let mut decision = Runner::new(Mode::Stream).reduce(c, state, input).await?;
             let ActionIntent::Show { update, .. } = decision.actions.last_mut().unwrap() else {
                 panic!()
             };
@@ -51,7 +57,7 @@ impl DistRunnerCoreService for QuotaRunner {
             next_deadlines: vec![],
             actions: (0..33).map(|index| ActionIntent::Show {
                 tid: tid.clone(),
-                node: NodeId("n".into()),
+                source: CorrelationKey("n".into()),
                 artifact_id: ArtifactId(format!("rejected-{index}")),
                 class: OutputClass::Output,
                 update: ArtifactUpdate::Upsert {

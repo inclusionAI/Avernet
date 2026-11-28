@@ -68,12 +68,14 @@ async fn format_event(
     let body = match event.body {
         OutputBody::Status { status, interactions } => FormattedOutputBody::Status { status, interactions },
         OutputBody::Terminal { status, result_ref } => FormattedOutputBody::Terminal { status, result_ref },
-        OutputBody::Artifact { node, artifact_id, class, update } => {
+        OutputBody::Artifact { source, artifact_id, class, update } => {
             let update = match update {
                 ArtifactUpdate::Upsert { content } => ArtifactUpdate::Upsert { content: Payload::Inline(inline(blobs, content).await?) },
                 ArtifactUpdate::AppendText { delta } => ArtifactUpdate::AppendText { delta: Payload::Inline(inline(blobs, delta).await?) },
+                ArtifactUpdate::UpsertParts { content } => ArtifactUpdate::UpsertParts { content: Payload::Inline(inline(blobs, content).await?) },
+                ArtifactUpdate::AppendParts { delta } => ArtifactUpdate::AppendParts { delta: Payload::Inline(inline(blobs, delta).await?) },
             };
-            let content = output.artifact(&ArtifactChange { node, artifact_id, class, update }).map_err(format_error)?;
+            let content = output.artifact(&ArtifactChange { source, artifact_id, class, update }).map_err(format_error)?;
             FormattedOutputBody::Artifact { content }
         }
     };

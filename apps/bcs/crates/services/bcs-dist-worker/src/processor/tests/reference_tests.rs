@@ -73,7 +73,8 @@ fn candidate_with_text(length: usize) -> Checkpoint {
     let display = DisplaySnapshot {
         format_version: 1,
         units: vec![DisplayUnit {
-            node: NodeId("node".into()),
+            content_format: DisplayContentFormat::Json,
+            source: CorrelationKey("source".into()),
             artifact_id: ArtifactId("answer".into()),
             class: OutputClass::Output,
             content: serde_json::json!("x".repeat(length)),
@@ -110,7 +111,7 @@ fn candidate_with_text(length: usize) -> Checkpoint {
                 id: snapshot.snapshot_event_id.unwrap(),
                 tid: task().tid,
                 body: OutputBody::Artifact {
-                    node: display.units[0].node.clone(),
+                    source: display.units[0].source.clone(),
                     artifact_id: display.units[0].artifact_id.clone(),
                     class: OutputClass::Output,
                     update: ArtifactUpdate::Upsert {
@@ -126,6 +127,8 @@ fn candidate_with_text(length: usize) -> Checkpoint {
         commit_seq: CommitSeq(1),
         consumed: None,
         tasks: VecDeque::from([task()]),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: BTreeMap::new(),
         deadlines: vec![],

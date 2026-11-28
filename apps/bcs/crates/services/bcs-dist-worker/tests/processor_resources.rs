@@ -308,24 +308,30 @@ struct SelectiveRunner {
     bad: InvalidRunner,
     good: FinishingRunner,
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for SelectiveRunner {
-    fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
+    async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         if context.spec.sid == spec().sid {
-            self.bad.init(context)
+            self.bad.init(context).await
         } else {
-            self.good.init(context)
+            self.good.init(context).await
         }
     }
-    fn reduce(
+    async fn reduce(
         &self,
         context: &EvaluationContext<'_>,
         state: &RunnerState,
         inputs: &[RunnerInput],
     ) -> Result<Decision, RunnerError> {
         if context.spec.sid == spec().sid {
-            self.bad.reduce(context, state, inputs)
+            self.bad.reduce(context, state, inputs).await
         } else {
-            self.good.reduce(context, state, inputs)
+            self.good.reduce(context, state, inputs).await
         }
     }
 }
@@ -526,23 +532,9 @@ async fn invalid_session_or_output_limits_never_create_a_task() {
     let mut bad_timeout = spec();
     bad_timeout.limits.task_timeout_millis = u64::MAX;
     let mut large_binding = spec();
-    large_binding.participants.push(ParticipantBinding {
-        node: NodeId("node".into()),
+    large_binding.authorized_agents.push(AuthorizedAgent {
         pool: PoolId("pool".into()),
-        target: AgentBinding {
-            agent: AgentId("a".into()),
-            binding_version: BindingVersion("1".into()),
-            credential_ref: CredentialRef("x".repeat(30_000)),
-        },
-        capabilities: DownstreamCapabilities {
-            idempotent_start: true,
-            idempotent_input: true,
-            query_by_request: true,
-            query_by_task: true,
-            subscribe: true,
-            resume_events: true,
-            cancel: true,
-        },
+        agent: AgentId("x".repeat(30_000)),
     });
     for (case, definition, initial) in [
         ("oversized-outbox", spec(), bad_profile),

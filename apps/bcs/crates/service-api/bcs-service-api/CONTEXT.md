@@ -1,5 +1,27 @@
 # bcs-service-api Context
 
+## Version 9.0.0 — distributed Direct A2A
+
+Distributed Gateway, Worker, Connector, and their host now consume session
+targets, immutable mode configurations and logical agent IDs. The Gateway
+directory port retains the admission hook. `DistSessionAuthorizerPort` lets a
+directory delegate authorization independently of target/configuration resolution;
+concrete policy integration is deferred to the host, with no default allow.
+The Gateway passes the existing caller scope unchanged;
+it does not define delegated identities or organization-based task ownership.
+The Worker runner SPI prepares typed effects.
+The Connector agent port resolves transport capabilities at call time. Workspace
+consumers rebuild together. External implementations of the distributed ports
+must update their signatures.
+
+`DistRunnerCoreService::validate_session` is required: implementations explicitly
+validate their supported session mode/configuration. The unused directory
+`load_mode_config` method is removed; Worker reference resolution loads the
+immutable payload before runner validation. Output contracts distinguish JSON
+from ordered parts via `DisplayContentFormat` and `UpsertParts`/`AppendParts`.
+Projection, Worker, TaskFeed and output adapters rebuild together. The unpublished
+v1 display shape requires a fresh namespace, with no implicit record migration.
+
 ## Version 8.0.0: Owner-side friend removal contract
 
 `DeleteFriendConnection` (application/v1) gains `actor:

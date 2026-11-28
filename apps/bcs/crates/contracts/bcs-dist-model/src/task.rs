@@ -31,10 +31,21 @@ pub enum InteractionKind {
     Authorization,
 }
 
+/// Maximum serialized interaction list shared by the status event and snapshot.
+/// Both copies must fit alongside dispatch effects in an ordinary Worker commit.
+pub const MAX_INTERACTION_METADATA_BYTES: usize = 40 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InteractionOrigin {
+    Dispatch { did: Did },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interaction {
     pub id: InteractionId,
-    pub did: Did,
+    pub origin: InteractionOrigin,
+    pub prompt: Option<String>,
     pub kind: InteractionKind,
 }
 
@@ -91,7 +102,7 @@ pub enum OutputBody {
         interactions: Vec<Interaction>,
     },
     Artifact {
-        node: NodeId,
+        source: CorrelationKey,
         artifact_id: ArtifactId,
         class: OutputClass,
         update: ArtifactUpdate,

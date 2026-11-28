@@ -21,7 +21,7 @@ use bcs_service_api::application::principal::CallerContext;
 use bcs_service_api::core::dist_gateway::{
     CoreTaskQuery, DistGatewayCoreError, DistGatewayCoreService,
 };
-use bcs_service_api::port::dist_agent::DistGroupDirectoryPort;
+use bcs_service_api::port::dist_agent::DistSessionDirectoryPort;
 use error::core_error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ impl DistGatewayConfig {
 
 pub struct DistGateway {
     core: Arc<dyn DistGatewayCoreService>,
-    groups: Arc<dyn DistGroupDirectoryPort>,
+    directory: Arc<dyn DistSessionDirectoryPort>,
     config: DistGatewayConfig,
 }
 
@@ -81,7 +81,7 @@ impl DistGateway {
     /// Fails when `shard_count` is zero.
     pub fn new(
         core: Arc<dyn DistGatewayCoreService>,
-        groups: Arc<dyn DistGroupDirectoryPort>,
+        directory: Arc<dyn DistSessionDirectoryPort>,
         _clock: Arc<dyn Clock>,
         config: DistGatewayConfig,
     ) -> Result<Self, GatewayError> {
@@ -90,24 +90,24 @@ impl DistGateway {
         }
         Ok(Self {
             core,
-            groups,
+            directory,
             config,
         })
     }
 }
 
 impl DistGateway {
-    /// A session is reached only through the group it was created for. The
-    /// frozen spec holds that group; another one is answered as NotFound, so a
+    /// A session is reached only through the target it was created for. The
+    /// frozen spec holds that target; another one is answered as NotFound, so a
     /// caller learns nothing about sessions it did not address.
-    pub(crate) async fn check_group(
+    pub(crate) async fn check_target(
         &self,
         scope: &TaskScope,
         sid: &Sid,
-        group: &GroupId,
+        target: &SessionTarget,
     ) -> Result<(), GatewayError> {
-        let frozen = self.core.session_group(scope, sid).await.map_err(core_error)?;
-        if &frozen == group {
+        let frozen = self.core.session_target(scope, sid).await.map_err(core_error)?;
+        if &frozen == target {
             Ok(())
         } else {
             Err(GatewayError::NotFound)
@@ -153,12 +153,12 @@ impl DistGatewayService for DistGateway {
     async fn get_task(
         &self,
         caller: &GatewayCaller,
-        group: &GroupId,
+        target: &SessionTarget,
         tid: &Tid,
     ) -> Result<TaskView, GatewayError> {
         let scope = scope_of(caller)?;
         let sid = session_of_task(tid)?;
-        self.check_group(&scope, &sid, group).await?;
+        self.check_target(&scope, &sid, target).await?;
         let cut = self.core.restore_task(&scope, tid).await.map_err(core_error)?;
         Ok(cut.view)
     }
@@ -197,7 +197,7 @@ impl DistGatewayService for DistGateway {
             return Err(invalid("session_filter_required"));
         };
         parse_session(&sid)?;
-        self.check_group(&scope, &sid, &request.group).await?;
+        self.check_target(&scope, &sid, &request.target).await?;
         let query = CoreTaskQuery {
             sid: Some(sid),
             statuses: request.statuses,

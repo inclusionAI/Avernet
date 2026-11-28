@@ -1,18 +1,24 @@
 use super::*;
 use harness::services::*;
 
+#[async_trait::async_trait]
 impl DistRunnerCoreService for Script {
-    fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(std::sync::Arc::new(()))
+    }
+    async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         self.call(
             "init",
             (
                 context.spec,
-                serde_json::to_value(context.workflow).unwrap(),
+                serde_json::to_value(&context.spec.mode_envelope.payload).unwrap(),
                 context.now,
             ),
         )
     }
-    fn reduce(
+    async fn reduce(
         &self,
         context: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -22,7 +28,7 @@ impl DistRunnerCoreService for Script {
             "reduce",
             (
                 context.spec,
-                serde_json::to_value(context.workflow).unwrap(),
+                serde_json::to_value(&context.spec.mode_envelope.payload).unwrap(),
                 context.now,
                 state,
                 inputs,
@@ -31,13 +37,15 @@ impl DistRunnerCoreService for Script {
     }
 }
 
-#[test]
-fn runner_harness_detects_nondeterministic_decisions() -> ContractResult {
+#[tokio::test]
+async fn runner_harness_detects_nondeterministic_decisions() -> ContractResult {
     let spec = spec();
-    let workflow = workflow();
+    let workflow = spec.mode_envelope.payload.clone();
     let context = EvaluationContext {
         spec: &spec,
-        workflow: &workflow,
+        config: &workflow,
+        tid: &input().tid,
+        downstream_generation: 0,
         now: TimestampMillis(500),
     };
     let inputs = vec![RunnerInput::Start {
@@ -75,13 +83,12 @@ fn runner_harness_detects_nondeterministic_decisions() -> ContractResult {
                 Ok::<_, RunnerError>(decision.clone()),
             )
             .expect("reduce", &reduction_args, Ok::<_, RunnerError>(repeated));
-        let check =
-            || dist_runner_core_service_contract_tests(&script, &context, &state(), &inputs);
+        let state = state();
+        let check = dist_runner_core_service_contract_tests(&script, &context, &state, &inputs);
         if deterministic {
-            check()?;
+            check.await?;
         } else {
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check));
-            assert!(panic.is_err(), "nondeterministic reducer was accepted");
+            rejects(check, "assertion").await;
         }
         script.done();
     }
@@ -92,10 +99,10 @@ fn runner_harness_detects_nondeterministic_decisions() -> ContractResult {
 async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
     let request = AdmitTaskCommand {
         input: input(),
-        create_session: Some(FrozenGroupDefinition {
-            group: spec().group,
-            workflow: spec().workflow,
-            participants: spec().participants,
+        create_session: Some(FrozenSessionProposal {
+            target: spec().target,
+            mode_envelope: spec().mode_envelope,
+            authorized_agents: spec().authorized_agents,
             limits: spec().limits,
         }),
         start_task: true,
@@ -123,14 +130,14 @@ async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
             };
             script
                 .expect(
-                    "DistGatewayCoreService::session_group",
+                    "DistGatewayCoreService::session_target",
                     (scope(), receipt().sid),
-                    Ok::<_, DistGatewayCoreError>(spec().group),
+                    Ok::<_, DistGatewayCoreError>(spec().target),
                 )
                 .expect(
-                    "DistGatewayCoreService::session_group",
+                    "DistGatewayCoreService::session_target",
                     (stranger, receipt().sid),
-                    Err::<GroupId, _>(DistGatewayCoreError::NotFound),
+                    Err::<SessionTarget, _>(DistGatewayCoreError::NotFound),
                 )
         } else {
             script
@@ -162,7 +169,7 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
         caller: CallerContext::Public,
     };
     let request = SubmitInput {
-        group: spec().group,
+        target: spec().target,
         message_id: RequestId("request-a".into()),
         session: Some(owner().sid),
         task: Some(input().tid),
@@ -188,15 +195,15 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&caller, &request.group, input().tid),
+                (&caller, &request.target, input().tid),
                 Ok::<_, GatewayError>(task_view()),
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&unauthorized, &request.group, input().tid),
+                (&unauthorized, &request.target, input().tid),
                 denied,
             );
-        let another = GroupId(format!("{}-another", request.group.0));
+        let another = SessionTarget::Group { group: GroupId(format!("{}-another", request.target.id())) };
         let script = if leaks {
             script
         } else {
@@ -336,42 +343,32 @@ async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -
 }
 
 #[tokio::test]
-async fn directory_harness_checks_frozen_definition_and_workflow_revision() -> ContractResult {
+async fn directory_harness_checks_frozen_configuration() -> ContractResult {
     let spec = spec();
-    let frozen = FrozenGroupDefinition {
-        group: spec.group.clone(),
-        workflow: spec.workflow,
-        participants: spec.participants,
+    let frozen = FrozenSessionProposal {
+        target: spec.target.clone(),
+        mode_envelope: spec.mode_envelope,
+        authorized_agents: spec.authorized_agents,
         limits: spec.limits,
     };
     for stable in [true, false] {
-        let mut repeated = workflow();
+        let mut repeated = frozen.clone();
         if !stable {
-            repeated.version += 1;
+            repeated.mode_envelope.payload = Payload::Inline(serde_json::json!("changed"));
         }
         let script = Script::default()
             .expect(
-                "DistGroupDirectoryPort::resolve",
-                (scope(), &frozen.group),
-                Ok::<_, GroupDirectoryError>(frozen.clone()),
+                "DistSessionDirectoryPort::resolve",
+                (scope(), &frozen.target),
+                Ok::<_, DirectoryError>(frozen.clone()),
             )
             .expect(
-                "DistGroupDirectoryPort::resolve",
-                (scope(), &frozen.group),
-                Ok::<_, GroupDirectoryError>(frozen.clone()),
-            )
-            .expect(
-                "DistGroupDirectoryPort::load_workflow",
-                (scope(), &frozen.workflow),
-                Ok::<_, GroupDirectoryError>(workflow()),
-            )
-            .expect(
-                "DistGroupDirectoryPort::load_workflow",
-                (scope(), &frozen.workflow),
-                Ok::<_, GroupDirectoryError>(repeated),
+                "DistSessionDirectoryPort::resolve",
+                (scope(), &frozen.target),
+                Ok::<_, DirectoryError>(repeated),
             );
         let scope = scope();
-        let test = dist_group_directory_port_contract_tests(&script, &scope, &frozen.group);
+        let test = dist_session_directory_port_contract_tests(&script, &scope, &frozen.target);
         if stable {
             test.await?;
         } else {

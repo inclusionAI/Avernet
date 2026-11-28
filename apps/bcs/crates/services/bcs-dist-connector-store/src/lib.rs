@@ -32,10 +32,9 @@
 //! One JSON document per dispatch, shared by the Worker and the holding
 //! Connector. Each side writes only its own parts:
 //!
-//! - `/spec`: written by the Worker at creation, never changed. It names the
-//!   agent, the request and `/spec/capabilities` (`DownstreamCapabilities`),
-//!   which decides how a task is followed (subscribe, poll, or blind) and what
-//!   a new holder may resend.
+//! - `/spec`: written by the Worker at creation, never changed. It identifies
+//!   the logical agent, request and downstream conversation context. The
+//!   Connector resolves the agent's capabilities when it handles the call.
 //! - `/control`: written by the Worker: `cancel` (a cancel intent) and
 //!   `pending_input` (human replies waiting in the Worker's queue).
 //! - `/execution`: written by the holder: `holder`, `phase`, `remote`,

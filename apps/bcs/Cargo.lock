@@ -377,8 +377,11 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-migrations",
  "bcs-db-mysql",
+ "bcs-direct-a2a-runner",
  "bcs-dist-a2a-output",
+ "bcs-dist-connector",
  "bcs-dist-connector-store",
+ "bcs-dist-encoding",
  "bcs-dist-gateway",
  "bcs-dist-gateway-http",
  "bcs-dist-model",
@@ -1511,6 +1514,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-direct-a2a-runner"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-a2a-output",
+ "bcs-dist-encoding",
+ "bcs-dist-model",
+ "bcs-dist-projection",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-dist-a2a-output"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1637,7 +1656,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-dist-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1696,10 +1715,13 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-a2a-http",
  "bcs-app-dist-gateway",
  "bcs-db-local",
  "bcs-db-migrations",
+ "bcs-direct-a2a-runner",
  "bcs-dist-a2a-output",
+ "bcs-dist-connector",
  "bcs-dist-connector-store",
  "bcs-dist-encoding",
  "bcs-dist-gateway",
@@ -1708,6 +1730,7 @@ dependencies = [
  "bcs-dist-projection",
  "bcs-dist-store",
  "bcs-domain",
+ "bcs-route-security",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -2557,7 +2580,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "8.0.0"
+version = "9.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

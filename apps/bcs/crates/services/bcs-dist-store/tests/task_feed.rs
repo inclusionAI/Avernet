@@ -494,7 +494,7 @@ async fn append_referenced(f: &Fixture, count: usize, length: usize) -> TaskCurs
             id: event_id(1, index as u32 + 1),
             tid: Tid(TID.into()),
             body: OutputBody::Artifact {
-                node: NodeId("node".into()),
+                source: CorrelationKey("source".into()),
                 artifact_id: ArtifactId(format!("artifact-{index}")),
                 class: OutputClass::Output,
                 update: ArtifactUpdate::Upsert {

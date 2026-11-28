@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 fn change(class: OutputClass, update: ArtifactUpdate) -> ArtifactChange {
     ArtifactChange {
-        node: NodeId("n1".into()),
+        source: CorrelationKey("n1".into()),
         artifact_id: ArtifactId("answer".into()),
         class,
         update,
@@ -16,7 +16,7 @@ fn change(class: OutputClass, update: ArtifactUpdate) -> ArtifactChange {
 
 fn snapshot(content: Value) -> Value {
     json!({ "format_version": 1, "units": [
-        { "node": "n1", "artifact_id": "answer", "class": "output", "content": content }
+        { "source": "n1", "artifact_id": "answer", "class": "output", "content_format": "json", "content": content }
     ] })
 }
 
@@ -48,6 +48,30 @@ fn append_text_is_a_delta_for_the_same_artifact() {
 }
 
 #[test]
+fn explicit_parts_preserve_fields_without_reinterpreting_plain_json_arrays() {
+    let parts = json!([{"url":"https://example.com/file", "metadata":{"name":"file"}},
+        {"text":"caption", "metadata":{"lang":"en"}}, {"data":{"n":1}}]);
+    let mut raw = snapshot(parts.clone());
+    let ordinary = A2aOutputAdapter.snapshot(&raw).unwrap();
+    assert_eq!(ordinary["artifacts"][0]["parts"], json!([{"data":parts}]));
+    raw["units"][0]["content_format"] = json!("parts");
+    let full = A2aOutputAdapter.snapshot(&raw).unwrap();
+    for (update, append) in [(ArtifactUpdate::UpsertParts { content: Payload::Inline(parts.clone()) }, false),
+        (ArtifactUpdate::AppendParts { delta: Payload::Inline(parts.clone()) }, true)] {
+        let event = A2aOutputAdapter.artifact(&change(OutputClass::Output, update)).unwrap();
+        assert_eq!(event["artifact"], full["artifacts"][0]);
+        assert_eq!(event["artifact"]["parts"], parts);
+        assert_eq!(event["append"], append);
+    }
+    for invalid in [json!("not parts"), json!([null])] {
+        raw["units"][0]["content"] = invalid.clone();
+        assert!(A2aOutputAdapter.snapshot(&raw).is_err());
+        assert!(A2aOutputAdapter.artifact(&change(OutputClass::Output,
+            ArtifactUpdate::AppendParts { delta: Payload::Inline(invalid) })).is_err());
+    }
+}
+
+#[test]
 fn json_content_and_explicit_message_sources_are_preserved() {
     let adapter = A2aOutputAdapter;
     for value in [json!({ "answer": [1, true, null] }), json!(["x", 1]), json!(42), Value::Null] {
@@ -68,9 +92,9 @@ fn node_and_class_are_part_of_collision_free_artifact_identity() {
     let first = change(OutputClass::Output, ArtifactUpdate::Upsert { content: Payload::Inline(json!("x")) });
     let base = adapter.artifact(&first).unwrap();
     let mut other = first.clone();
-    other.node = NodeId("n2".into());
+    other.source = CorrelationKey("n2".into());
     assert_ne!(base["artifact"]["artifactId"], adapter.artifact(&other).unwrap()["artifact"]["artifactId"]);
-    other.node = first.node;
+    other.source = first.source;
     other.class = OutputClass::Tool;
     let tool = adapter.artifact(&other).unwrap();
     assert_ne!(base["artifact"]["artifactId"], tool["artifact"]["artifactId"]);
@@ -89,4 +113,22 @@ fn invalid_neutral_content_is_rejected_instead_of_dropped() {
     assert!(adapter.artifact(&change(OutputClass::Output, ArtifactUpdate::Upsert {
         content: Payload::Ref(BlobRef { key: "x".into(), digest: Digest("sha256:x".into()) }),
     })).is_err());
+}
+
+#[test]
+fn invalid_a2a_parts_are_rejected_before_http_decoding() {
+    for parts in [json!([{}]), json!([{"text":123}]), json!([{"url":false}]),
+        json!([{"raw":"%not-base64"}]), json!([{"text":"valid"},{}])] {
+        let mut saved = snapshot(parts.clone());
+        saved["units"][0]["content_format"] = json!("parts");
+        assert!(A2aOutputAdapter.snapshot(&saved).is_err(), "accepted {parts}");
+        for update in [ArtifactUpdate::UpsertParts { content: Payload::Inline(parts.clone()) },
+            ArtifactUpdate::AppendParts { delta: Payload::Inline(parts.clone()) }] {
+            assert!(A2aOutputAdapter.artifact(&change(OutputClass::Output, update)).is_err());
+        }
+    }
+    // An empty Vec<Part> is accepted by the same SDK used by the HTTP consumer.
+    let mut empty = snapshot(json!([]));
+    empty["units"][0]["content_format"] = json!("parts");
+    assert_eq!(A2aOutputAdapter.snapshot(&empty).unwrap()["artifacts"][0]["parts"], json!([]));
 }

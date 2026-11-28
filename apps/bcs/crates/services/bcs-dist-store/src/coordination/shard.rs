@@ -8,7 +8,8 @@ struct StoredShard {
     request_digest: Digest,
 }
 fn digest<T: Serialize>(value: &T) -> Result<Digest, StoreError> {
-    Ok(crate::identity::digest_json(&encode_json(value)?))
+    let value = serde_json::to_value(value).map_err(|_| invalid("json_encode"))?;
+    Ok(crate::identity::digest_json(&value))
 }
 #[async_trait]
 impl ShardLeasePort for CoordinationStore {

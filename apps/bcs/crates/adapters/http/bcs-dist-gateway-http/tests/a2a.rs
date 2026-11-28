@@ -30,16 +30,22 @@ use tower::ServiceExt;
 
 struct Groups;
 #[async_trait]
-impl DistGroupDirectoryPort for Groups {
-    async fn resolve(&self, _scope: &TaskScope, group: &GroupId) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        Ok(FrozenGroupDefinition {
-            group: group.clone(),
-            workflow: WorkflowRef {
-                definition_id: "wf-research".into(),
+impl DistSessionDirectoryPort for Groups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
+        Ok(())
+    }
+
+    async fn resolve(&self, _scope: &TaskScope, target: &SessionTarget) -> Result<FrozenSessionProposal, DirectoryError> {
+        Ok(FrozenSessionProposal {
+            target: target.clone(),
+            mode_envelope: ModeConfigEnvelope {
+                mode: CollaborationMode::StateMachine,
+                mode_version: 1,
+                payload: Payload::Inline(serde_json::json!({})),
                 revision: "7".into(),
                 digest: Digest("sha256:ab12".into()),
             },
-            participants: vec![],
+            authorized_agents: vec![],
             limits: SessionLimits {
                 max_queued_tasks: 16,
                 max_task_steps: 200,
@@ -48,13 +54,7 @@ impl DistGroupDirectoryPort for Groups {
             },
         })
     }
-    async fn load_workflow(
-        &self,
-        _scope: &TaskScope,
-        _reference: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::Unavailable)
-    }
+
 }
 
 struct TestClock;
@@ -195,7 +195,7 @@ fn artifact_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
         id,
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
-            node: NodeId("n1".into()),
+            source: CorrelationKey("n1".into()),
             artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
             update: ArtifactUpdate::AppendText { delta: Payload::Inline(json!(text)) },
@@ -272,8 +272,8 @@ async fn neutral_worker_output_reaches_get_task_and_sse_with_matching_ids() {
     task.sid = Sid(tid.rsplit_once('.').unwrap().0.to_owned());
     task.scope = TaskScope { tenant: TenantId("t-ant".into()), principal: PrincipalId("bot:pa-001".into()) };
     task.content.snapshot = Payload::Inline(json!({ "format_version": 1, "units": [
-        { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "Hello" },
-        { "node": "n2", "artifact_id": "a-1", "class": "tool", "content": { "answer": 42 } }
+        { "source": "n1", "artifact_id": "a-1", "class": "output", "content_format": "json", "content": "Hello" },
+        { "source": "n2", "artifact_id": "a-1", "class": "tool", "content_format": "json", "content": { "answer": 42 } }
     ] }));
     p.worker.publish(&task).await;
     let got = json_of(&app, rpc("GetTask", json!({ "id": tid }))).await;
@@ -518,8 +518,36 @@ async fn protocol_errors_are_reported_as_json_rpc_errors() {
     let core = gateway_core(&p);
     let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), DistGatewayConfig::new(64)).unwrap();
     let bare = router(Arc::new(gateway), GatewayHttpConfig::new("https://gw.example"));
-    let response = bare.oneshot(rpc("GetTask", json!({ "id": "x" }))).await.unwrap();
+    let response = bare.oneshot(rpc("GetTask", json!({ "id": 7 }))).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn methods_accept_only_their_named_a2a_arguments_and_keep_the_rpc_id() {
+    let app = app_over(Arc::new(Failing(GatewayError::NotFound)));
+    for (method, params) in [
+        ("SendMessage", json!({ "id": "s0001.abc.def" })),
+        ("SendStreamingMessage", json!({ "message": false })),
+        ("GetTask", json!(["s0001.abc.def"])),
+        ("SubscribeToTask", json!({ "id": 7 })),
+        ("CancelTask", Value::Null),
+        ("ListTasks", json!({ "pageSize": "five" })),
+    ] {
+        let response = json_of(&app, rpc(method, params)).await;
+        assert_eq!(response["id"], "r1");
+        assert_eq!(error_code(&response), -32602, "{method}");
+    }
+    let raw = |json| Request::post("/a2a/grp-research-01")
+        .header("content-type", "application/json")
+        .body(Body::from(json)).unwrap();
+    let missing = json_of(&app, raw(r#"{"id":17,"jsonrpc":"2.0","method":"GetTask"}"#)).await;
+    assert_eq!(missing["id"], 17);
+    assert_eq!(error_code(&missing), -32602);
+
+    // JSON field order does not affect dispatch. Valid params reach the service.
+    let ordered = json_of(&app, raw(r#"{"params":{"id":"s0001.abc.def"},"method":"GetTask","id":17,"jsonrpc":"2.0"}"#)).await;
+    assert_eq!(ordered["id"], 17);
+    assert_eq!(error_code(&ordered), -32001);
 }
 
 /// A Gateway whose every use case fails with one error.
@@ -529,7 +557,7 @@ impl DistGatewayService for Failing {
     async fn submit(&self, _: &GatewayCaller, _: SubmitInput) -> Result<AdmissionReceipt, GatewayError> {
         Err(self.0.clone())
     }
-    async fn get_task(&self, _: &GatewayCaller, _: &GroupId, _: &Tid) -> Result<TaskView, GatewayError> {
+    async fn get_task(&self, _: &GatewayCaller, _: &SessionTarget, _: &Tid) -> Result<TaskView, GatewayError> {
         Err(self.0.clone())
     }
     async fn subscribe(&self, _: &GatewayCaller, _: SubscribeTask) -> Result<TaskSubscription, GatewayError> {
@@ -718,4 +746,23 @@ async fn a_question_that_arrives_in_a_resent_snapshot_ends_the_stream() {
     let frames = parse_frames(&text);
     assert_eq!(frames.len(), 2, "{frames:?}");
     assert_eq!(frames[1].data["result"]["task"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
+}
+
+#[tokio::test]
+async fn direct_agent_and_group_with_the_same_name_have_separate_routes_and_sessions() {
+    let p = ports();
+    let app = app(&p);
+    let direct_url = "/a2a/agents/grp-research-01";
+    let card = Request::get(format!("{direct_url}/.well-known/agent-card.json")).body(Body::empty()).unwrap();
+    assert_eq!(json_of(&app, card).await["supportedInterfaces"][0]["url"],
+        format!("https://gw.example{direct_url}"));
+    let group = json_of(&app, send("first", "hello", None, None, true)).await;
+    let mut direct = send("first", "hello", None, None, true);
+    *direct.uri_mut() = direct_url.parse().unwrap();
+    let direct = json_of(&app, direct).await;
+    let direct_task = &direct["result"]["task"];
+    assert!(direct_task["id"].is_string(), "{direct}");
+    assert_ne!(direct_task["contextId"], group["result"]["task"]["contextId"]);
+    let read_via_group = rpc("GetTask", json!({ "id": direct_task["id"] }));
+    assert_eq!(error_code(&json_of(&app, read_via_group).await), -32001);
 }

@@ -20,8 +20,10 @@ for retained layout, cold-start health, resource bounds and validation limits.
 Gateway application calls `DistGatewayCoreService`, which uses business repo
 ports. The pure `DistRunnerCoreService` reduces supplied state and inputs; it
 does no storage or remote IO. Connector orchestration uses `DistAgentClientPort`
-over the existing outbound binding/client. `DistGroupDirectoryPort` freezes and
-loads the exact workflow revision used by a session.
+to resolve the logical agent's current route and credentials. Gateway calls
+`DistSessionDirectoryPort` to authorize a new send or reply before Inbox admission
+and to freeze the initial session proposal. Worker loads the immutable mode
+configuration and executes admitted inputs.
 
 Worker/Connector admin facades are application contracts. Their future engines
 implement `DistRuntimeControlPort`; service engines must not import application

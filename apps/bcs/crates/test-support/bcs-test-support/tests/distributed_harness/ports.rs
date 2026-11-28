@@ -382,26 +382,30 @@ impl CommandFeedPort for Script {
 
 #[async_trait]
 impl DistAgentClientPort for Script {
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
+    async fn capabilities(&self, target: &AgentId) -> Result<DownstreamCapabilities, AgentReadError> {
+        self.call("DistAgentClientPort::capabilities", target)
+    }
+
+    async fn start(&self, target: &AgentId, request: StableSendRequest) -> SendOutcome {
         self.call("DistAgentClientPort::start", (target, request))
     }
 
     async fn send_input(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         request: StableSendRequest,
     ) -> SendOutcome {
         self.call("DistAgentClientPort::send_input", (target, remote, request))
     }
 
-    async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
+    async fn query(&self, target: &AgentId, query: RemoteQuery) -> QueryOutcome {
         self.call("DistAgentClientPort::query", (target, query))
     }
 
     async fn subscribe(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
@@ -410,7 +414,7 @@ impl DistAgentClientPort for Script {
 
     async fn cancel(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         request_id: RequestId,
     ) -> CancelOutcome {
@@ -419,22 +423,18 @@ impl DistAgentClientPort for Script {
 }
 
 #[async_trait]
-impl DistGroupDirectoryPort for Script {
+impl DistSessionDirectoryPort for Script {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
+        Ok(())
+    }
     async fn resolve(
         &self,
         scope: &TaskScope,
-        group: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        self.call("DistGroupDirectoryPort::resolve", (scope, group))
+        target: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError> {
+        self.call("DistSessionDirectoryPort::resolve", (scope, target))
     }
 
-    async fn load_workflow(
-        &self,
-        scope: &TaskScope,
-        reference: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        self.call("DistGroupDirectoryPort::load_workflow", (scope, reference))
-    }
 }
 
 #[async_trait]
@@ -461,10 +461,10 @@ impl DistGatewayService for Script {
     async fn get_task(
         &self,
         caller: &GatewayCaller,
-        group: &GroupId,
+        target: &SessionTarget,
         tid: &Tid,
     ) -> Result<TaskView, GatewayError> {
-        self.call("DistGatewayService::get_task", (caller, group, tid))
+        self.call("DistGatewayService::get_task", (caller, target, tid))
     }
 
     async fn subscribe(
@@ -532,12 +532,12 @@ impl DistGatewayCoreService for Script {
         self.call("DistGatewayCoreService::admit", (scope, command))
     }
 
-    async fn session_group(
+    async fn session_target(
         &self,
         scope: &TaskScope,
         sid: &Sid,
-    ) -> Result<GroupId, DistGatewayCoreError> {
-        self.call("DistGatewayCoreService::session_group", (scope, sid))
+    ) -> Result<SessionTarget, DistGatewayCoreError> {
+        self.call("DistGatewayCoreService::session_target", (scope, sid))
     }
 
     async fn restore_task(

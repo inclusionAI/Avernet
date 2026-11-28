@@ -33,30 +33,27 @@ struct Groups {
     changed: AtomicBool,
 }
 #[async_trait::async_trait]
-impl DistGroupDirectoryPort for Groups {
+impl DistSessionDirectoryPort for Groups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
+        Ok(())
+    }
     async fn resolve(
         &self,
         _: &TaskScope,
-        group: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
+        target: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError> {
         let mut s = spec();
         if self.changed.load(Ordering::SeqCst) {
-            s.workflow.revision = "updated".into();
+            s.mode_envelope.revision = "updated".into();
         }
-        Ok(FrozenGroupDefinition {
-            group: group.clone(),
-            workflow: s.workflow,
-            participants: s.participants,
+        Ok(FrozenSessionProposal {
+            target: target.clone(),
+            mode_envelope: s.mode_envelope,
+            authorized_agents: s.authorized_agents,
             limits: s.limits,
         })
     }
-    async fn load_workflow(
-        &self,
-        _: &TaskScope,
-        _: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        unreachable!()
-    }
+
 }
 fn scope() -> TaskScope {
     TaskScope {
@@ -144,7 +141,7 @@ async fn gateway_retries_survive_clock_config_and_lost_response_without_reexecut
         .unwrap()
         .into());
     let frozen = f.coordination.get_spec(&sid).await.unwrap().unwrap();
-    assert_eq!(frozen.workflow.revision, "1");
+    assert_eq!(frozen.mode_envelope.revision, "1");
     let conflict = json_response(&app, send("same", "changed")).await;
     assert!(conflict.get("error").is_some());
     f.warm().await;
@@ -180,14 +177,20 @@ async fn gateway_retries_survive_clock_config_and_lost_response_without_reexecut
 struct AppendingRunner {
     calls: AtomicUsize,
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for AppendingRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -203,7 +206,7 @@ impl DistRunnerCoreService for AppendingRunner {
             actions: vec![
                 ActionIntent::Show {
                     tid: tid.clone(),
-                    node: NodeId("n".into()),
+                    source: CorrelationKey("n".into()),
                     artifact_id: ArtifactId("answer".into()),
                     class: OutputClass::Output,
                     update: ArtifactUpdate::Upsert {
@@ -212,7 +215,7 @@ impl DistRunnerCoreService for AppendingRunner {
                 },
                 ActionIntent::Show {
                     tid: tid.clone(),
-                    node: NodeId("n".into()),
+                    source: CorrelationKey("n".into()),
                     artifact_id: ArtifactId("answer".into()),
                     class: OutputClass::Output,
                     update: ArtifactUpdate::AppendText {

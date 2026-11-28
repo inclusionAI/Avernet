@@ -148,6 +148,8 @@ impl Fixture {
                 commit_seq: CommitSeq(sequence),
                 consumed: None,
                 tasks: VecDeque::new(),
+                downstream_generation: 0,
+                pending_cancel_did: None,
                 runner_state: None,
                 dispatch_seq: BTreeMap::new(),
                 deadlines: vec![],
@@ -212,7 +214,8 @@ pub fn hello_snapshot(sequence: u64, covered: EventId) -> TaskSnapshot {
         serde_json::to_value(DisplaySnapshot {
             format_version: 1,
             units: vec![DisplayUnit {
-                node: NodeId("node".into()),
+                content_format: DisplayContentFormat::Json,
+                source: CorrelationKey("source".into()),
                 artifact_id: ArtifactId("answer".into()),
                 class: OutputClass::Output,
                 content: serde_json::json!("hello"),
@@ -265,7 +268,7 @@ pub fn text_events(commit: u64) -> Vec<OutputEvent> {
         id: event_id(commit, index as u32 + 1),
         tid: Tid(TID.into()),
         body: OutputBody::Artifact {
-            node: NodeId("node".into()),
+            source: CorrelationKey("source".into()),
             artifact_id: ArtifactId("answer".into()),
             class: OutputClass::Output,
             update,

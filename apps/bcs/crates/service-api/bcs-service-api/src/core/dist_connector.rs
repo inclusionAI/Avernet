@@ -31,7 +31,7 @@
 //! `seq` in `/control/pending_input`; a *key event* is one the session must
 //! see exactly once (final, error, input/auth required), an *intermediate
 //! event* is everything else (deltas, thinking, tools, snapshots).
-//! `DownstreamCapabilities` is written by the Worker in `/spec/capabilities`
+//! The Connector resolves `DownstreamCapabilities` for the dispatch’s logical agent
 //! and decides how an unknown send is resolved and how a task is followed.
 use crate::port::repo::distributed::inbox::{AppendAgentEvent, ConnectorAdmission};
 use bcs_dist_model::*;

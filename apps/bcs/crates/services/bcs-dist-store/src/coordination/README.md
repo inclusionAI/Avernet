@@ -67,25 +67,20 @@ The Worker separately validates maximum legal business/finalization candidates;
 missing capacity declarations fail startup. This is an enforced bound, not an
 extra storage read or an assumption about an unnamed backend's native limit.
 
-## Integration and migration
+## Integration
 
 Admission creates spec/task through the same DocumentCas layout that Worker
 reads. Legacy GT helpers remain only for other independently validated paths.
-Do not mix legacy JSON or GT writers with these records. Initial adoption uses
-an isolated namespace with all writers on the new protocol; existing namespaces
-require a separate offline migration/recovery procedure. This change does not
-automatically migrate live data or enable the Worker in existing bootstrap.
+Do not mix legacy JSON or GT writers with these records. All distributed roles
+use the same v1 protocol. This change does not enable the Worker in existing
+bootstrap.
 
-The coordination-only #4145 prototype used numeric checkpoint format 1 with an
-unscoped `runner_state: {format_version, value}`. The phase-one runtime's format 1
-uses `runner_state: null | {tid, state}` and task-local lifecycle state. Those
-prototype namespaces are unsupported, even though the numeric version matches:
-do not reopen them with this runtime or infer a task association for old state.
-Use a fresh namespace; retaining or migrating prototype evidence requires a
-separate offline procedure. Ordinary reads check the numeric header before body
-decoding and explicitly reject the known prototype shape as `UnsupportedFormat`
-(format 1), without rewriting/sealing it. Other malformed current bodies remain
-data errors. Header-only control recovery continues to preserve the raw body.
+The distributed roles retain the `bcn:v1` key prefix and checkpoint format 1.
+The checkpoint records the active task's runner state, downstream conversation
+generation and pending cancellation. V1 has not been deployed, so these fields
+complete its initial format without a version upgrade or migration. Reads
+validate the numeric header before decoding the body; header-only control
+recovery preserves the raw body.
 
 The provider's lease implementation must pass the retained membership contract before this
 store can start. A document-CAS-only backend is insufficient. The test-only model

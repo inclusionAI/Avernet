@@ -90,7 +90,7 @@ pub fn text_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
         id,
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
-            node: NodeId("n1".into()),
+            source: CorrelationKey("n1".into()),
             artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
             update: ArtifactUpdate::Upsert {
@@ -276,7 +276,7 @@ pub fn final_record(tid: &str) -> FinalTaskRecord {
         tid: Tid(tid.into()),
         status: TerminalStatus::Completed,
         snapshot: Payload::Inline(serde_json::json!({ "format_version": 1, "units": [
-            { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "final" }
+            { "source": "n1", "artifact_id": "a-1", "class": "output", "content_format": "json", "content": "final" }
         ] })),
         result: Payload::Inline(serde_json::json!("done")),
         source_commit: CommitSeq(9),
@@ -420,14 +420,15 @@ pub fn session_spec(sid: &str, scope: TaskScope) -> SessionSpec {
         sid: Sid(sid.into()),
         shard: KeyLayout::shard_of(&Sid(sid.into())).unwrap(),
         scope,
-        kind: SessionKind::FsmGroup,
-        group: GroupId("grp-research-01".into()),
-        workflow: WorkflowRef {
-            definition_id: "wf-research".into(),
+        target: SessionTarget::Group { group: GroupId("grp-research-01".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "7".into(),
             digest: Digest("sha256:ab12".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 16,
             max_task_steps: 200,
@@ -460,7 +461,8 @@ pub fn user_body(text: &str) -> InputBody {
 pub fn question(id: &str) -> Interaction {
     Interaction {
         id: InteractionId(id.into()),
-        did: Did(format!("{TID}.n2.a1")),
+        origin: InteractionOrigin::Dispatch { did: Did(format!("{TID}.n2.a1")) },
+        prompt: None,
         kind: InteractionKind::HumanInput,
     }
 }
