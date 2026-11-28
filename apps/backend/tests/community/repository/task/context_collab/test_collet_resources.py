@@ -39,6 +39,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
     ResourceBinding,
 )
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 
 OWNER = ActorContext(PrincipalRef("human", "owner"), "api")
 RESOURCES = (
@@ -74,9 +78,11 @@ def test_create_resources_persist_without_creating_work_or_binding_events(runtim
     assert record.task is None and record.tasks == () and record.events == []
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert json.loads(row.resources) == [item.to_dict() for item in RESOURCES]
-        assert json.loads(row.creation_facts) == {}
-        assert row.root_task_ref is None
+        assert stored_context_value(row, "resources") == [
+            item.to_dict() for item in RESOURCES
+        ]
+        assert stored_context_value(row, "creation_facts") == {}
+        assert stored_context_value(row, "root_task_ref") is None
         assert session.query(ContextCollabTaskModel).count() == 0
         assert session.query(ContextCollabEventModel).count() == 0
 
@@ -125,29 +131,37 @@ def test_create_command_rejects_invalid_resources(resources):
         _command(resources=resources)
 
 
-def test_legacy_null_resources_read_as_empty_without_rewrite(runtime, db):
+def test_legacy_resources_read_as_empty_without_rewrite(runtime, db):
     service, repository = runtime
     collet = service.create_collet(_command(), OWNER)
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().resources = None
+        # Historical rows have no split resources column inside an unversioned
+        # ContextSpec object; the physical storage format stays untouched.
+        row = session.query(ContextCollabColletModel).one()
+        row.context_spec = json.dumps({"objective": "legacy task", "executor_refs": []})
     assert repository.get_current_status(collet.collet_id).collet.resources == ()
     with db.orm_session() as session:
-        assert session.query(ContextCollabColletModel).one().resources is None
+        assert json.loads(
+            session.query(ContextCollabColletModel).one().context_spec
+        ) == {
+            "objective": "legacy task",
+            "executor_refs": [],
+        }
 
 
-@pytest.mark.parametrize(
-    "stored", ["{bad", "null", "{}", '"resource"', "[null]", "[{}]"]
-)
+@pytest.mark.parametrize("stored", ["bad", None, {}, [None], [{}]])
 def test_invalid_stored_resources_fail_read_and_append_without_writes(
     runtime, db, stored
 ):
     service, repository = runtime
     collet = service.create_collet(_command(), OWNER)
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().resources = stored
-    with pytest.raises(ContextCollabValidationError, match="resources"):
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "resources", stored
+        )
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.get_current_status(collet.collet_id)
-    with pytest.raises(ContextCollabValidationError, match="resources"):
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.append_event(
             collet.collet_id,
             AppendEventRecordRequest(
@@ -162,5 +176,8 @@ def test_invalid_stored_resources_fail_read_and_append_without_writes(
         )
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert row.resources == stored and row.context_version == 1
+        assert (
+            stored_context_value(row, "resources") == stored
+            and row.context_version == 1
+        )
         assert session.query(ContextCollabEventModel).count() == 0

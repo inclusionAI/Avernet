@@ -1,6 +1,5 @@
 """Real product composition, selection prerequisites and ProductInstance persistence."""
 
-import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -61,8 +60,14 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskAdvanceCommand,
     TaskMethodOpsPort,
 )
-from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog
+from agentclaw.community.di.modules.task.context_collab_products import (
+    build_product_catalog,
+)
 
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     opportunities_query_request,
 )
@@ -457,9 +462,9 @@ def test_wrong_persisted_root_task_reference_fails_closed(
             .filter_by(collab_context_id=collet.collet_id)
             .one()
         )
-        facts = json.loads(row.creation_facts)
+        facts = stored_context_value(row, "creation_facts")
         facts["product_instance"]["root_task_ref"] = root_ref
-        row.creation_facts = json.dumps(facts)
+        store_context_value(row, "creation_facts", facts)
     with pytest.raises(ContextCollabValidationError, match="ProductInstance"):
         injector.get(ContextCollabRepositoryProtocol).get_current_status(
             collet.collet_id
@@ -488,10 +493,9 @@ def test_historical_instance_without_root_ref_uses_l4_identity_without_rewriting
             .filter_by(collab_context_id=collet.collet_id)
             .one()
         )
-        facts = json.loads(row.creation_facts)
+        facts = stored_context_value(row, "creation_facts")
         del facts["product_instance"]["root_task_ref"]
-        historical_json = json.dumps(facts)
-        row.creation_facts = historical_json
+        store_context_value(row, "creation_facts", facts)
     recovered = injector.get(ContextCollabRepositoryProtocol).get_current_status(
         collet.collet_id
     )
@@ -503,7 +507,7 @@ def test_historical_instance_without_root_ref_uses_l4_identity_without_rewriting
             .filter_by(collab_context_id=collet.collet_id)
             .one()
         )
-        assert row.creation_facts == historical_json
+        assert stored_context_value(row, "creation_facts") == facts
 
 
 def test_product_selection_cannot_be_replaced_on_an_existing_instance(instance_runtime):

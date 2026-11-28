@@ -48,6 +48,10 @@ from tests.community.core.task.context_collab.creation_facts import (
     creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 
 OWNER = PrincipalRef("human", "u_task_owner")
 EXECUTOR = AgentRef("bot", "bot_task_worker")
@@ -128,7 +132,7 @@ def _storage(db):
         collets = [
             (
                 r.collab_context_id,
-                r.root_task_ref,
+                stored_context_value(r, "root_task_ref"),
                 r.context_version,
                 r.current_event_id,
                 r.current_snapshot,
@@ -166,7 +170,7 @@ def _make_legacy(db, repository, context_id):
     with db.orm_session() as session:
         session.query(ContextCollabTaskModel).delete()
         row = session.query(ContextCollabColletModel).one()
-        row.root_task_ref = None
+        store_context_value(row, "root_task_ref", None)
         row.current_snapshot = json.dumps(snapshot)
         for event in session.query(ContextCollabEventModel):
             event.task_ref = None
@@ -366,7 +370,7 @@ def test_invalid_task_authority_fails_closed_without_snapshot_fallback(
         elif corruption == "wrong_subject":
             session.query(ContextCollabEventModel).one().task_ref = "different-task"
         elif corruption == "orphan":
-            row.root_task_ref = None
+            store_context_value(row, "root_task_ref", None)
         else:
             for child_id, parent_id in (("child-a", "child-b"), ("child-b", "child-a")):
                 child = replace(
@@ -436,7 +440,7 @@ def test_partial_legacy_context_allows_message_but_not_work(repository, db):
     with db.orm_session() as session:
         session.query(ContextCollabTaskModel).delete()
         row = session.query(ContextCollabColletModel).one()
-        row.root_task_ref = None
+        store_context_value(row, "root_task_ref", None)
         row.current_snapshot = None
     assert repository.get_current_status(created.collet.collet_id).task is None
     message = _message(repository, created.collet.collet_id)

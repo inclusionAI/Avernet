@@ -83,6 +83,10 @@ from tests.community.core.task.context_collab.test_l6_runtime_contract import (
 from tests.community.repository.task.context_collab.test_product_instantiation import (
     runtime as runtime,
 )
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 
 BOT = AgentRef("bot", "worker")
 OUTSIDE = AgentRef("bot", "outsider")
@@ -395,7 +399,7 @@ def test_pinned_scope_cannot_be_widened_in_persisted_instance(
     _instantiate(repo, store, collet, catalog=catalog)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.creation_facts)
+        data = stored_context_value(row, "creation_facts")
         if tamper == "missing":
             del data["product_instance"]["participant_scope"]
         else:
@@ -405,7 +409,7 @@ def test_pinned_scope_cannot_be_widened_in_persisted_instance(
                 else ParticipantScope(ParticipantScopeKind.ALLOWLIST, (OUTSIDE,))
             )
             data["product_instance"]["participant_scope"] = scope.to_dict()
-        row.creation_facts = json.dumps(data)
+        store_context_value(row, "creation_facts", data)
     with pytest.raises(ContextCollabValidationError):
         repo.get_current_status(collet.collet_id)
 
@@ -482,10 +486,10 @@ def test_historical_open_scope_and_role_fallback_load_without_rewriting(runtime,
     instance = service.instantiate(command, _actor())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.creation_facts)
+        data = stored_context_value(row, "creation_facts")
         del data["product_instance"]["participant_scope"]
-        historical_json = json.dumps(data)
-        row.creation_facts = historical_json
+        historical_facts = data
+        store_context_value(row, "creation_facts", historical_facts)
         for event_row in session.query(ContextCollabEventModel).all():
             payload = json.loads(event_row.payload)
             payload.pop("participation", None)
@@ -504,8 +508,10 @@ def test_historical_open_scope_and_role_fallback_load_without_rewriting(runtime,
     )
     with db.orm_session() as session:
         assert (
-            session.query(ContextCollabColletModel).one().creation_facts
-            == historical_json
+            stored_context_value(
+                session.query(ContextCollabColletModel).one(), "creation_facts"
+            )
+            == historical_facts
         )
 
 

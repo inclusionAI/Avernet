@@ -37,6 +37,9 @@ from tests.community.core.task.context_collab.creation_facts import (
     creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    stored_context_value,
+)
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
@@ -141,7 +144,10 @@ class TestAppendEvent:
             assert row.context_version == 2
             assert row.current_event_id is None  # Deprecated SQL column is not written.
             assert row.current_snapshot is None
-            assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
+            assert (
+                stored_context_value(row, "root_task_ref")
+                == repo.get_current_status(context_id).task.task_id
+            )
             events = _event_rows(session, context_id)
             # 顺序即插入顺序:2 行,按 id 升序初始事件在前。
             assert len(events) == 2
@@ -204,7 +210,10 @@ class TestAppendEvent:
                 _event_rows(session, context_id)[-1].event_id == appended.event.event_id
             )
             assert row.current_snapshot is None
-            assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
+            assert (
+                stored_context_value(row, "root_task_ref")
+                == repo.get_current_status(context_id).task.task_id
+            )
             assert len(_event_rows(session, context_id)) == 2
 
     def test_parent_older_than_head_appends_branch_event(self, db):

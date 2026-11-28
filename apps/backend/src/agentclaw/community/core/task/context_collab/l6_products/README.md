@@ -286,7 +286,7 @@ instances retain their old JSON shape (no new Task-contract field). Strict
 loading checks the exact selection against the installed definition; missing or
 mismatched references fail closed. Historical reads and Method recovery do not
 renegotiate capabilities or choose a newer contract. These references use the
-existing `creation_facts` JSON storage; no new table or backfill is needed.
+the existing `context_spec.creation_facts` JSON envelope; no additional physical Collet column or backfill is needed.
 
 Do not mutate an installed product version to remove its old references. Author
 and explicitly install a **new product version** for new instances; preserve old
@@ -571,7 +571,7 @@ the pure L4 command:
    initial Event and ProductInstance metadata. Task has its own ID/revision;
    `current_snapshot` is a derived G3 response, not persisted Work authority.
    The instance occupies the reserved `product_instance` member of the existing
-   `creation_facts` JSON column. L6 owns selection decoding; L4 Collet/Task do not
+   `context_spec.creation_facts` envelope. L6 owns selection decoding; L4 Collet/Task do not
    depend on that decoder or own product configuration.
 4. L5 projection creates the selected Method topology: independent bindings and
    declared edges for explicit relations, or the historical single-binding shape
@@ -700,7 +700,7 @@ mismatched binding references rather than silently moving admission/selection
 history to newly invented partitions.
 
 `root_task_ref` is a local reference, not a universal ACCS field or a Collet ID
-alias. Taskless installation persists `None` in `creation_facts`; no placeholder
+alias. Taskless installation persists `None` in `context_spec.creation_facts.product_instance`; no placeholder
 Task is created. Once explicit L4 create_task or Work.start creates the
 authoritative root, reads resolve the live reference from the same L4 snapshot without rewriting immutable L6
 selection or renegotiating capabilities. Other pinned references and creation

@@ -153,19 +153,22 @@ async def test_explicit_relation_order_capabilities_and_opt_in(multi):
         validate_configuration(no_relation, h.profile.stages, h.execution)
     with pytest.raises(Invalid, match="must equal"):
         policy(max_rollouts=3)
-    with pytest.raises(Invalid, match="not configured"):
-        from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import (
-            ProductProfileService,
-        )
+    from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import (
+        ProductProfileService,
+    )
 
-        service = ProductProfileService(
-            h.repository,
-            h.authorization,
-            h.execution,
-            h.interaction,
-            h.service._messages,
-        )
-        await service.create_product_profile("denied", h.profile.stages)
+    service = ProductProfileService(
+        h.repository,
+        h.authorization,
+        h.execution,
+        h.interaction,
+        h.service._messages,
+    )
+    profile = await service.create_product_profile(
+        "capability-admission", h.profile.stages
+    )
+    with pytest.raises(Invalid, match="not configured"):
+        await service.create_product_collet(profile.id, "requires runtime admission")
 
 
 @pytest.mark.asyncio

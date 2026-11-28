@@ -32,6 +32,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.multi_rollout_polic
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.rollout_models import (
     ProductConfigurationRow,
+    ProductIdentityRow,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     default_composition,
@@ -129,15 +130,19 @@ async def test_public_repeated_creations_remain_independent(multi):
         ("notifications", UnavailableMultiRolloutNotifications),
     ],
 )
-async def test_default_publication_requires_installed_host_capabilities(
+async def test_profile_storage_does_not_require_runtime_host_capabilities(
     multi, port, unavailable
 ):
     h = multi
     setattr(h.controller, port, unavailable())
-    with pytest.raises(Invalid, match="not installed"):
-        await h.service.create_product_profile("unavailable", STAGES)
+    profile = await h.service.create_product_profile("unavailable", STAGES)
     with h.repository.db.orm_session() as session:
-        assert session.query(ProductConfigurationRow).count() == 0
+        assert session.query(ProductConfigurationRow).count() == 1
+    with pytest.raises(Invalid, match="not installed"):
+        await h.service.create_product_collet(profile.id, "requires capabilities")
+    with h.repository.db.orm_session() as session:
+        assert session.query(ProductConfigurationRow).count() == 1
+        assert session.query(ProductIdentityRow).count() == 0
     h.bot.send_message.assert_not_awaited()
     h.strategy.propose_adjustment.assert_not_awaited()
 

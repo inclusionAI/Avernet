@@ -1,7 +1,6 @@
 """Repository-backed evidence: pinned selections and no generic/product bypass."""
 
 from unittest.mock import Mock
-import json
 from dataclasses import replace
 
 import pytest
@@ -98,6 +97,10 @@ from agentclaw.community.di.modules.task.task_commission_method_ops_adapter impo
     TaskCommissionOpenMethodAdapter,
 )
 from sqlalchemy import event as sql_event
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 from sqlalchemy import func, select
 
 from tests.community.core.task.context_collab.product_catalog import (
@@ -403,7 +406,7 @@ def test_corrupt_pinned_metadata_fails_closed(db, corruption):
     _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.creation_facts)
+        data = stored_context_value(row, "creation_facts")
         if corruption == "missing_instance":
             del data["product_instance"]
         elif corruption == "role":
@@ -418,7 +421,7 @@ def test_corrupt_pinned_metadata_fails_closed(db, corruption):
             data["product_instance"]["negotiation"]["missing_capabilities"] = [
                 "method:Open@0.2"
             ]
-        row.creation_facts = json.dumps(data)
+        store_context_value(row, "creation_facts", data)
     with pytest.raises(ContextCollabValidationError):
         repo.get_current_status(created.collet_id)
 
@@ -429,13 +432,13 @@ def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
     _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.creation_facts)
+        data = stored_context_value(row, "creation_facts")
         for key in (
             "product_profile_ref",
             "product_instance",
         ):
             del data[key]
-        row.creation_facts = json.dumps(data)
+        store_context_value(row, "creation_facts", data)
     record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
     assert record.creation_facts["product_profile_ref"] is None
@@ -518,13 +521,13 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
     if legacy:
         with db.orm_session() as session:
             row = session.query(ContextCollabColletModel).one()
-            data = json.loads(row.creation_facts)
+            data = stored_context_value(row, "creation_facts")
             for key in (
                 "product_profile_ref",
                 "product_instance",
             ):
                 del data[key]
-            row.creation_facts = json.dumps(data)
+            store_context_value(row, "creation_facts", data)
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
     started = product.start_task(TaskAdvanceCommand(created.collet_id), _actor(BOT))
     assert started.status == "in_progress"
@@ -643,13 +646,13 @@ def test_legacy_commission_progress_requires_typed_executor(db):
     _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.creation_facts)
+        data = stored_context_value(row, "creation_facts")
         for key in (
             "product_profile_ref",
             "product_instance",
         ):
             del data[key]
-        row.creation_facts = json.dumps(data)
+        store_context_value(row, "creation_facts", data)
     product.start_task(TaskAdvanceCommand(created.collet_id), _actor(BOT))
     for principal, message in (
         (OWNER, "designated executor"),
@@ -695,7 +698,9 @@ def test_create_task_after_instantiation_preserves_selection_and_bindings(
     l4, repo, before = instantiated_without_work
     cid = before.collet.collet_id
     with db.orm_session() as session:
-        raw_facts = session.query(ContextCollabColletModel).one().creation_facts
+        raw_facts = stored_context_value(
+            session.query(ContextCollabColletModel).one(), "creation_facts"
+        )
     task = l4.create_task(
         cid,
         TaskCreateCommand(before.collet.version, OWNER, "deliver", ("accepted",)),
@@ -717,7 +722,12 @@ def test_create_task_after_instantiation_preserves_selection_and_bindings(
     assert event.event_kind == "task.created" and event.task_ref == task.task_id
     assert event.payload["executor_refs"] == [AgentRef("bot", "worker").to_dict()]
     with db.orm_session() as session:
-        assert session.query(ContextCollabColletModel).one().creation_facts == raw_facts
+        assert (
+            stored_context_value(
+                session.query(ContextCollabColletModel).one(), "creation_facts"
+            )
+            == raw_facts
+        )
         assert session.query(ContextCollabTaskModel).count() == 1
 
 

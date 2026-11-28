@@ -4,7 +4,6 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_reader imp
     ProductProfileReader,
 )
 
-import json
 from dataclasses import replace
 
 import pytest
@@ -73,6 +72,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskMethodOpsPort,
 )
 
+from tests.community.repository.task.context_collab.context_spec_test_support import (
+    store_context_value,
+    stored_context_value,
+)
 from tests.community.core.task.context_collab.products.test_task_commission_end_to_end import (
     HUMAN,
     OBJECTIVE,
@@ -372,11 +375,11 @@ def test_historical_composite_instance_is_not_silently_reinterpreted(
             .filter_by(collab_context_id=collet.collet_id)
             .one()
         )
-        facts = json.loads(row.creation_facts)
+        facts = stored_context_value(row, "creation_facts")
         facts["product_instance"]["method_binding_refs"] = [
             top_level_binding_id(collet.collet_id)
         ]
-        row.creation_facts = json.dumps(facts)
+        store_context_value(row, "creation_facts", facts)
     with pytest.raises(
         ContextCollabValidationError, match="persisted product bindings"
     ):

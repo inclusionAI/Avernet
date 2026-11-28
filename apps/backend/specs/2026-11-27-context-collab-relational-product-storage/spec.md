@@ -108,7 +108,7 @@ event.(collet_rollout_id, collet_stage_rollout_id) --> stage.(collet_rollout_id,
 ### 3.1 前提与安装路径
 
 - 以下为 **MySQL/InnoDB 方言方案稿**，没有在目标 MySQL/OceanBase 执行，不宣称生产兼容性已验证。
-- 假设原 L4 Collet/Event/Task 及所需 metadata/resources 列已安装；对已有表提供 ALTER，不重复复制历史基线结构。
+- 假设原 L4 Collet/Event/Task 使用单一 `context_spec` 存储封套；对已有表提供 ALTER，不重复复制历史基线结构。Collet 不安装独立 metadata/resources 分列，scope、审计、资源、creation facts 与 root-task 指针均编码在 `context_spec`。
 - 全新安装只加载 L4 基线和本版五表变更，**不创建旧六张运行表，也不创建已排除的五张配套表**。已有环境执行受评审升级脚本，历史 SQL 不倒改。
 - 执行前核验实际 schema、signed/unsigned、字符集/排序规则、索引长度、禁用物理外键规范/分区支持、隔离级别和同名结构；停写、备份并记录每步。DDL 不视为可整体事务回滚。
 - 不使用 `CREATE IF NOT EXISTS` 掩盖不兼容结构，不依赖版本敏感的 JSON CHECK/ENUM。闭合类型/状态由受测代码校验。
@@ -396,7 +396,7 @@ stages:
 3. 插入初始 rollout/stage 实际行并取得各自自增 ID；Stage 不写七项排除字段，验收字符串/错误文本先按第 3.6 节校验容量。不能以这些业务行已存在为理由，宣称完整运行 bindings/relations/multi、执行尝试/有效租约/路由/投递/取消事实已持久化。
 4. 填 current_rollout_id，追加真实创建审计，然后统一提交；不先填指向不存在后继的关联 ID，不写执行状态快照。
 
-原 Collet 必填兼容列诚实填写：scope 为合法 JSON `null`，creation_facts 为合法 `{}`，root_task_ref/current_snapshot 为 NULL，actor_ref 来自真实创建者；不虚构 L3 授权、L4 Task 或历史时间，也不借这些列重新存入被移除的控制态。已有 context 冲突不得认领别人的 L4 行。
+原 Collet 兼容字段统一编码在物理 `context_spec` 中：scope 为 JSON `null`、creation_facts 为 JSON `{}`、root_task_ref 为 null，current_snapshot 物理列为 NULL，actor_ref 仍使用独立物理列并来自真实创建者；不虚构 L3 授权、L4 Task 或历史时间，也不借 `context_spec` 重新存入被移除的运行控制态。已有 context 冲突不得认领别人的 L4 行。
 
 **并发业务写入：** 不再使用 Collet.revision CAS，计划改为根 Collet 行锁串行化；以下只描述业务落库互斥，不声称替代完整运行控制协议。
 

@@ -2,9 +2,7 @@
 -- OceanBase MySQL mode, matching the baseline dialect. Apply once via the deployment migration process.
 -- Stop old snapshot-writing runtimes before cutover; mixed old/new writers are not supported.
 -- No historic events or profile versions are rewritten. GET never performs backfill.
-
-ALTER TABLE `ac_context_collab_collet`
-  ADD COLUMN `root_task_ref` varchar(128) DEFAULT NULL COMMENT 'Independent root L4 Task; NULL selects explicit legacy decoding';
+-- The root Task pointer lives inside ac_context_collab_collet.context_spec, not a physical Collet column.
 
 ALTER TABLE `ac_context_collab_event`
   ADD COLUMN `task_ref` varchar(128) DEFAULT NULL COMMENT 'Work subject; NULL for Message and pre-Task history',

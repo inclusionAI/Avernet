@@ -11,25 +11,19 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
     LegacyCollet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
-    ColletMetadata,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    parse_collet_context_spec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
-    ResourceBinding,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -42,7 +36,7 @@ def _dump_json(data: dict) -> str:
 def _collet_from_row(
     row: ContextCollabColletModel,
 ) -> LegacyCollet:
-    """Decode L4 identity/scope/audit; composition stays with the injected codec."""
+    """Decode the real context_spec envelope; composition uses the typed codec."""
     if row.product_profile_id is not None:
         raise ContextCollabValidationError(
             "product Collet cannot use the legacy L4 reader/writer"
@@ -52,45 +46,15 @@ def _collet_from_row(
             f"collaboration context {row.collab_context_id!r} has a NULL actor_ref column; "
             "the Collet aggregate requires a non-null initiator_ref"
         )
-    metadata = None
-    if row.collet_metadata is not None:
-        try:
-            data = json.loads(row.collet_metadata)
-            # Retired marker is accepted only at the stored-row boundary.
-            if isinstance(data, dict) and "schema_version" in data:
-                if data.pop("schema_version") != "1.1":
-                    raise ContextCollabValidationError(
-                        "unsupported legacy Collet schema_version"
-                    )
-            metadata = ColletMetadata.from_dict(data)
-        except (json.JSONDecodeError, ContextCollabValidationError) as error:
-            raise ContextCollabValidationError(
-                f"collaboration context {row.collab_context_id!r} has invalid "
-                f"collet_metadata: {error}"
-            ) from error
-    resources = ()
-    if row.resources is not None:
-        try:
-            raw_resources = json.loads(row.resources)
-            if not isinstance(raw_resources, list):
-                raise ContextCollabValidationError("resources must be a list")
-            resources = tuple(
-                ResourceBinding.from_dict(resource) for resource in raw_resources
-            )
-        except (json.JSONDecodeError, ContextCollabValidationError) as error:
-            raise ContextCollabValidationError(
-                f"collaboration context {row.collab_context_id!r} has invalid "
-                f"resources: {error}"
-            ) from error
-    scope = json.loads(row.scope)
+    spec = parse_collet_context_spec(row)
     collet = LegacyCollet(
         collet_id=row.collab_context_id,
         initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
         state=ColletState.ACTIVE,
-        scope=SpaceRef.from_dict(scope) if scope is not None else None,
+        scope=spec.scope,
         version=int(row.context_version),
-        metadata=metadata,
-        resources=resources,
+        metadata=spec.collet_metadata,
+        resources=spec.resources,
     )
     return collet
 

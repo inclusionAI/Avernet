@@ -1,6 +1,6 @@
 -- Five business tables; additive migration, NOT an automatic startup action.
 -- Stop all writers and back up before applying. Requires the L4 baseline,
--- Task, collet metadata and resources migrations. MySQL/InnoDB dialect.
+-- Task migration and the single-context_spec Collet baseline. MySQL/InnoDB dialect.
 -- If the existing product_profile has profile_id/profile_version/definition_json,
 -- first verify the archive name is unused, then execute ONCE:
 -- RENAME TABLE ac_context_collab_product_profile

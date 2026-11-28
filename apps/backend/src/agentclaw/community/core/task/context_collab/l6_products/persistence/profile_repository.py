@@ -155,6 +155,9 @@ class SqlProductProfileRepository:
                 return tuple(result)
 
     def _verify_history(self, session, axes):
+        from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+            parse_collet_context_spec,
+        )
         from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
             ContextCollabColletModel,
         )
@@ -170,7 +173,7 @@ class SqlProductProfileRepository:
             .filter(ContextCollabColletModel.env == axes.env)
             .all()
         ):
-            facts = json.loads(row.creation_facts)
+            facts = parse_collet_context_spec(row).creation_facts
             ref = creation_profile_ref(facts)
             if ref is not None and ref not in available:
                 raise ContextCollabValidationError(
