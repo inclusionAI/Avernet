@@ -2,8 +2,10 @@ import json
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -36,6 +38,22 @@ class BotRunModel(Base):
     error = Column(Text, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
+    # Durable BCN callback delivery state.  These columns are nullable/defaulted
+    # for rolling migration compatibility with pre-v5 rows.
+    bcn_callback_function = Column(String(64), nullable=True)
+    bcn_callback_eligible = Column(Boolean, nullable=False, server_default="0")
+    bcn_callback_state = Column(String(32), nullable=True)
+    bcn_callback_sent = Column(Boolean, nullable=False, server_default="0")
+    bcn_callback_attempts = Column(Integer, nullable=False, server_default="0")
+    bcn_callback_next_retry_at = Column(DateTime, nullable=True)
+    bcn_callback_in_flight_until = Column(DateTime, nullable=True)
+    bcn_callback_lease_token = Column(String(128), nullable=True)
+    bcn_callback_lease_generation = Column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    bcn_callback_last_status = Column(String(32), nullable=True)
+    bcn_callback_last_error_kind = Column(String(64), nullable=True)
+
     __table_args__ = (UniqueConstraint("run_id", name="uq_baas_bot_run_run_id"),)
 
     def to_record(self) -> BotRunRecord:
@@ -55,6 +73,17 @@ class BotRunModel(Base):
             result_extra=self._parse_result_extra(),
             error=self.error,
             completed_at=self.completed_at,
+            bcn_callback_function=self.bcn_callback_function,
+            bcn_callback_eligible=bool(self.bcn_callback_eligible),
+            bcn_callback_state=self.bcn_callback_state,
+            bcn_callback_sent=bool(self.bcn_callback_sent),
+            bcn_callback_attempts=int(self.bcn_callback_attempts or 0),
+            bcn_callback_next_retry_at=self.bcn_callback_next_retry_at,
+            bcn_callback_in_flight_until=self.bcn_callback_in_flight_until,
+            bcn_callback_lease_token=self.bcn_callback_lease_token,
+            bcn_callback_lease_generation=int(self.bcn_callback_lease_generation or 0),
+            bcn_callback_last_status=self.bcn_callback_last_status,
+            bcn_callback_last_error_kind=self.bcn_callback_last_error_kind,
         )
 
     def _parse_metadata(self) -> dict | None:

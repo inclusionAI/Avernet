@@ -142,6 +142,10 @@ user_config:
     lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
     dry_run: false  # 测试模式：只打印日志
+    callback_batch_size: 2  # 每轮最多补发 2 个终态回调
+    callback_max_attempts: 5
+    callback_lease_seconds: 45
+    callback_budget_seconds: 35
 
   # Publish retry sweep config (periodically advances timed-out device publish
   # attempts so retries do not depend on a client polling for progress).
@@ -178,6 +182,8 @@ user_config:
     uplink:
       base_url: "https://bcn.example.com"
       provider_id: "dummy-provider"
+      timeout: 10.0
+      max_retries: 3
 
   # Bot Health Checker 配置
   bot_health_checker:

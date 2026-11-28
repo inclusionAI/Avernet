@@ -200,19 +200,9 @@ class SerializingExecutor:
             try:
                 await self._inner.execute(record)
             except BaseException:
-                # 异常路径显式 force_unlock，避免 ``_release_lock_internal``
-                # 吞异常路径导致 ``ac_lock_table`` 孤儿 session 锁残留
-                # （仅在 ``lock.acquired=True`` 分支内执行，不动他人锁）。
-                try:
-                    self._lock_service.force_unlock(lock_name)
-                except Exception as unlock_err:
-                    logger.warning(
-                        "[SerializingExecutor] force_unlock failed "
-                        "run_id=%s lock_name=%s: %s",
-                        record.run_id,
-                        lock_name,
-                        unlock_err,
-                    )
+                # The context manager releases with the acquired holder on exit.
+                # Never use the administrative force-unlock path here: an old
+                # worker must not delete a newer holder's re-acquired lock.
                 raise
 
 

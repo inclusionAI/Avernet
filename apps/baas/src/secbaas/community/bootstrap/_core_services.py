@@ -648,6 +648,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BcnUplinkConfig,
         base_url=config.bcn.uplink.base_url,
         provider_id=config.bcn.uplink.provider_id,
+        timeout=config.bcn.uplink.timeout,
+        max_retries=config.bcn.uplink.max_retries,
     )
 
     bcn_uplink_client = providers.Singleton(
@@ -660,6 +662,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BcnUplinkCallback,
         uplink_client=bcn_uplink_client,
         run_repository=bot_run_repository,
+        max_attempts=config.bot_run_recovery.callback_max_attempts,
+        lease_seconds=config.bot_run_recovery.callback_lease_seconds,
     )
 
     # ── BotService plugin ────────────────────────────────────────────────────
@@ -817,6 +821,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         run_repository=bot_run_repository,
         interaction_service=bot_interaction_service,
         abort_surface=bot_request_worker,
+        bcn_uplink_callback=bcn_uplink_callback,
     )
 
     # ── Sandbox device management providers ───────────────────────────────────

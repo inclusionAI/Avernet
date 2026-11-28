@@ -288,6 +288,7 @@ class TestUpdateExpireTime:
 
         result = repository.update_expire_time(
             lock_name="test-lock",
+            lock_holder="holder",
             expire_time=FUTURE,
         )
 
@@ -298,6 +299,7 @@ class TestUpdateExpireTime:
 
         result = repository.update_expire_time(
             lock_name="missing",
+            lock_holder="holder",
             expire_time=FUTURE,
         )
 
@@ -308,6 +310,7 @@ class TestUpdateExpireTime:
 
         result = repository.update_expire_time(
             lock_name="test-lock",
+            lock_holder="holder",
             expire_time=PAST,
         )
 
@@ -323,7 +326,7 @@ class TestDeleteLock:
     def test_delete_returns_true_when_row_deleted(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
-        result = repository.delete_lock("release-lock")
+        result = repository.delete_lock("release-lock", lock_holder="holder")
 
         assert result is True
         mock_session.query.assert_called_once_with(DistributedLockModel)
@@ -331,14 +334,14 @@ class TestDeleteLock:
     def test_delete_returns_false_when_no_row_deleted(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 0
 
-        result = repository.delete_lock("missing-lock")
+        result = repository.delete_lock("missing-lock", lock_holder="holder")
 
         assert result is False
 
     def test_delete_returns_false_when_rowcount_is_zero(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 0
 
-        result = repository.delete_lock("stale-lock")
+        result = repository.delete_lock("stale-lock", lock_holder="holder")
 
         assert result is False
         assert isinstance(result, bool)
@@ -841,7 +844,7 @@ class TestWithOrmSessionIntegration:
         repo = OrmDistributedLockRepository(mock_database)
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
-        repo.delete_lock("test-lock")
+        repo.delete_lock("test-lock", lock_holder="holder")
 
         mock_database.orm_session.assert_called_once()
 
@@ -856,8 +859,10 @@ class TestWithOrmSessionIntegration:
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
         repo.get_by_lock_name("lock-a")
-        repo.update_expire_time(lock_name="lock-b", expire_time=FUTURE)
-        repo.delete_lock("lock-c")
+        repo.update_expire_time(
+            lock_name="lock-b", lock_holder="holder", expire_time=FUTURE
+        )
+        repo.delete_lock("lock-c", lock_holder="holder")
 
         assert mock_database.orm_session.call_count == 3
 
@@ -892,7 +897,7 @@ class TestMethodRoundTrips:
         )
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
-        deleted = repository.delete_lock("delete-lock")
+        deleted = repository.delete_lock("delete-lock", lock_holder="holder")
         assert deleted is True
 
     def test_full_lock_lifecycle(self, repository, mock_session):
@@ -912,13 +917,14 @@ class TestMethodRoundTrips:
         mock_session.query.return_value.filter.return_value.update.return_value = 1
         renewed = repository.update_expire_time(
             lock_name="lifecycle-lock",
+            lock_holder="holder",
             expire_time=FUTURE,
         )
         assert renewed == 1
 
         # Release
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
-        deleted = repository.delete_lock("lifecycle-lock")
+        deleted = repository.delete_lock("lifecycle-lock", lock_holder="holder")
         assert deleted is True
 
     def test_get_not_found_returns_none(self, repository, mock_session):
@@ -930,7 +936,7 @@ class TestMethodRoundTrips:
     def test_delete_not_found_returns_false(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 0
 
-        result = repository.delete_lock("nonexistent")
+        result = repository.delete_lock("nonexistent", lock_holder="holder")
         assert result is False
 
 
@@ -989,6 +995,7 @@ class TestEdgeCases:
 
         result = repository.update_expire_time(
             lock_name="bulk-lock",
+            lock_holder="holder",
             expire_time=FUTURE,
         )
         assert result == 1000

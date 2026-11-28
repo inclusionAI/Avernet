@@ -16,13 +16,15 @@ class DistributedLockRepository(Protocol):
         self,
         *,
         lock_name: str,
+        lock_holder: str,
         expire_time: datetime,
+        now: datetime | None = None,
     ) -> int:
-        """更新锁过期时间（用于续期）"""
+        """仅在 ``lock_name`` 仍由 ``lock_holder`` 持有时续期。"""
         ...
 
-    def delete_lock(self, lock_name: str) -> bool:
-        """删除锁记录"""
+    def delete_lock(self, lock_name: str, *, lock_holder: str) -> bool:
+        """仅删除 ``lock_name`` 且持有者匹配的锁记录。"""
         ...
 
     def try_acquire_lock(
@@ -41,6 +43,10 @@ class DistributedLockRepository(Protocol):
         返回 True 表示加锁成功；False 表示锁被他人持有且未过期。
         OceanBase/MySQL 锁等待超时（1205）视为正常竞争，返回 False。
         """
+        ...
+
+    def force_delete_lock(self, lock_name: str) -> bool:
+        """Explicit administrative delete without holder fencing."""
         ...
 
     def delete_expired_locks_by_prefix(self, prefix: str, *, now: datetime) -> int:
