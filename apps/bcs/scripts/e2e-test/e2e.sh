@@ -107,6 +107,7 @@ source "$SCRIPT_DIR/fuse_cards_story.sh"
 source "$SCRIPT_DIR/delivery_fault_isolation_story.sh"
 source "$SCRIPT_DIR/caller_config_storage_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
+source "$SCRIPT_DIR/managers_sync_concurrent.sh"
 
 # Both registration paths share parent identity while each child keeps its own
 # credential and lifecycle. Run through the live server used by Singlebox.
