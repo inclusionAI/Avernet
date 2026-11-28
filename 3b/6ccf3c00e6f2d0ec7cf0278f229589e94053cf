@@ -1,0 +1,36 @@
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  s_f410cc4c683e14::t_b51131f7b3126a 228
+  s_f410cc4c683e14::t_d83916d2d666d8 173-184
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_f410cc4c683e14::t_1a4ecb737dd8fa 22,29-30
+  s_f410cc4c683e14::t_c4df4a804b21f5 6
+  s_f410cc4c683e14::t_f061246087ca16 57,78
+  s_f410cc4c683e14::t_bb0dc61544843d 58-77
+  s_f410cc4c683e14::t_7d1e0d26f3fef0 92-96
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  s_f410cc4c683e14::t_7cfc7cd4c2a523 610-627,630,653-655,704
+  s_f410cc4c683e14::t_64ad6acb764ed2 656-699,701-702,706-707
+  s_f410cc4c683e14::t_3d146c60f3391c 700,703,705
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_f410cc4c683e14::t_1b1f0cd36eed90 186
+  s_f410cc4c683e14::t_9e454bde5bec02 63-64,69
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_f410cc4c683e14::t_1a5a8e25936ca1 667,670-682,702,717-718
+  s_f410cc4c683e14::t_f468ab27c62eca 668-669,683-701,703-716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3b6ccf3c00e6f2d0ec7cf0278f229589e94053cf",
+  "prompts": {},
+  "sessions": {
+    "s_f410cc4c683e14": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "67f12881-1fab-4d35-a900-779de257603c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

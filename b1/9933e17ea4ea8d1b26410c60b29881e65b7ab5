@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/expert_chat/router.py
+  s_c3ece772cfb1b0::t_068f770d04e4b1 100-104
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_c3ece772cfb1b0::t_068f770d04e4b1 329,332,335-356,359,363-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b19933e17ea4ea8d1b26410c60b29881e65b7ab5",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

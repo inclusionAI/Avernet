@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/callback-compensation.md
+  h_bb3ca6fb13c5df 122-128,137-140
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/callback-compensation-authority.ts
+  h_bb3ca6fb13c5df 1-62
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/callback-compensation-repository.ts
+  h_bb3ca6fb13c5df 2,80-82,85-87,90,96-98
+apps/evolverun/clawweb/public/modules/workflow/server/services/callback-compensation/__tests__/authority-race.test.ts
+  h_bb3ca6fb13c5df 1-216
+apps/evolverun/clawweb/public/modules/workflow/server/services/callback-compensation/service.ts
+  h_bb3ca6fb13c5df 6,104-105,144,165-166,274-275,277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c47a3fecbe86b4f10517425bb4050de64c1dff3",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
