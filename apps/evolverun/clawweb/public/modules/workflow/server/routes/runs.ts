@@ -408,7 +408,7 @@ export function createRunsRouter(
     try {
       const flowId = String(req.params.flowId);
 
-      const run = await flowRunRepo.findByFlowId(flowId);
+      const run = await flowRunRepo.findForAbort(flowId);
       if (!run) {
         res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
         return;
@@ -431,16 +431,18 @@ export function createRunsRouter(
 
       // 1. Update flow_runs status to "cancelled" with abort info, set completed_at
       const completedAt = Math.floor(Date.now() / 1000);
-      const updated = await flowRunRepo.abort(flowId, reason);
+      // Capture once: never re-read a newer attempt to authorize this request or cleanup.
+      const retryEpoch = run.retry_epoch ?? undefined;
+      const updated = await flowRunRepo.abort(flowId, reason, retryEpoch);
 
       if (!updated) {
-        res.status(500).json({ error: "Internal Server Error", message: "中止操作失败：无法更新流程状态" });
+        res.status(409).json({ error: "Conflict", message: "流程状态或执行轮次已变化，中止操作未写入" });
         return;
       }
 
       // 2. Reconcile all still-running node_executions to "skipped" with abort reason
       //    This writes the abort action into the node process table (node_executions)
-      const reconciledNodes = await nodeExecRepo.reconcileStaleRunning(flowId, "cancelled", `Workflow aborted by ${operatorName}(${operatorId}): ${reason}`);
+      const reconciledNodes = await nodeExecRepo.reconcileStaleRunning(flowId, "cancelled", `Workflow aborted by ${operatorName}(${operatorId}): ${reason}`, retryEpoch);
 
       // 3. Release flow control slots if available
       if (flowControlRepo) {

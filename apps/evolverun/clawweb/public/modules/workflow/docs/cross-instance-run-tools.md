@@ -61,6 +61,14 @@ OCB 的内部 ClawWeb Host 从 `@avernet/workflow` 导入此 Repository 和路�
 
 ## 发布顺序
 
+本节原有顺序描述查询/重试邮箱能力依赖；**不能据此单独先发当前整版 server**。
+本版同时移除 4505/服务端业务超时校验，旧 120 分钟误判 writer 会真实写成 failed。
+必须先暂停/隔离错误旧 writer 并处理在途/排队请求，再发 server/schema 契约，
+升级验证 Mind 和遗留 TaskGuard，最后恢复写入。不能隔离时不得单独发布去校验版。
+Nginx 应急过滤默认 off；本版没有可保留旧预算校验的内置 runtime feature flag。
+详见 [发布门禁](../../../../docs/workflow-timeout-write-policy.md#release-gate-and-rollback)。
+以下步骤都在该隔离窗口内执行：
+
 1. Avernet ClawWeb Shared 数据库迁移 v119：增加 `flow_retry_requests.options_json`，增加共享列表查询索引。
 2. 发布 Avernet workflow 模块和 OCB Host 接线，再更新所有 ClawMind 实例（本地库迁移 v38）。
 3. 用 A 实例创建的 flow，在 B 实例执行上面的列表、详情和日志查询。
@@ -91,7 +99,9 @@ placement, and schema v157 rollout, see [flow run lineage](flow-run-lineage.md).
 These fields do not change the separate scoped run-read summary contract below.
 
 All paths below are relative to `/api/internal`, behind the host's service signature middleware.
-`POST /runs` accepts optional `state_json` as a serialized JSON object. When present, the run and its initial state are inserted in one SQL statement. Clients that omit the field remain compatible. Deploy this server change before updating ClawMind; existing runs with null state are unchanged.
+`POST /runs` accepts optional `state_json` as a serialized JSON object. When present, the run and its initial state are inserted in one SQL statement. Clients that omit the field remain compatible; existing runs with null state are unchanged.
+The server must understand this field before clients use it, but that additive
+API dependency does not waive the isolation-first release gate above.
 Read requests use POST so their scope and filters are covered by the existing body signature.
 
 | Endpoint | Request body | Response `data` |
@@ -133,7 +143,11 @@ options in the response; existing open requests retain their original parameters
 
 - 迟到的 completion、status 和 retry-resume 写不能重新打开已中止运行；取消保护同样适用于不提供 `retry_epoch` 的旧客户端。
 - `POST /retry-requests` 对已中止运行返回 **409**，即使邮箱已有 pending/claimed 请求也不能以去重成功绕过取消。`POST /retry-requests/claim` 在候选查询和实际 CAS 领取时均排除已中止运行，包含过期 claimed 请求。
-- `PUT /runs/:flowId/status`、`PUT /runs/:flowId/retry-failed`、`PUT /runs/:flowId/retry-resume` 不得用重试撤销中止，取消冲突返回 **409**。retry-failed 被拒绝时，节点重置与运行状态修改必须一起回滚。status 分类读取的数据库故障仍返回 **500**，不得误报为记录不存在。
+- `PUT /runs/:flowId/status`、`PUT /runs/:flowId/retry-failed`、`PUT /runs/:flowId/retry-resume` 不得用重试撤销中止，取消冲突返回 **409**。`retry-failed` 已废弃：已有运行始终 **409**，引导协调 `retry-resume`；只读检查，不重置节点也不修改运行。缺失运行仍 **404**，无数据库 **503**，读取异常 **500**。status 分类读取的数据库故障仍返回 **500**，不得误报为记录不存在。
+- 人工重试必须使用原执行状态捕获的 `retry_epoch + 1` 调用 `retry-resume`；不得读共享最新 epoch 自动放行旧请求。默认选择 failed/blocked/waiting 节点；显式节点 ID 可重跑已成功片段，但必须进入新代次。`status running` 不能重新打开任何终态（包括 epoch 0）。`retry-resume` 保留原始开始时间及节点历史，同轮 running 响应丢失重放不再次写入。
+- `retry-resume` 可选 `state_json` 必须是含匹配下一代 `retryEpoch`（TaskGuard）或 `recoveryEpoch`（Mind）的对象 JSON 字符串；至少有一种，两者出现须一致，坏值不得 fallback；显式 `workflowId` 须匹配原运行。与 epoch+1 同事务、单次 UPDATE 持久化 canonical state 和已有 `params_json._clawmind_state`，保留 embedded 的字符串/对象形态及其他参数。非法请求 **400**，保存的 checkpoint/embedded 内容或代次矛盾 **409**，DB 异常 **500** 全部回滚；不得回退无 fence 的 `/state`。同代 running 重放只读，不覆盖后续 checkpoint；省略 state 保持 Mind 既有兼容行为。
+- `/state` 使用 `{ state_json, retry_epoch? }`，`/phase` 使用 `{ phase, retry_epoch? }`。省略仅表示 epoch 0；正代次 state 必须显式携带匹配的 `retryEpoch`/`recoveryEpoch`。事务锁内匹配原执行代次，终态只允许同值只读确认；旧代/不同值 **409**。state 镜像把 fanout 可信合并后的结果同步到已有 embedded checkpoint（保留字符串/对象形态），两存储同事务回滚，避免第二次 retry 因合法 progress 镜像产生双存分歧。
+- `/result-json` 与 `/started-at` 同样废弃，route 和直接 repo 均只读：合法已有运行 **409**、缺失 **404**、无 DB **503**、读错 **500**，不改 result/started_at/completed_at、不触 observer。final result 只归 fenced completion，retry-resume 保留原 start；Mind/TaskGuard 必须去掉重试依赖旧 resetStartedAt 的调用，不能靠它重置时钟。
 - 已入邮箱、已领取或已保存为 retry intent 都不是执行授权。取消发生在领取之后时，ClawMind 仍需在实际尝试、Guardian 救援及重启恢复前重新检查权威状态，并结束已取消请求而不是反复 release；回调的实际发送和网络重投也需要取消检查。
 
 上述服务端保护需与匹配的 ClawMind 取消检查和信号接线一起发布。节点截止或 watchdog 请求 abort 不自动等同于用户中止。中止不会撤销已发生的外部副作用，也不保证已交付引擎的工具或模型请求立即停止。

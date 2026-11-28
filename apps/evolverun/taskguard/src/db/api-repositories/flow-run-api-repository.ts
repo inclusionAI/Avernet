@@ -8,6 +8,9 @@ import type { ApiClient } from "../api-client.js";
 import { FlowRunRepository, type FlowRunRow, type FlowRunInsert, type FlowRunCompletion, type FindFlowRunsOptions } from "../repositories/flow-run-repository.js";
 import type { IFlowRunRepository, FlowRunReapFields } from "../repositories/types.js";
 import { safeJsonStringify } from "../safe-json.js";
+import { expectedRetryEpoch } from "../repositories/retry-epoch.js";
+import { assertWriteAccepted } from "./write-response.js";
+import { validateRetryCheckpoint } from "../repositories/retry-checkpoint.js";
 
 // ── API Request/Response types ──
 
@@ -43,6 +46,8 @@ export class FlowRunApiRepository implements IFlowRunRepository {
       workflow_id: row.workflow_id ?? "",
       workflow_title: row.workflow_title ?? null,
       status: row.status ?? "",
+      retry_epoch: row.retry_epoch === undefined ? 0 : row.retry_epoch,
+      state_json: row.state_json ?? null,
       params_json: row.params_json ?? null,
       input_json: row.input_json ?? null,
       result_json: row.result_json ?? null,
@@ -113,9 +118,11 @@ export class FlowRunApiRepository implements IFlowRunRepository {
   }
 
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
+    const retryEpoch = expectedRetryEpoch(completion.retryEpoch);
     try {
       const body: Record<string, unknown> = {
         status: completion.status,
+        retry_epoch: retryEpoch,
         total_duration_ms: completion.totalDurationMs ?? null,
         total_token_usage: completion.totalTokenUsage ?? null,
         completed_at: completion.completedAt,
@@ -124,19 +131,13 @@ export class FlowRunApiRepository implements IFlowRunRepository {
       if (completion.inputJson !== undefined) body.input_json = completion.inputJson;
       if (completion.succeededCount !== undefined) body.succeeded_count = completion.succeededCount;
       if (completion.failedCount !== undefined) body.failed_count = completion.failedCount;
-      if (completion.currentPhase !== undefined) body.phase = completion.currentPhase;
+      if (completion.currentPhase !== undefined) body.current_phase = completion.currentPhase;
 
       const resp = await this.api.put<{ success: boolean; data: any }>(
         `/api/internal/runs/${encodeURIComponent(flowId)}/completion`,
         body,
       );
-      if (!resp.ok) {
-        // The terminal write must be loud: throwing lets the caller's
-        // withRetry kick in and surfaces the failure in run logs. Returning
-        // false here previously made completion failures silent — the flow
-        // then stayed "running" until the timeout watchdog reaped it.
-        throw new Error(`updateCompletion rejected by server: HTTP ${resp.status} ${resp.error ?? ""}`.trim());
-      }
+      assertWriteAccepted(resp, "updateCompletion");
       return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -147,26 +148,29 @@ export class FlowRunApiRepository implements IFlowRunRepository {
 
   /**
    * CAS-claim a timeout reap: the server transitions the row to failed only
-   * when it is not already terminal. Exactly one engine process sharing the
-   * DB wins — losers get claimed=false and skip logging/notifications.
+   * when it is running in the expected retry epoch. Exactly one engine process
+   * sharing the DB wins — losers get claimed=false and skip logging/notifications.
    * Throws on transport/5xx errors (callers treat those differently from
    * simply losing the race).
    */
   async markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean> {
+    const retryEpoch = expectedRetryEpoch(fields.retryEpoch);
     try {
       const resp = await this.api.put<{ claimed?: boolean }>(
         `/api/internal/runs/${encodeURIComponent(flowId)}/fail-if-running`,
         {
           reason: fields.reason,
+          retry_epoch: retryEpoch,
           current_phase: fields.currentPhase,
           total_duration_ms: fields.totalDurationMs ?? null,
           completed_at: fields.completedAt,
         },
       );
-      if (!resp.ok) {
-        throw new Error(`markFailedIfRunning rejected by server: HTTP ${resp.status} ${resp.error ?? ""}`.trim());
+      assertWriteAccepted(resp, "markFailedIfRunning");
+      if (typeof resp.data?.claimed !== "boolean") {
+        throw Object.assign(new Error("markFailedIfRunning returned no claim acknowledgement"), { status: resp.status });
       }
-      return resp.data?.claimed === true;
+      return resp.data.claimed;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[FlowRunApi] markFailedIfRunning failed: ${msg}`);
@@ -188,32 +192,31 @@ export class FlowRunApiRepository implements IFlowRunRepository {
     }
   }
 
-  async updateStatus(flowId: string, status: string): Promise<boolean> {
-    try {
-      const resp = await this.api.put<{ success: boolean; data: any }>(
-        `/api/internal/runs/${encodeURIComponent(flowId)}/status`,
-        { status },
-      );
-      return resp.ok;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[FlowRunApi] updateStatus failed: ${msg}`);
-      return false;
-    }
+  async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
+    const epoch = expectedRetryEpoch(retryEpoch);
+    if (!["running", "waiting", "blocked", "pending"].includes(status)) return false;
+    const resp = await this.api.put(`/api/internal/runs/${encodeURIComponent(flowId)}/status`,
+      { status, retry_epoch: epoch });
+    assertWriteAccepted(resp, "updateStatus");
+    return true;
   }
 
-  async updateCurrentPhase(flowId: string, currentPhase: string): Promise<boolean> {
-    try {
-      const resp = await this.api.put<{ success: boolean; data: any }>(
-        `/api/internal/runs/${encodeURIComponent(flowId)}/phase`,
-        { phase: currentPhase },
-      );
-      return resp.ok;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[FlowRunApi] updateCurrentPhase failed: ${msg}`);
-      return false;
-    }
+  async updateCurrentPhase(flowId: string, currentPhase: string, retryEpoch?: number): Promise<boolean> {
+    const body: Record<string, unknown> = { current_phase: currentPhase, phase: currentPhase };
+    if (retryEpoch !== undefined) body.retry_epoch = expectedRetryEpoch(retryEpoch);
+    const resp = await this.api.put(`/api/internal/runs/${encodeURIComponent(flowId)}/phase`, body);
+    assertWriteAccepted(resp, "updateCurrentPhase");
+    return true;
+  }
+
+  async resumeForRetry(flowId: string, retryEpoch: number, stateJson?: string): Promise<'resumed' | 'not_found' | 'conflict'> {
+    expectedRetryEpoch(retryEpoch);
+    if (retryEpoch < 1) throw new TypeError("retry epoch must advance to a positive safe integer");
+    if (stateJson !== undefined) validateRetryCheckpoint(stateJson, retryEpoch);
+    const resp = await this.api.put(`/api/internal/runs/${encodeURIComponent(flowId)}/retry-resume`,
+      { retry_epoch: retryEpoch, ...(stateJson === undefined ? {} : { state_json: stateJson }) });
+    assertWriteAccepted(resp, "resumeForRetry");
+    return 'resumed';
   }
 
   async updateNodeCount(flowId: string, nodeCount: number): Promise<boolean> {
@@ -259,11 +262,11 @@ export class FlowRunApiRepository implements IFlowRunRepository {
     }
   }
 
-  async findStaleRunning(cutoffEpochSecs: number, limit = 100): Promise<FlowRunRow[]> {
+  async findStaleRunning(cutoffEpochSecs: number, limit = 100, offset = 0): Promise<FlowRunRow[]> {
     try {
       const resp = await this.api.get<{ success: boolean; data: any[]; total?: number; limit?: number; offset?: number }>(
         "/api/internal/runs",
-        { status: "running", limit: String(limit) },
+        { status: "running", limit: String(limit), offset: String(offset) },
       );
       if (!resp.ok) return [];
       const rows = Array.isArray(resp.data) ? resp.data : (resp.data?.data ?? []);

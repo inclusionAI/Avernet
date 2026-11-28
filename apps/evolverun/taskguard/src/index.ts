@@ -1,3 +1,4 @@
+import { captureStateAttempt } from "./recovery/attempt.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import type { TaskguardExtensions } from "./community/types.js";
 
@@ -3957,7 +3958,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     // the only safety net that stops abandoned/zombie flows from sitting in
     // "running" forever. Tunable via application.yaml (execution.flowTimeoutMinutes /
     // execution.flowReapIntervalSecs) with env overrides (CLAWMIND_FLOW_TIMEOUT_MINUTES /
-    // CLAWMIND_FLOW_REAP_INTERVAL_SECS). Set flowTimeoutMinutes=0 to disable.
+    // CLAWMIND_FLOW_REAP_INTERVAL_SECS). Zero disables only runs frozen at zero.
     //
     // NOTE: _flowTimeoutMs is read dynamically on each sweep via loadConfig()
     // instead of being cached at startup. This ensures DB cm_app_config overrides
@@ -3965,7 +3966,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     // the DB config may not be ready yet, causing loadConfig() to fall back to
     // local application.yaml with a stale value.
     const FLOW_REAP_INTERVAL_MS = loadConfig().app.execution.flowReapIntervalSecs * 1000;
-    if (loadConfig().app.execution.flowTimeoutMinutes > 0) {
+    {
       console.info(
         `[taskguard] flow-timeout watchdog: timeout=${loadConfig().app.execution.flowTimeoutMinutes}min ` +
         `interval=${loadConfig().app.execution.flowReapIntervalSecs}s`,
@@ -3984,7 +3985,8 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
         // and the fail() caller share this reference.
         const taskFlow = api.runtime?.taskFlow as Record<string, unknown> | undefined;
 
-        // Callback 1: read FlowState from TaskFlow for richer failure diagnostics.
+        const scannedTaskFlows = new Map<string, { revision: number; retryEpoch: number }>();
+        // Capture state, attempt and revision together, before the DB timeout claim.
         const getStateForFlow = async (flowId: string): Promise<FlowState | undefined> => {
           try {
             if (!taskFlow) return undefined;
@@ -4002,7 +4004,12 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
             if (!flow) return undefined;
             const stateJson = flow.stateJson;
             if (typeof stateJson !== "string") return undefined;
-            return JSON.parse(stateJson) as FlowState;
+            const state = JSON.parse(stateJson) as FlowState;
+            const retryEpoch = captureStateAttempt(flow, state);
+            if (flow.status === "running" && typeof flow.revision === "number") {
+              scannedTaskFlows.set(flowId, { revision: flow.revision, retryEpoch });
+            }
+            return state;
           } catch {
             return undefined;
           }
@@ -4010,49 +4017,29 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
 
         // Callback 2: fail the flow in TaskFlow to prevent the executeLoop from
         // overwriting the "failed" status with "succeeded" after abort.
-        const failFlowInTaskFlow = async (flowId: string, stateJson: string, blockedSummary: string): Promise<boolean> => {
-          if (!taskFlow || typeof taskFlow.fail !== "function") return false;
-          try {
-            // Read the current revision from TaskFlow so fail() can CAS.
-            const getAnyOwner = taskFlow.getAnyOwner;
-            let flow: Record<string, unknown> | null = null;
-            if (typeof getAnyOwner === "function") {
-              flow = await (getAnyOwner as (id: string) => Promise<Record<string, unknown> | null>).call(taskFlow, flowId);
-            }
-            const revision = (flow as Record<string, unknown> | null)?.revision as number | undefined;
-            await (taskFlow.fail as (params: Record<string, unknown>) => Promise<unknown>).call(taskFlow, {
-              flowId,
-              expectedRevision: revision,
-              stateJson,
-              blockedSummary,
-            });
-            return true;
-          } catch {
-            // Revision conflict or already terminal — executeLoop may have already
-            // transitioned the flow. Return false to signal that the CAS didn't apply.
-            return false;
-          }
+        const failFlowInTaskFlow = async (flowId: string, stateJson: string, blockedSummary: string, retryEpoch?: number): Promise<boolean> => {
+          const snapshot = scannedTaskFlows.get(flowId);
+          if (!taskFlow || typeof taskFlow.fail !== "function" || !snapshot || snapshot.retryEpoch !== retryEpoch) return false;
+          const result = await (taskFlow.fail as (params: Record<string, unknown>) => Promise<{ applied?: boolean }>).call(taskFlow, {
+            flowId, expectedRevision: snapshot.revision, stateJson, blockedSummary,
+          });
+          return result?.applied === true;
         };
 
         // Read timeout dynamically each sweep — loadConfig() may return a stale
         // value at startup (before initConfig loads DB cm_app_config), but after
         // initConfig completes the cached config reflects DB overrides.
         const _flowTimeoutMs = loadConfig().app.execution.flowTimeoutMinutes * 60 * 1000;
-        if (_flowTimeoutMs <= 0) return; // watchdog disabled
 
         void reapStaleRunningFlows(_flowTimeoutMs, 100, getStateForFlow, failFlowInTaskFlow, async (workflowId) => {
           // Resolve per-workflow flowTimeoutMinutes, DB-first (mirrors runtime
           // resolveWorkflow) with local pack YAML as fallback. Returns undefined
           // to fall back to the global timeoutMs when the workflow has no
-          // per-workflow override or can't be resolved.
-          try {
-            // 1. Check local pack catalog
-            const catalog = loadWorkflowPackCatalog();
-            const wf = await resolveWorkflow(workflowId, _watchdogSpecRepo, catalog.workflows);
-            return wf?.spec?.flowTimeoutMinutes;
-          } catch {
-            return undefined;
-          }
+          // per-workflow override. Unavailable/invalid definitions defer this run.
+          const catalog = loadWorkflowPackCatalog();
+          const wf = await resolveWorkflow(workflowId, _watchdogSpecRepo, catalog.workflows);
+          if (!wf) throw new Error(`Workflow definition unavailable: ${workflowId}`);
+          return wf.spec.flowTimeoutMinutes;
         })
           .then((n) => {
             if (n > 0) console.warn(`[taskguard] flow-timeout watchdog reaped ${n} stuck flow(s) → failed`);
@@ -4060,8 +4047,6 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           .catch((e) => { console.error(`[taskguard] flow-timeout watchdog error: ${e?.message ?? e}`); });
       }, FLOW_REAP_INTERVAL_MS);
       _flowTimeoutTimer.unref?.(); // don't prevent process exit
-    } else {
-      console.info("[taskguard] flow-timeout watchdog: disabled (execution.flowTimeoutMinutes=0) — flows may run to completion");
     }
 
     // ── Orphaned flow recovery is deferred to buildDeps() which runs when

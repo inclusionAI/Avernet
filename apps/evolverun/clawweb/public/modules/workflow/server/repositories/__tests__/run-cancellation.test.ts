@@ -16,8 +16,8 @@ function fixture(status: string, epoch: number | null | 'absent') {
   CREATE TABLE node_executions (flow_id TEXT, status TEXT, error_text TEXT, duration_ms INTEGER, completed_at INTEGER, gmt_modified INTEGER);
   INSERT INTO node_executions VALUES ('flow', 'failed', 'original error', 10, 999, 999);`);
   raw.prepare(`INSERT INTO flow_runs (flow_id, status, started_at, completed_at, gmt_modified, result_json, failed_count${epoch === 'absent' ? '' : ', retry_epoch'})
-    VALUES ('flow', ?, 123, 999, 999, 'user aborted', 1${epoch === 'absent' ? '' : ', ?'})`)
-    .run(...(epoch === 'absent' ? [status] : [status, epoch]));
+    VALUES ('flow', ?, 123, ?, 999, 'user aborted', 1${epoch === 'absent' ? '' : ', ?'})`)
+    .run(...(epoch === 'absent' ? [status, status === 'running' ? null : 999] : [status, status === 'running' ? null : 999, epoch]));
   const db = new SqliteDatabase(raw);
   return { raw, db, runs: new FlowRunRepository(db), snapshot: () => raw.prepare('SELECT * FROM flow_runs').get() };
 }
@@ -63,7 +63,8 @@ for (const cancelled of ['cancelled', 'canceled']) {
           try {
             const before = snapshot();
             expect(await runs.resumeForRetry('flow', (stored ?? 0) + 1)).toBe('conflict');
-            expect(await runs.resumeForRetry('flow', stored ?? 0)).toBe('conflict');
+            if ((stored ?? 0) === 0) await expect(runs.resumeForRetry('flow', 0)).rejects.toThrow(/epoch/);
+            else expect(await runs.resumeForRetry('flow', stored!)).toBe('conflict');
             expect(snapshot()).toEqual(before);
           } finally { await db.close(); }
         });
@@ -75,7 +76,7 @@ for (const cancelled of ['cancelled', 'canceled']) {
 it('a real user abort wins over no-epoch late failure and reopening attempts', async () => {
   const { db, runs, snapshot } = fixture('running', 2);
   try {
-    expect(await runs.abort('flow', 'stop now')).toBe(true);
+    expect(await runs.abort('flow', 'stop now', 2)).toBe(true);
     const aborted = snapshot();
     expect(await runs.updateCompletion('flow', { status: 'failed', completedAt: 2000, resultJson: 'late failure', succeededCount: 0, failedCount: 1 })).toBe(false);
     expect(await runs.updateStatus('flow', 'running')).toBe(false);
@@ -84,29 +85,37 @@ it('a real user abort wins over no-epoch late failure and reopening attempts', a
   } finally { await db.close(); }
 });
 
-it.each(['absent', null, 0, 2] as const)('ordinary failed legacy retry stays available (epoch=%s)', async (epoch) => {
+it.each(['absent', null, 0, 2] as const)('failed retry requires a coordinated next epoch (epoch=%s)', async (epoch) => {
   const { db, raw, runs } = fixture('failed', epoch);
   try {
+    const before = raw.prepare('SELECT * FROM flow_runs').get();
     expect(await runs.resetFailedForRetry('flow', tx => new NodeExecutionRepository(tx).resetFailedByFlowId('flow', tx)))
-      .toEqual({ status: 'updated', resetCount: 1 });
-    expect(await runs.updateStatus('flow', 'running')).toBe(true);
-    expect(await runs.updateCompletion('flow', { status: 'succeeded', completedAt: 2000, succeededCount: 1, failedCount: 0 })).toBe(true);
-    expect(raw.prepare('SELECT status, started_at FROM flow_runs').get()).toEqual({ status: 'succeeded', started_at: 123 });
+      .toEqual({ status: 'conflict' });
+    expect(raw.prepare('SELECT * FROM flow_runs').get()).toEqual(before);
+    if (epoch === 'absent') {
+      await expect(runs.resumeForRetry('flow', 1)).rejects.toThrow(/retry_epoch/);
+    } else {
+      const nextEpoch = (epoch ?? 0) + 1;
+      expect(await runs.resumeForRetry('flow', nextEpoch)).toBe('resumed');
+      expect(await runs.updateCompletion('flow', { status: 'succeeded', completedAt: 2000, succeededCount: 1, failedCount: 0, retryEpoch: nextEpoch })).toBe(true);
+      expect(raw.prepare('SELECT status, started_at FROM flow_runs').get()).toEqual({ status: 'succeeded', started_at: 123 });
+    }
+    expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'failed' });
   } finally { await db.close(); }
 });
 
-it('rolls back node resets if the final guarded run write loses eligibility', async () => {
+it('never invokes a legacy reset callback even when it could mutate parent and children', async () => {
   const { db, raw, runs, snapshot } = fixture('failed', 0);
   try {
     const before = snapshot();
     const beforeNodes = raw.prepare('SELECT * FROM node_executions').all();
-    expect(await runs.resetFailedForRetry('flow', async tx => {
+    const reset = vi.fn(async (tx) => {
       const count = await new NodeExecutionRepository(tx).resetFailedByFlowId('flow', tx);
-      // Fault injection after the child write proves a rejected final CAS must
-      // throw through the transaction before mapping back to a conflict.
       await tx.exec("UPDATE flow_runs SET status = 'cancelled' WHERE flow_id = ?", ['flow']);
       return count;
-    })).toEqual({ status: 'conflict' });
+    });
+    expect(await runs.resetFailedForRetry('flow', reset)).toEqual({ status: 'conflict' });
+    expect(reset).not.toHaveBeenCalled();
     expect(snapshot()).toEqual(before);
     expect(raw.prepare('SELECT * FROM node_executions').all()).toEqual(beforeNodes);
   } finally { await db.close(); }

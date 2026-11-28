@@ -11,6 +11,8 @@ import type { WorkflowSpecRepository } from "../../repositories/workflow-spec-re
 import { OrdinaryRequestError } from "../../services/ordinary-run-request.js";
 import { createAutoHealRunRouter } from "../auto-heal-run.js";
 import { createInternalApprovalCardsRouter } from "../internal/approval-cards.js";
+import { createInternalNodeExecutionsRouter } from "../internal/node-executions.js";
+import type { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
 import { createInternalEventsRouter } from "../internal/events.js";
 import { createInternalRunsRouter } from "../internal/runs.js";
 import { registerWorkflowListRoutes, workflowsCache } from "../workflows-list.js";
@@ -244,4 +246,52 @@ describe("workflow route exception logging without response changes", () => {
     expect(console.warn).toHaveBeenCalledWith("[auto-heal] run failed:", expect.any(String));
     expect(console.error).not.toHaveBeenCalled();
   });
+});
+
+// Exercise the route call sites as well as the sink. A key enumeration can be
+// expensive even when a downstream logger ultimately discards its argument.
+describe("workflow closeout PUT logging", () => {
+  const flowId = "private-flow-" + "a".repeat(1200);
+  const error = new Error("private-storage-message");
+  for (const [family, action] of [["runs", "completion"], ["node-executions", "reconcile-stale-running"]] as const) {
+    const runs = family === "runs";
+    it.each(runs ? [200, 400, 404, 409, 500, 503] : [200, 400, 500, 503])(`${family}: only one fixed log for HTTP %s`, async status => {
+      const update = vi.fn().mockResolvedValue(status === 404 || status === 409 ? "rejected" : "updated");
+      const findStatusByFlowId = vi.fn().mockResolvedValue(status === 409 ? { status: "failed" } : null);
+      const reconcile = vi.fn().mockResolvedValue(3);
+      if (status === 500) { update.mockRejectedValue(error); reconcile.mockRejectedValue(error); }
+      const router = Router();
+      const ownKeys = vi.fn(Reflect.ownKeys);
+      router.use((req, _res, next) => { req.body = new Proxy(req.body, { ownKeys }); next(); });
+      router.use(`/api/internal/${family}`, runs
+        ? createInternalRunsRouter(status === 503 ? null : { updateCompletionOutcome: update, findStatusByFlowId } as unknown as FlowRunRepository)
+        : createInternalNodeExecutionsRouter(status === 503 ? null : { reconcileStaleRunning: reconcile } as unknown as NodeExecutionRepository));
+      const base = await listen(router);
+      const body = { status: status === 400 ? "" : "succeeded", flow_status: status === 400 ? "" : "failed",
+        result_json: "private-result", input_json: "private-input", "private-field-name": 1 };
+      const response = await fetch(`${base}/api/internal/${family}/${flowId}/${action}?q=private-query`, {
+        method: "PUT", headers: { "content-type": "application/json", "x-test": "private-header" }, body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(status);
+      const result = await response.json();
+      if (status === 200) {
+        expect(result).toEqual({ success: true, data: runs ? true : { flowId, reconciled: 3 } });
+        if (runs) expect(update).toHaveBeenCalledExactlyOnceWith(flowId, expect.objectContaining({ resultJson: body.result_json, inputJson: body.input_json }));
+        else expect(reconcile).toHaveBeenCalledExactlyOnceWith(flowId, body.flow_status, undefined, undefined);
+      } else if (status === 404 || status === 409) {
+        expect(findStatusByFlowId).toHaveBeenCalledExactlyOnceWith(flowId);
+        expect(result).toMatchObject({ success: false, message: expect.stringContaining(flowId) });
+      } else if (status === 500) expect(result).toEqual({ success: false, error: "Internal Server Error", message: error.message });
+      expect(ownKeys).not.toHaveBeenCalled();
+      await flushInternalApiLog();
+      const lines = files.appendFile.mock.calls.flatMap(call => String(call[1]).trimEnd().split("\n"));
+      expect(lines).toHaveLength(1);
+      const { line, entry } = lastFileLog();
+      expect(line).toContain(` ${status < 400 ? "INFO" : status < 500 ? "WARN" : "ERROR"} [internal-api] `);
+      expect(entry).toEqual({ ts: expect.any(String), method: "PUT", path: `/${family}/:flowId/${action}`, status,
+        ...(status >= 500 ? { stack: "Workflow closeout failure observed (exception withheld)", stackSource: "observation" } : {}) });
+      const summaries = [console.log, console.warn, console.error].flatMap(fn => vi.mocked(fn).mock.calls);
+      expect(JSON.stringify({ lines, summaries, diagnostics })).not.toContain("private-");
+    });
+  }
 });

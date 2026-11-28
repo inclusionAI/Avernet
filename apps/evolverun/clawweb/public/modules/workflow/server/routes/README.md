@@ -33,6 +33,32 @@ messages passed as `%s` data arguments and the original stack kept separate.
 Request-derived `%s`, `%d`, `%j`, and `%%` text must remain literal; it must not
 consume, reinterpret, or truncate the stack or approved structured metadata.
 
+## Completion and stale-node reconciliation (PUT)
+
+The public internal logger records one outcome per handled closeout, not a
+request preview. Its only request-specific field is the numeric HTTP status;
+method and path are `PUT` and one of two fixed templates:
+
+- `/runs/:flowId/completion`
+- `/node-executions/:flowId/reconcile-stale-running`
+
+These routes do not enumerate body keys or capture request/response bodies,
+headers, IDs, query strings, domain status, or exception details for logging.
+On 5xx the file, console summary and HTTP diagnostic handoff use a fixed
+observation, **not a call stack**. If the completion handler's terminal observer
+rejects, the route wrapper emits only a fixed warning. The separate
+`fail-if-running` caller keeps its bounded, redacted ID, message and stack.
+Responses, persistence and observer delivery are unchanged.
+
+**Boundary:** metadata-only applies to these handlers' request logs, not to all
+logs for the request. Repository diagnostics and independent business observers
+have their own logging policies and can still record IDs. Host HTTP middleware
+is also separate. In particular, the default standalone public host's JSON
+parser can reject a request before either handler runs: **audit its existing
+parser-error logging separately**. This change does not alter the parser, host
+error handling, or background workflows. See [shared diagnostic redaction](../../../../shared/server/logging/README.md).
+
+
 ## Scope and compatibility
 
 The enterprise HTTP middleware applies this policy to an explicit set of Task
