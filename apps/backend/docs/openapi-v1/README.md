@@ -1803,6 +1803,47 @@ regenerated `bots.openapi.json` plus matching route/security configuration to
 the independently managed OCB/Sofapy Gateway. Avernet's broad
 `/openapi/v1/bots/**` forwarding/security rule already covers these paths.
 
+### ✅ Todo workbench, templates and stages — **IMPLEMENTED**
+Todo routes live under `/openapi/v1/collaboration/tasks`. The workbench is a
+browser self-service surface: every route is human-scoped, `user_id` is
+required, and `TASK_TODO_ADMISSION` refuses application-only callers. Paths in
+the table are relative to that prefix. Space
+membership and roles are checked by `SpaceAccessService`; missing Todos and
+templates answer 404, access denial answers 403, and invalid lifecycle
+transitions answer 409. The
+authoritative product states, template/stage semantics and execution contract
+are in [core/task/todos](../../src/agentclaw/community/core/task/todos/README.md);
+this table is the HTTP surface only.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/todo-template-capabilities` | Exact V1 template features accepted by this build (user-invariant payload) | `Envelope[TodoTemplateCapabilities]` |
+| POST | `/todo-templates` | Create a template identity and first draft (Space Admin) | `201 Envelope[TodoTemplateDetail]` |
+| GET | `/todo-templates?space_id=` | List templates visible to a Space member (optional `status`) | `Envelope[Page[TodoTemplateRecord]]` |
+| GET | `/todo-templates/{template_id}` | Template metadata and ordered versions | `Envelope[TodoTemplateDetail]` |
+| GET | `/todo-templates/{template_id}/versions/{version_id}` | Read one exact draft or published version | `Envelope[TodoTemplateVersion]` |
+| POST | `/todo-templates/{template_id}/versions` | Copy the latest version into a new editable draft (Admin) | `201 Envelope[TodoTemplateVersion]` |
+| PUT | `/todo-templates/{template_id}/versions/{version_id}` | Replace one editable draft definition (Admin) | `Envelope[TodoTemplateVersion]` |
+| POST | `/todo-templates/{template_id}/versions/{version_id}/validate` | Run deterministic capability validation on a stored version | `Envelope[TodoTemplateVersion]` |
+| POST | `/todo-templates/{template_id}/versions/{version_id}/publish` | Publish one validated draft as immutable (Admin) | `Envelope[TodoTemplateVersion]` |
+| POST | `/todo-templates/{template_id}/archive` | Make a template read-only; no new drafts or Todos (Admin) | `Envelope[TodoTemplateRecord]` |
+| POST | `/todo-templates/{template_id}/activate` | Reactivate a previously archived template (Admin) | `Envelope[TodoTemplateRecord]` |
+| POST | `/todos/from-template` | Expand a published template version into a Todo (Space member) | `201 Envelope[Todo]` |
+| GET | `/todos/{todo_id}/stages` | Immutable expanded stage timeline | `Envelope[list[TodoStage]]` |
+| POST | `/todos/{todo_id}/stages/{stage_instance_id}/complete` | Complete the current Human stage as its owner or a Space admin; requires `summary` and `idempotency_key` | `Envelope[Todo]` |
+| POST | `/todos/{todo_id}/resume` | Resume an interrupted or blocked Todo | `Envelope[Todo]` |
+| POST | `/todos/{todo_id}/cancel` | Cancel explicitly as creator, current stage owner or Space admin | `Envelope[Todo]` |
+
+Template creation creates the identity and its first draft; creating a later
+draft copies the latest version. Published versions are immutable,
+and a template identity may be archived and reactivated. Template Todos pin one
+published version and advance through the ordered stages; Bot stages report and
+complete through the runtime protocol, while only a Human stage bound to its
+owner (or a Space admin) uses the Human completion route. The legacy workbench
+routes (`GET|POST /todos`, `/run`, `/events`, `/interactions`, `/acceptance`,
+`/artifacts`) retain their wire contracts; template Todos never use the legacy
+acceptance-reconciliation path.
+
 ### ✅ totalfrank · P1 — mcp (8 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
 the internal MCP services through the shared `core/mcp/` flow (extracted from the
@@ -1828,6 +1869,16 @@ Headers without clearing API key, Bot URL, or Bot-specific endpoint choices.
 Normal Center endpoints resolve user and Bot Headers by case-insensitive name,
 with Bot values winning; custom Bot URLs do not inherit user credentials.
 The existing `/config` routes remain user-only and retain their wire contracts.
+
+Bot-addressed overrides use a separate pair,
+`GET|PUT /openapi/v1/bots/{bot_id}/mcps/{server_code}/config`. Read requires
+MEMBER access; write requires ADMIN access (and the Bot edit lock where
+applicable, plus a live app grant for application callers). The write updates
+only that Bot's explicit Header names and URL override and reports
+`desired_state.status` plus a best-effort `runtime_projection.status`; it does
+not install the MCP. The authoritative semantics, including masked reads,
+Header clearing and URL-redirect risk, are in
+[core/mcp](../../src/agentclaw/community/core/mcp/README.md#bot-mcp-configuration-openapi).
 
 The unified marketplace search also exposes
 `POST /openapi/v1/bots/market/mcp-servers`. Its JSON request supports the full

@@ -29,6 +29,10 @@ A2A Work ingress and executor-only compatibility progress enforcement.
 frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
 不改变本域的任务执行或 Relay 协议。
 
+Backend 侧只负责该资产的 manifest 校验、保存与环境级发现，见
+[task_panel](task_panel/README.md)：内部 `GET`/`POST /api/v1/collaboration/tasks/manifest`，
+无 OpenAPI 镜像，也不承载任务执行行为。
+
 ## Harness 运行活动观测
 
 Bot 会话通过 SecBaaS 查询 Engine 的同一 run 事件序号，而非仅以可见消息判断静默。
@@ -60,7 +64,6 @@ core/task/
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
-├── context_collab/                 # Context 生命周期与 Todo BCS 执行器
 ├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
 ├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
@@ -71,6 +74,7 @@ core/task/
 │   ├── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
 │   └── relay_report.py            # Relay 两事件回投的原子图谱写入与重放回执
 ├── task_harness/                  # TaskHarness 重试、超时、恢复与 redrive
+├── task_panel/                    # 任务副屏资产 manifest 的校验、保存与环境级发现
 └── task_discovery/                # Bot 候选发现与会话创建
 ```
 
@@ -208,6 +212,9 @@ stateDiagram-v2
 
 ### Todo ContextCollab 执行边界
 
+Todo 产品生命周期、Space/Bot 资格、自动调度、事件优先验收与事件/互动投影的权威说明见
+[todos/README.md](todos/README.md)。本域只承载执行边界，不复述 Todo 状态机。
+
 Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.py`
 直接复用 Task 已有的 `BcsClientPort`、`BcsCreateGroupRequest`、
 `BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
@@ -324,6 +331,10 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## 上下文自主协作(context_collab)
+
+`context_collab/` 实现基于上下文的自主协作协议 v2 的最小持久化闭环,北向只有三个 API:创建协作上下文、追加事件、查询最新状态。内部入口为 `/api/v1/collaboration/task/context_collab`,公开面为 `/openapi/v1/collaboration/task/context_collab`;两者都把已验证调用者绑定为 L2 责任主体,公开面还显式拒绝 app-only caller。`ContextCollabServiceProtocol` 由 `task_module.py` 绑定;写路径经 G1 结构授权与 G4 状态机守卫,读路径按 visibility 过滤后由 G3 投影并统计进度。创建与追加均不设幂等键,重复提交即重复事件。权威设计见 `apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md`。
 
 ## Owner handoff and BCS identity
 

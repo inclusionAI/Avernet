@@ -226,6 +226,38 @@ lock check. A result whose `allowed` is not `True` raises
 `ServicePublicationGatePendingError`. Both errors expose only the plugin's
 `gate_result` projection and map to HTTP 403/403210 and 409/409210.
 
+### Standard-evaluation task lifecycle
+
+A standard-run task is driven by `ServiceBotEvalService` and the quality
+`TaskProcessor`, not by the release-gate precheck. The service creates or reuses
+the Eval-zone environment with `default_tag=eval` and a 240-minute TTL
+(`_STANDARD_EVAL_ENV_TTL_MINUTES`, matching the OCB eval-env switch default),
+then starts MASA and polls `/eval/progress`. Progress polling is adaptive:
+15 seconds for the first five minutes after `task_created`, then 60 seconds;
+the 30-minute bound applies only to environment preparation, not to a running
+evaluation. Intermediate progress is persisted only when it differs from the
+stored `ext`, so long runs do not write on every poll.
+
+`standard_eval_snapshots.py` derives the five client-facing steps — create
+environment, confirm sample set, execute evaluation, evaluation report, save
+result — from the task status, environment build status, MASA progress, report
+URL and save status. It also attaches a step-specific error and strips routing
+headers, device IDs and infrastructure bindings from the environment projection.
+The task status and this projection are the contract; the frontend does not
+call MASA directly.
+
+`create_standard_task` reuses the latest active standard-evaluation task
+(`init`/`env_preparing`/`env_ready`/`task_created`/`task_executed`) for the same
+Bot version and restarts its driver instead of creating a duplicate task and
+environment. This makes execution/report retries idempotent. The processor
+persists the MASA `eval_start_env` and passes the same `env` to
+`/eval/progress`, so a task stuck at `task_created` can advance; terminal tasks
+are never reused.
+
+Verification:
+`tests/community/core/service_bot/services/test_service_bot_eval_service.py`
+and `tests/community/core/quality/test_task_processor.py`.
+
 ## Publish operation ledger (#197)
 
 Every BaaS mutation in the publish pipeline (verify/online release, upgrade,
