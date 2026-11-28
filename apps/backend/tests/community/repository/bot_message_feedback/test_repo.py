@@ -157,3 +157,34 @@ async def test_like_clears_reason_and_comment(repo):
     assert updated.user_message_content == "question"
     assert updated.env == "dev"
 
+
+
+async def test_list_by_message_ids_scopes_user_and_env(repo):
+    await repo.upsert(
+        "msg-1", "u1", "like",
+        message_content="answer", user_message_id="msg-0",
+        user_message_content="question", bot_id="bot-1", env="dev",
+    )
+    await repo.upsert(
+        "msg-2", "u1", "dislike",
+        message_content="answer", user_message_id="msg-0",
+        user_message_content="question", bot_id="bot-1",
+        reason="inaccurate", env="pre",
+    )
+    await repo.upsert(
+        "msg-3", "u2", "like",
+        message_content="answer", user_message_id="msg-0",
+        user_message_content="question", bot_id="bot-1", env="dev",
+    )
+
+    records = await repo.list_by_message_ids(
+        ["msg-1", "msg-2", "msg-3", "missing"], user_id="u1", env="dev"
+    )
+
+    assert [record.message_id for record in records] == ["msg-1"]
+    assert records[0].user_id == "u1"
+    assert records[0].env == "dev"
+
+
+async def test_list_by_message_ids_returns_empty_for_empty_input(repo):
+    assert await repo.list_by_message_ids([], user_id="u1", env="dev") == []

@@ -15,9 +15,10 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
-    """Business logic for submitting message feedback."""
+    """Business logic for submitting and reading message feedback."""
 
     VALID_FEEDBACK_TYPES = {"like", "dislike"}
+    MAX_BATCH_MESSAGE_IDS = 100
 
     @inject
     def __init__(self, repo: BotMessageFeedbackRepositoryProtocol) -> None:
@@ -91,3 +92,60 @@ class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
                 env=env,
             )
 
+    async def get_feedback(
+        self,
+        message_id: str,
+        user_id: str,
+        env: str | None = None,
+    ) -> BotMessageFeedbackRecord | None:
+        """Return this user's feedback for one message, or None when absent."""
+        if not message_id or not message_id.strip():
+            raise ValueError("message_id is required")
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
+
+        env = (env or "").strip().lower() or get_current_env()
+        records = await self._repo.list_by_message_ids(
+            [message_id.strip()],
+            user_id=user_id.strip(),
+            env=env,
+        )
+        return records[0] if records else None
+
+    async def list_feedback(
+        self,
+        message_ids: list[str],
+        user_id: str,
+        env: str | None = None,
+    ) -> list[BotMessageFeedbackRecord]:
+        """Return this user's feedback for the requested messages.
+
+        Ids are trimmed, de-duplicated while preserving order, and capped to
+        ``MAX_BATCH_MESSAGE_IDS`` so a history refresh cannot trigger an
+        unbounded query.
+        """
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in message_ids:
+            message_id = (raw or "").strip()
+            if not message_id or message_id in seen:
+                continue
+            seen.add(message_id)
+            normalized.append(message_id)
+
+        if not normalized:
+            raise ValueError("message_ids is required")
+        if len(normalized) > self.MAX_BATCH_MESSAGE_IDS:
+            raise ValueError(
+                f"message_ids supports at most {self.MAX_BATCH_MESSAGE_IDS} items"
+            )
+
+        env = (env or "").strip().lower() or get_current_env()
+        return await self._repo.list_by_message_ids(
+            normalized,
+            user_id=user_id.strip(),
+            env=env,
+        )

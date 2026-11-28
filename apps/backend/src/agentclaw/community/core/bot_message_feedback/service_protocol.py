@@ -9,7 +9,7 @@ from agentclaw.community.core.bot_message_feedback.schemas import BotMessageFeed
 
 @runtime_checkable
 class BotMessageFeedbackServiceProtocol(Protocol):
-    """Submit per-user feedback on a single bot message."""
+    """Submit and read per-user feedback on a single bot message."""
 
     @abstractmethod
     async def submit_feedback(
@@ -27,4 +27,27 @@ class BotMessageFeedbackServiceProtocol(Protocol):
         env: str | None = None,
     ) -> BotMessageFeedbackRecord:
         """Submit or overwrite feedback for a message."""
+        ...
+
+    @abstractmethod
+    async def get_feedback(
+        self,
+        message_id: str,
+        user_id: str,
+        env: str | None = None,
+    ) -> BotMessageFeedbackRecord | None:
+        """Return this user's feedback for one message, or None when absent."""
+        ...
+
+    @abstractmethod
+    async def list_feedback(
+        self,
+        message_ids: list[str],
+        user_id: str,
+        env: str | None = None,
+    ) -> list[BotMessageFeedbackRecord]:
+        """Return this user's feedback for the requested messages in one env.
+
+        Missing message ids are omitted from the result.
+        """
         ...
