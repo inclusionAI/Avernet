@@ -33,14 +33,31 @@ class HttpxForwarder(Forwarder):
     :meth:`aclose` on shutdown. Tests inject a client wired to a mock transport.
     """
 
-    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        *,
+        connect_timeout: float = 5.0,
+        read_timeout: float = 120.0,
+        write_timeout: float = 5.0,
+        pool_timeout: float = 5.0,
+    ) -> None:
         self._client = client
         self._owns_client = client is None
+        self._connect_timeout = connect_timeout
+        self._read_timeout = read_timeout
+        self._write_timeout = write_timeout
+        self._pool_timeout = pool_timeout
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0),
+                timeout=httpx.Timeout(
+                    connect=self._connect_timeout,
+                    read=self._read_timeout,
+                    write=self._write_timeout,
+                    pool=self._pool_timeout,
+                ),
             )
         return self._client
 

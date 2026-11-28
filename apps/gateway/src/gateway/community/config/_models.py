@@ -178,6 +178,21 @@ class CorsConfig(BaseModel):
         return patterns
 
 
+class ForwarderPluginConfig(BaseModel):
+    """Forwarder HTTP timeout configuration (``user_config.plugins.forwarder_config``).
+
+    Defaults match the HttpxForwarder's current hard-coded values so existing
+    deployments are unchanged. Raise ``read_timeout`` for endpoints that return
+    SSE streams or take >120 s (e.g. agentswarm runs/events long-polling).
+    """
+
+    model_config = {"extra": "allow"}
+    connect_timeout: float = 5.0
+    read_timeout: float = 120.0
+    write_timeout: float = 5.0
+    pool_timeout: float = 5.0
+
+
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.
 
@@ -199,6 +214,9 @@ class PluginConfig(BaseSettings):
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: str = Field(default="sqlite", min_length=1)
     secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
+    forwarder_config: ForwarderPluginConfig = Field(
+        default_factory=ForwarderPluginConfig
+    )
 
 
 class UserConfig(BaseModel):
