@@ -73,6 +73,13 @@ impl ConnectService for DbConnectService {
                 .filter(|request| !is_internal_reverse_connect(request))
                 .map(|request| request.request_id.clone())
                 .collect();
+            // A genuine same-direction pending request means the caller is
+            // re-applying. Retry the owner notification in that case: a single
+            // transient notification failure (empty recipients resolution or a
+            // backend intake rejection) must not be frozen forever — without a
+            // retry the pending request deadlocks with nobody able to approve
+            // it.
+            let resend_forward = !request_ids.is_empty();
             if request_ids.is_empty() {
                 // A peer creating in the opposite direction finds our generated
                 // reverse mirror. Return the original logical request instead
@@ -89,6 +96,39 @@ impl ConnectService for DbConnectService {
                 return Err(ServiceError::InternalError(
                     "pending connect pair has no user-authored request".to_string(),
                 ));
+            }
+            if resend_forward {
+                // Best-effort, idempotent retry of the owner notification. The
+                // returned status stays Pending regardless of the transport
+                // outcome (Spec §12.3: a notification failure must not fail the
+                // friend request), so a repeated create acts as a fresh
+                // notification attempt instead of a silent no-op. Reuse the
+                // stored pending row's message (the reason the owner sees) so a
+                // retry with a different/absent body still reproduces the
+                // original request intent.
+                let retry_message = pending
+                    .iter()
+                    .find(|request| !is_internal_reverse_connect(request))
+                    .and_then(|request| request.message.as_deref());
+                if let Err(error) = self
+                    .emit_friend_connect_notification(
+                        FriendConnectNotificationKind::ApprovalRequested,
+                        request_ids.clone(),
+                        caller,
+                        to_bot,
+                        self.target_notification_recipients(to_bot, &cfg).await,
+                        retry_message,
+                        request_auth.clone(),
+                    )
+                    .await
+                {
+                    warn!(
+                        error = %error,
+                        request_ids = ?request_ids,
+                        target_bot_id = %to_bot,
+                        "friend connect notification resend (dedup) failed; continuing without it"
+                    );
+                }
             }
             return Ok(ConnectResult {
                 request_ids,
@@ -620,6 +660,25 @@ impl ConnectService for DbConnectService {
         // TODO(installment-5): spec §4.1 models unfriend as a Revoke-kind
         // request that the owner directly approves; this direct-revoke path is
         // sufficient for T13. The revoke-request flow can layer on later.
+
+        // Clear any residual pending Connect requests between the pair. An
+        // unfriend leaves those rows undecidable — the friendship they were
+        // waiting on is gone — and they block a fresh re-apply by letting the
+        // create dedup branch short-circuit. Clear both directions so a pair
+        // carries no lingering pending request after revoke.
+        for (from, to) in [(caller, target), (target, caller)] {
+            for req in self.find_pending_connect(from, to).await? {
+                self.requests
+                    .decide(
+                        req.request_id.as_str(),
+                        &self.env,
+                        RequestStatus::Cancelled,
+                        "system",
+                        Some("cancelled by unfriend"),
+                    )
+                    .await?;
+            }
+        }
 
         // Reverse-sync (coexistence): drop the legacy friendship mirror for
         // unfriends so stale rows cannot keep legacy readers open.
