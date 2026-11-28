@@ -223,6 +223,33 @@ injected governed capabilities. Public defaults deny execution/verification and
 use a conservative no-op proposal; missing capabilities cannot produce a runnable
 profile. A host must supply the real capabilities and schedule the worker.
 
+When the deployment already supplies `OpenApiBotPort`, `BotRepository` and
+`NotifyMessagesProvider`, the shared
+[product runtime module](../../../../../di/modules/task/product_profile_runtime.py)
+installs the same hosted seam in pre and production:
+
+- `BotRepositoryRolloutIdentity` resolves a unique live Bot/current owner and
+  uses the BaaS `online` lifecycle stage.
+- `OpenApiRolloutExecution` dispatches the actual Bot and observes/cancels the
+  real provider run.
+- `SignedOpenApiEvidence` accepts only the existing signed Bot ingress identity,
+  requires exact frozen-condition coverage, and requires artifacts for a PASS.
+- `AdaptiveStageImprovementStrategy` calls the failed stage's configured Bot as
+  `stage-improvement-agent@1`; its JSON response is parsed into a typed
+  `AdjustmentProposal` and rejected if it uses an unknown action or shape.
+- `OpenApiCandidateIsolation` derives the per-candidate namespace used in the
+  Bot input, admits one adaptive candidate at a time, and requires a complete
+  real route/artifacts before attachment.
+- `ChannelFeedbackNotifications` sends human feedback waiting through the
+  configured notification sender; unavailable infrastructure binds the
+  previous fail-closed capability and blocks Collet admission.
+
+No port discovery failure is reported as capability availability. The same
+module deliberately binds the explicit fail-closed old defaults for standalone
+public/test injectors that have no work-row infrastructure. Installing these
+seams lets `create_product_collet` pass capability admission and persist the
+five-table business graph; it does not bypass the later storage boundary below.
+
 ## Storage, recovery and compatibility
 
 > Phase-one cutover: profile/Collet creation and business reads now use the five

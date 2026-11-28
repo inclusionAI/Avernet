@@ -272,3 +272,35 @@ DEPLOY_PROFILE=test uv run --no-sync pytest -q   tests/community/adapters/http/t
 ```
 
 结果：**504 passed，45 warnings**。本次不改变 DDL、不新增表列、不迁移历史 `config@1` 行，也未执行目标 MySQL/OceanBase、生产部署或真实 Bot/provider 验证。
+
+## 后续调整：宿主 Product runtime 能力接入（2026-11-28）
+
+按“不能修改测试契约造假，能力必须真实接入”的要求，本阶段将
+`ProductProfileRuntimeModule` 从静态 fail-closed 绑定升级为共享组合根：
+
+- `OpenApiBotPort`、`BotRepository` 与 `NotifyMessagesProvider` 已由当前部署基础设施安装时，自动装配 `BotRepositoryRolloutIdentity`、真实 `OpenApiRolloutExecution`、签名进度校验 `SignedOpenApiEvidence`、`AdaptiveStageImprovementStrategy`、`OpenApiCandidateIsolation`、`ChannelFeedbackNotifications` 与阶段消息读取适配器。
+- Stage improvement 是一次真实 Bot `send_and_wait` 调用，仅将其 JSON 结果解析为 typed `AdjustmentProposal`；动作、rerun、patch、请求反馈字段任一不满足合同即拒绝，不把自由文本穿孔提升为权限操作。
+- 通知通过部署列现有 `NotifyMessagesProvider` 投递；未配置时保持原 `UnavailableMultiRolloutNotifications`。轻量公共测试环境或缺省工作行中未装端口仍返回原 fail-closed 适配器，因此没有把“发现端口缺省”伪装成“能力可用”。
+- pre/线上没有环境专属代码分支，行为必须一致：两者都依赖同一 composition root。差异只允许出在环境 overlay 提供的 `OpenApiBotPort` base URL/key、数据库/租户 scope 与通知通道配置。pre 和生产都必须部署本次代码并完成同一组真实集成验证。
+- 新增 Hosted DI 测试验证 ONLINE Profile 在三个真实工作行端口绑定后，`create_product_collet` 不再命中 “product execution and evidence capabilities are not configured”，且真实写入 Collet/Rollout/Stage/Event；同时覆盖 identity、签名证据和 Agent typed proposal 合同。
+
+实际验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/repository/task/context_collab/product_relational \
+  tests/community/adapters/http/task/test_context_collab_products.py
+```
+
+结果：**295 passed，19 warnings**。
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/architecture
+```
+
+结果：**470 passed，44 warnings**。
+
+Ruff format/check 与 `git diff --check` 通过，新增/修改 source 均低于 1000 行。这些依旧是 SQLite、DI 替身和架构门禁证据；本段尚未目标库执行真实 OpenAPI Bot、通知通道或 MySQL/OceanBase/生产部署验证。
+
+**仍未改变的边界**：本变更解决 Collet 创建前的 runtime capability admission；五表 adapter 对 `save`、late delivery、intent claim/finish 等执行修改路径仍 fail closed。因此完整 worker 派发、签名进度落库、交互后继 rollout 和 MultiRollout 控制流还没有在五表上交付，不能用本段冒充完整 runtime 上线。
