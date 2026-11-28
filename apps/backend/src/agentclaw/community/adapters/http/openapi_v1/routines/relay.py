@@ -1,11 +1,13 @@
 """Routines-local relay diagnostics and fixed public error translation."""
 
+import json
 from time import monotonic
 
 from fastapi import HTTPException
 
 from agentclaw.community.core.cron.errors import CronApiTimeoutError, CronRelayError
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterEndpointNotFoundError
 from agentclaw.community.adapters.http.openapi_v1.responses import trace_id
 
 from .converter import _map_routine, _map_run, failed_targets, target_context, safe_reason
@@ -49,7 +51,7 @@ def _result_log(result: dict) -> dict:
     return projected
 
 
-async def call_cron(operation, *, request, actor, check_success=True, **kwargs):
+async def call_cron(operation, *, request, actor, check_success=True, recognize_missing=False, **kwargs):
     started = monotonic()
     fields = {key: value for key, value in kwargs.items() if key not in {"body", "nick_name"}}
     fields.update(operation=operation.__name__, method=request.method, route=request.url.path,
@@ -63,6 +65,13 @@ async def call_cron(operation, *, request, actor, check_success=True, **kwargs):
         logger.warning("openapi.routines.failure system=backend fields=%s exception_type=%s error_code=%s elapsed_ms=%.1f",
                        fields, type(exc).__name__, getattr(exc, "error_code", None),
                        (monotonic() - started) * 1000)
+        if recognize_missing and isinstance(exc, DeviceAdapterEndpointNotFoundError):
+            try:
+                payload = json.loads(exc.response_text)
+            except (TypeError, ValueError):
+                payload = None
+            if payload == {"detail": "Task not found", "code": "cron.task_not_found.v1"}:
+                raise HTTPException(404, "Routine not found") from None
         if isinstance(exc, CronRelayError) and not isinstance(exc, CronApiTimeoutError) and exc.error_code in {404, 504}:
             raise HTTPException(exc.error_code, "Cron runtime target unavailable") from None
         if isinstance(exc, CronApiTimeoutError):

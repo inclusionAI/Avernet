@@ -182,7 +182,7 @@ async def get_routine(
     # named. It is on the path now, ahead of the routine. The owner is the
     # addressed one (OwnerIdDep); the cron relay still attributes the job to
     # that owner's identity. Missing/non-dict data collapses to 404.
-    result = await call_cron(factory.get_cron_detail, request=request, actor=actor,
+    result = await call_cron(factory.get_cron_detail, request=request, actor=actor, recognize_missing=True,
         bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id,
         **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
     )
