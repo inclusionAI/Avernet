@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -124,6 +125,13 @@ _SUDO_PROBE_FALLBACK_TIMEOUT_SECONDS = 10.0
 # preventing arbitrary absolute source/target paths.
 _EXTRA_INCLUDE_HOME_ROOT = PurePosixPath("/home/admin")
 _EXTRA_INCLUDE_HOME_ARTIFACT_ROOT = "home"
+
+# Bolt targets can momentarily report an NFS transport failure. Probe at a
+# bounded interval instead of turning one first-attempt blip into a bot
+# migration failure.
+_TARGET_DIR_MIGRATION_MAX_ATTEMPTS = 3
+_TARGET_DIR_MIGRATION_RETRY_SECONDS = 0.1
+_TARGET_DIR_MIGRATION_RETRYABLE_ERRNOS = frozenset({errno.ENOTCONN})
 
 
 @dataclass(frozen=True)
@@ -1363,6 +1371,31 @@ class BotBuildService:
                 except OSError:
                     pass
 
+    def _ensure_target_dir_ready(self, target_dir: Path) -> None:
+        """Ensure the target directory exists for the rsync destination."""
+        last_error: OSError | None = None
+        for attempt in range(_TARGET_DIR_MIGRATION_MAX_ATTEMPTS):
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                return
+            except OSError as exc:
+                if exc.errno not in _TARGET_DIR_MIGRATION_RETRYABLE_ERRNOS:
+                    raise
+                last_error = exc
+                logger.warning(
+                    "[BotBuildService._ensure_target_dir_ready] "
+                    "Target dir not ready (attempt %d/%d): %s; retry in %.3fs: %s",
+                    attempt + 1,
+                    _TARGET_DIR_MIGRATION_MAX_ATTEMPTS,
+                    target_dir,
+                    _TARGET_DIR_MIGRATION_RETRY_SECONDS,
+                    exc,
+                )
+                if attempt < _TARGET_DIR_MIGRATION_MAX_ATTEMPTS - 1:
+                    time.sleep(_TARGET_DIR_MIGRATION_RETRY_SECONDS)
+        if last_error is not None:
+            raise last_error
+
     def _migrate_bot_instance(
         self,
         device_id: str,
@@ -1427,8 +1460,8 @@ class BotBuildService:
                 )
 
         try:
-            # 确保目标目录存在
-            target_dir.mkdir(parents=True, exist_ok=True)
+            # 确保目标目录存在；bolt 挂载偶发传输未就绪时短暂重试。
+            self._ensure_target_dir_ready(target_dir)
 
             # 构建 rsync 排除参数
             excludes = []
