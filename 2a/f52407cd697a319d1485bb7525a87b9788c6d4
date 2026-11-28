@@ -1,0 +1,62 @@
+apps/evolverun/clawweb/README.md
+  h_bb3ca6fb13c5df 19
+apps/evolverun/clawweb/public/modules/workflow/docs/callback-compensation.md
+  h_bb3ca6fb13c5df 3,10-14
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/callback-compensation.test.ts
+  h_bb3ca6fb13c5df 1-225
+apps/evolverun/clawweb/public/modules/workflow/web/api/callback-compensation-protocol.ts
+  h_bb3ca6fb13c5df 9
+apps/evolverun/clawweb/public/modules/workflow/web/api/callback-compensation.ts
+  h_bb3ca6fb13c5df 5-6,11,14-45,47
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensation.tsx
+  h_bb3ca6fb13c5df 1-8,10-11,13-22,24-30,32-37,39-63,65-73
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensationBatch.tsx
+  h_bb3ca6fb13c5df 1-5
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensationConfirm.tsx
+  h_bb3ca6fb13c5df 1-3
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensationDialog.tsx
+  h_bb3ca6fb13c5df 1-8,20,38
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensationPreview.tsx
+  h_bb3ca6fb13c5df 1-5
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/CallbackCompensationScope.tsx
+  h_bb3ca6fb13c5df 1-7
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/__tests__/CallbackCompensation.test.tsx
+  h_bb3ca6fb13c5df 1-6,14,16-18,20,22-26,29,33,36,48,70,75,78,84,108,136,145,179,198,219,224,226,236-237,239-241,247,274,294,296,304,309,316-324,327,337,350,352-353,363,369,376,387,406,421-422,425-426,435,457,461,469,485,527,550,580,602-663
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/__tests__/fixtures.ts
+  h_bb3ca6fb13c5df 1,3,7
+apps/evolverun/clawweb/public/modules/workflow/web/components/callback-compensation/primitives.tsx
+  h_bb3ca6fb13c5df 1-80
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/OverviewTab.tsx
+  h_bb3ca6fb13c5df 18,554-560,562-577
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/CallbackCompensationOverview.test.tsx
+  h_bb3ca6fb13c5df 1-185
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/callback-compensation/__tests__/useCallbackCompensationIdentity.test.tsx
+  h_bb3ca6fb13c5df 1-70
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/callback-compensation/useCallbackCompensation.ts
+  h_bb3ca6fb13c5df 6,10,15-17,23,132,180
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/callback-compensation/useCallbackCompensationBatch.ts
+  h_bb3ca6fb13c5df 4,8,12-13,89
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/callback-compensation/useCallbackCompensationIdentity.ts
+  h_bb3ca6fb13c5df 1-63
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/callback-compensation/useCallbackCompensationPending.ts
+  h_bb3ca6fb13c5df 1-3,21
+apps/evolverun/clawweb/public/modules/workflow/web/models/__tests__/callbackCompensation.test.ts
+  h_bb3ca6fb13c5df 1,5,8,13,105-114
+apps/evolverun/clawweb/public/modules/workflow/web/models/__tests__/callbackCompensationErrors.test.ts
+  h_bb3ca6fb13c5df 1,5
+apps/evolverun/clawweb/public/modules/workflow/web/models/callbackCompensationTypes.ts
+  h_bb3ca6fb13c5df 60-67
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewPage.tsx
+  h_bb3ca6fb13c5df 127-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2af52407cd697a319d1485bb7525a87b9788c6d4",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
