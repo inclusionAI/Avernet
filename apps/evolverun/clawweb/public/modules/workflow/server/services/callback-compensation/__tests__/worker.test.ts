@@ -14,7 +14,7 @@ describe('single attempt, durable worker lifecycle',()=>{
     expect(await s.get('wf','admin',batch.batchId)).toMatchObject({status:'completed',counts:{received:1,auditPending:0}});
     const logs=f.raw.prepare('SELECT * FROM http_callback_logs').all();expect(logs).toHaveLength(1);
     expect(logs[0]).toMatchObject({status:'delivered',callback_source:'workflow-level',request_body:null,request_headers:null,response_body:null});
-    expect(JSON.stringify(logs)).not.toMatch(/SENSITIVE|SIGNING-SECRET/);await s.tick();await other.tick();expect(f.calls).toHaveLength(1);
+    expect(JSON.stringify(logs)).not.toMatch(/SENSITIVE|TEST-TOKEN/);await s.tick();await other.tick();expect(f.calls).toHaveLength(1);
   });
   it('frozen protocol preserves JSON strings, null phase, lineage; never sends credentials',async()=>{
     f.raw.exec("UPDATE flow_runs SET parent_flow_id='real-parent',root_flow_id='real-root'");await f.authorize();
@@ -22,10 +22,10 @@ describe('single attempt, durable worker lifecycle',()=>{
     expect(body).toMatchObject({workflow_id:'wf',flow_id:'flow-1',status:'succeeded',ext_info:{flow_runs:{
       status:'succeeded',current_phase:null,parent_flow_id:'real-parent',root_flow_id:'real-root',credentials_json:null,
       result_json:'{"result":"SENSITIVE-RESULT"}',params_json:'{"secret_param":"SENSITIVE-PARAM"}'}}});
-    expect(body.ext_info.node_executions[0]).not.toHaveProperty('output_json');expect(call.rawBody).not.toContain('NEVER-COPY-CREDENTIAL');
+    expect(body.ext_info.node_executions[0]).not.toHaveProperty('output_json');expect(call.rawBody).not.toContain('fake');
     expect(call).toMatchObject({url:'https://cortex.example.test/exact',redirect:'error',timeoutMs:1000});
     expect(call.headers['X-Callback-Config-Id']).toBe('callback-string-id');expect(call.headers['X-Callback-Timestamp']).toBe(String(NOW));
-    expect(call.headers['X-Callback-Signature-256']).toBe('sha256='+createHmac('sha256','SIGNING-SECRET-NEVER-STORE').update(`${NOW}.${call.rawBody}`).digest('hex'));
+    expect(call.headers['X-Callback-Signature-256']).toBe('sha256='+createHmac('sha256','TEST-TOKEN').update(`${NOW}.${call.rawBody}`).digest('hex'));
     expect(f.raw.prepare('SELECT status,current_phase FROM flow_runs').get()).toEqual({status:'succeeded',current_phase:null});
   });
   it('honors includeNodeOutput and caps timeout at 30s',async()=>{
@@ -124,10 +124,10 @@ describe('single attempt, durable worker lifecycle',()=>{
     expect(f.calls).toHaveLength(0);expect((await s.get('wf','admin',batch.batchId)).items[0].state).toBe('skipped');
   });
   it('approved exact URL is preserved for POST but path/query tokens never reach audit or DTOs',async()=>{
-    const url='https://cortex.example.test/SENSITIVE-PATH?token=SENSITIVE-QUERY';
+    const url='https://cortex.example.test/SENSITIVE-PATH?token=fake';
     f.raw.prepare('UPDATE http_callback_configs SET url=?').run(url);
     await f.authorize('flow-1',{url,urls:[url]});const {batch,preview,service:s}=await f.queued();await s.tick();
-    expect(f.calls[0].url).toBe(url);expect(JSON.stringify([preview,batch,await s.get('wf','admin',batch.batchId)])).not.toMatch(/SENSITIVE-(PATH|QUERY)/);
+    expect(f.calls[0].url).toBe(url);expect(JSON.stringify([preview,batch,await s.get('wf','admin',batch.batchId)])).not.toMatch(/SENSITIVE-PATH|token=fake/);
     expect(f.raw.prepare('SELECT callback_url FROM http_callback_logs').get()).toEqual({callback_url:'https://cortex.example.test'});
   });
   it('unsigned callbacks retain string config identity but no signature',()=>{

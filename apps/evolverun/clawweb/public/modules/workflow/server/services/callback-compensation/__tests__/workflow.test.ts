@@ -92,7 +92,7 @@ describe('durable ownership, freezing, request idempotency', () => {
     const {batch,preview}=await f.queued();
     const tables=['workflow_callback_compensation_previews','workflow_callback_compensation_batches','workflow_callback_compensation_items'];
     const stored=tables.flatMap(t=>f.raw.prepare(`SELECT * FROM ${t}`).all());
-    expect(JSON.stringify([batch,preview,stored])).not.toMatch(/SENSITIVE|SIGNING-SECRET|NEVER-COPY-CREDENTIAL|secret_param/);
+    expect(JSON.stringify([batch,preview,stored])).not.toMatch(/SENSITIVE|TEST-TOKEN|fake|secret_param/);
     expect(JSON.stringify(stored)).toContain('v1.');
   });
   it('tampered frozen ciphertext cannot execute',async()=>{

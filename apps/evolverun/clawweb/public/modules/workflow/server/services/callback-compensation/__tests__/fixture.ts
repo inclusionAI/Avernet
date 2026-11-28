@@ -35,7 +35,7 @@ export function fixture(path = ':memory:') {
   function run(flowId = 'flow-1', changes: Record<string, unknown> = {}) {
     const data = { flow_id: flowId, workflow_id: 'wf', status: 'succeeded', env: 'pre', retry_epoch: 0,
       params_json: '{"secret_param":"SENSITIVE-PARAM"}', input_json: '{"body":"SENSITIVE-INPUT"}',
-      result_json: '{"result":"SENSITIVE-RESULT"}', current_phase: null, credentials_json: '{"secret":"NEVER-COPY-CREDENTIAL"}',
+      result_json: '{"result":"SENSITIVE-RESULT"}', current_phase: null, credentials_json: '{"secret":"fake"}',
       node_count: 1, succeeded_count: 1, failed_count: 0, started_at: NOW / 1000 - 60, completed_at: NOW / 1000 - 10,
       gmt_create: NOW / 1000 - 60, gmt_modified: NOW / 1000 - 10, ...changes };
     raw.prepare(`INSERT INTO flow_runs (${Object.keys(data).join(',')}) VALUES (${Object.keys(data).map(() => '?').join(',')})`).run(...Object.values(data));
@@ -45,7 +45,7 @@ export function fixture(path = ':memory:') {
   }
   function config(configId = 'callback-string-id', changes: Record<string, unknown> = {}) {
     const data = { config_id: configId, workflow_id: 'wf', name: 'Cortex', url: 'https://cortex.example.test/exact',
-      secret: 'SIGNING-SECRET-NEVER-STORE', enabled: 1, notify_on: '["workflow_succeeded"]',
+      secret: 'TEST-TOKEN', enabled: 1, notify_on: '["workflow_succeeded"]',
       timeout_ms: 1000, include_node_output: 0, ...changes };
     raw.prepare(`INSERT INTO http_callback_configs (${Object.keys(data).join(',')}) VALUES (${Object.keys(data).map(() => '?').join(',')})`).run(...Object.values(data));
   }

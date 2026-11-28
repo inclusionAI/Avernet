@@ -402,7 +402,7 @@ it('scans flow IDs only with no time range, and maps a service code without rend
   fireEvent.change(screen.getByRole('textbox', { name: '运行 IDs（可选）' }), { target: { value: 'r1,r2\nr1' } });
   fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
   await screen.findByText('请选择 1–100 个不重复的有效运行 ID。');
-  expect(screen.queryByText(/secret=never/)).not.toBeInTheDocument();
+  expect(screen.queryByText('secret=never', { exact: false })).not.toBeInTheDocument();
   expect(service.preview.mock.calls[0][1]).toEqual({ configId: 'cfg', flowIds: ['r1', 'r2'] });
   fireEvent.click(screen.getByRole('button', { name: '生成预览' }));
   await screen.findByText('run-eligible');

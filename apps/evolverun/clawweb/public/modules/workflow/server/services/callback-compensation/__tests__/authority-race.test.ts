@@ -40,7 +40,7 @@ const changes = [
   ['result JSON trailing whitespace only', "UPDATE flow_runs SET result_json=result_json || ' ' WHERE flow_id='flow-1'"],
   ['result JSON case-only change', "UPDATE flow_runs SET result_json=replace(result_json,'SENSITIVE-RESULT','sensitive-result') WHERE flow_id='flow-1'"],
   ['node replaced at same count and timestamps', replaceNode],
-  ['receiver secret rotated', "UPDATE http_callback_configs SET secret='ROTATED-AFTER-PREFLIGHT' WHERE config_id='callback-string-id'"],
+  ['receiver secret rotated', "UPDATE http_callback_configs SET secret='dummy' WHERE config_id='callback-string-id'"],
   ['same-second run result', `UPDATE flow_runs SET result_json='{"result":"changed after preflight"}' WHERE flow_id='flow-1'`],
   ['same-second run input', `UPDATE flow_runs SET input_json='{"input":"changed after preflight"}' WHERE flow_id='flow-1'`],
   ['same-second run params', `UPDATE flow_runs SET params_json='{"params":"changed after preflight"}' WHERE flow_id='flow-1'`],

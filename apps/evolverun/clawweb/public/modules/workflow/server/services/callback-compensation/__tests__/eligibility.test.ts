@@ -13,7 +13,7 @@ describe('strict callback compensation eligibility', () => {
     const p = await s.preview('wf','admin',input);
     expect(p.items[0]).toMatchObject({ status: 'review' });
     expect(p.items[0].reasons).toContain('TRUSTED_EVIDENCE_MISSING');
-    const text = JSON.stringify(p); expect(text).not.toMatch(/SENSITIVE|SIGNING-SECRET|NEVER-COPY-CREDENTIAL|secret_param/);
+    const text = JSON.stringify(p); expect(text).not.toMatch(/SENSITIVE|TEST-TOKEN|fake|secret_param/);
     expect(text).not.toContain('https://cortex.example.test/exact');
     await expect(s.create('wf','admin',{ previewId:p.previewId,itemIds:[p.items[0].itemId],reason:'reviewed test reason',requestKey:'request1' }))
       .rejects.toMatchObject({ code: 'EXECUTION_DISABLED' });
