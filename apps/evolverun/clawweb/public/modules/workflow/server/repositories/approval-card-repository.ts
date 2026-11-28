@@ -347,9 +347,20 @@ export class ApprovalCardRepository {
     );
   }
 
-  /** Acknowledge a resolved card-web card, preserving the first durable timestamp. */
-  async markProcessed(cardId: number): Promise<boolean> {
+  /**
+   * Validate legacy ACKs without writes. Only explicit consumption persists the
+   * first durable timestamp; receiving an ACK alone does not prove consumption.
+   */
+  async markProcessed(cardId: number, consumed = false): Promise<boolean> {
     if (!Number.isSafeInteger(cardId) || cardId <= 0) return false;
+    if (consumed !== true) {
+      const rows = await this.db.query<{ id: number }>(
+        `SELECT id FROM approval_cards
+         WHERE id = ? AND status IN ('approved', 'rejected') AND delivery_mode = 'card-web'`,
+        [cardId],
+      );
+      return rows.length > 0;
+    }
     const result = await this.db.exec(
       `UPDATE approval_cards SET processed_at = COALESCE(processed_at, ?)
        WHERE id = ? AND status IN ('approved', 'rejected') AND delivery_mode = 'card-web'`,

@@ -35,6 +35,7 @@ const publicKeyB64 = keys.publicKey.export({ type: 'spki', format: 'der' }).toSt
 const wrongAlgorithmKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
   .publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
 const createBody = { flow_id: 'new-flow', node_id: 'review', workflow_id: 'workflow', approver_ids: 'reviewer' };
+const consumedBody = { consumed: true };
 const queries = ['?botId=bot-a', '?botId=bot-b', ''];
 const initialIds = [[2, 1], [3, 1], [3, 2, 1]];
 let raw: Database.Database;
@@ -125,7 +126,7 @@ it.each(invalidKinds)('rejects %s production engine reads/writes before ACK pers
   const create = vi.spyOn(ApprovalCardRepository.prototype, 'create');
   await primeCaches();
   const before = history();
-  for (const [path, method, body] of [['/2/processed', 'POST', {}], ['/resolved?botId=bot-a', 'GET', undefined],
+  for (const [path, method, body] of [['/2/processed', 'POST', consumedBody], ['/resolved?botId=bot-a', 'GET', undefined],
     ['/', 'POST', createBody]] as const) {
     const response = await request(path, method, body, invalidHeaders(kind, body));
     expect(response.status).toBe(401);
@@ -148,7 +149,7 @@ it.each([['missing', ''], ['invalid', 'not-an-ed25519-key'], ['wrong algorithm',
     await stop();
     await start('prod', key);
     const before = history();
-    for (const [path, method, body] of [['/2/processed', 'POST', {}], ['/resolved?botId=bot-a', 'GET', undefined],
+    for (const [path, method, body] of [['/2/processed', 'POST', consumedBody], ['/resolved?botId=bot-a', 'GET', undefined],
       ['/', 'POST', createBody]] as const) {
       const response = await request(path, method, body);
       expect(response.status).toBe(503);
@@ -163,6 +164,70 @@ it.each([['missing', ''], ['invalid', 'not-an-ed25519-key'], ['wrong algorithm',
   },
 );
 
+it.each([
+  { name: 'bodyless', body: undefined },
+  { name: 'empty object', body: {} },
+  { name: 'object without consumed', body: { legacy: true } },
+])('accepts a signed legacy $name ACK without consuming a waiting card or invalidating caches', async ({ body }) => {
+  await start('prod');
+  const find = vi.spyOn(ApprovalCardRepository.prototype, 'findResolvedCardWeb');
+  const ack = vi.spyOn(ApprovalCardRepository.prototype, 'markProcessed');
+  await primeCaches();
+  const before = history();
+  const response = await request('/2/processed', 'POST', body);
+  expect(response.status).toBe(200); expect(await response.json()).toEqual({ success: true });
+  expect(ack).toHaveBeenCalledWith(2, false);
+  expect(history()).toEqual(before);
+  expect((await new ApprovalCardRepository(state.db!).findById(2))?.processed_at).toBeNull();
+  await primeCaches();
+  expect(find).toHaveBeenCalledTimes(3);
+  // An uncached read must retain the card too, not only the pre-ACK cache.
+  invalidateResolvedCache();
+  await primeCaches();
+  expect(find).toHaveBeenCalledTimes(6);
+});
+
+it('rejects a legacy-body signature reused for a consumed-v1 ACK without persistence or cache invalidation', async () => {
+  await start('prod');
+  const find = vi.spyOn(ApprovalCardRepository.prototype, 'findResolvedCardWeb');
+  const ack = vi.spyOn(ApprovalCardRepository.prototype, 'markProcessed');
+  await primeCaches();
+  const before = history();
+  const response = await request('/2/processed', 'POST', consumedBody, signed({}));
+  expect(response.status).toBe(401);
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(await response.json()).toMatchObject({ success: false, error: 'Unauthorized' });
+  expect(ack).not.toHaveBeenCalled(); expect(history()).toEqual(before);
+  await primeCaches();
+  expect(find).toHaveBeenCalledTimes(3);
+});
+
+it.each([
+  { name: 'null body', body: null },
+  { name: 'array body', body: [] },
+  { name: 'boolean body', body: true },
+  { name: 'number body', body: 1 },
+  { name: 'string body', body: 'consumed' },
+  { name: 'false consumed', body: { consumed: false } },
+  { name: 'null consumed', body: { consumed: null } },
+  { name: 'numeric consumed', body: { consumed: 1 } },
+  { name: 'string consumed', body: { consumed: 'true' } },
+  { name: 'object consumed', body: { consumed: {} } },
+  { name: 'array consumed', body: { consumed: [] } },
+])('rejects a signed malformed $name ACK without persistence or cache invalidation', async ({ body }) => {
+  await start('prod');
+  const find = vi.spyOn(ApprovalCardRepository.prototype, 'findResolvedCardWeb');
+  const ack = vi.spyOn(ApprovalCardRepository.prototype, 'markProcessed');
+  await primeCaches();
+  const before = history();
+  const response = await request('/2/processed', 'POST', body);
+  expect(response.status).toBe(400);
+  // Strict JSON parsing may reject scalar/null bodies before the engine guard.
+  expect(ack).not.toHaveBeenCalled(); expect(history()).toEqual(before);
+  await primeCaches();
+  expect(find).toHaveBeenCalledTimes(3);
+});
+
 it.each([['approved', 2], ['rejected', 3]] as const)(
   'permits signed GET and durable %s ACK while preserving Bot isolation and the first timestamp', async (_status, id) => {
     await start('prod');
@@ -170,7 +235,7 @@ it.each([['approved', 2], ['rejected', 3]] as const)(
     await primeCaches();
     const before = history();
     const now = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
-    const response = await request(`/${id}/processed`, 'POST', {});
+    const response = await request(`/${id}/processed`, 'POST', consumedBody);
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ success: true });
     const card = await new ApprovalCardRepository(state.db!).findById(id);
     expect(card).toMatchObject({ id, processed_at: Math.floor(now / 1000) });
@@ -183,9 +248,23 @@ it.each([['approved', 2], ['rejected', 3]] as const)(
     }
     expect(find).toHaveBeenCalledTimes(6);
     clock.mockReturnValue(now + 1_000);
-    const repeated = await request(`/${id}/processed`, 'POST');
+    const repeated = await request(`/${id}/processed`, 'POST', consumedBody);
     expect(repeated.status).toBe(200); expect(await repeated.json()).toEqual({ success: true });
     expect((await new ApprovalCardRepository(state.db!).findById(id))?.processed_at).toBe(Math.floor(now / 1000));
+    for (const [index, query] of queries.entries()) {
+      expect(await pollIds(query)).toEqual(initialIds[index].filter(value => value !== id));
+    }
+    expect(find).toHaveBeenCalledTimes(9);
+    const consumedHistory = history();
+    for (const legacyBody of [undefined, {}, { legacy: true }]) {
+      const legacy = await request(`/${id}/processed`, 'POST', legacyBody);
+      expect(legacy.status).toBe(200); expect(await legacy.json()).toEqual({ success: true });
+      expect(history()).toEqual(consumedHistory);
+      for (const [index, query] of queries.entries()) {
+        expect(await pollIds(query)).toEqual(initialIds[index].filter(value => value !== id));
+      }
+      expect(find).toHaveBeenCalledTimes(9);
+    }
   },
 );
 
@@ -223,7 +302,7 @@ it.each(['dev', 'prod'] as const)('leaves the user-facing approval pages and ses
 it('retains the existing unsigned dev socket-loopback policy only when no key is configured', async () => {
   await start('dev', '');
   expect(await pollIds('?botId=bot-a', {})).toEqual([2, 1]);
-  const response = await request('/2/processed', 'POST', undefined, {});
+  const response = await request('/2/processed', 'POST', consumedBody, {});
   expect(response.status).toBe(200);
   expect((await new ApprovalCardRepository(state.db!).findById(2))?.processed_at).toEqual(expect.any(Number));
 });

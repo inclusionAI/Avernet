@@ -142,13 +142,13 @@ describe("resolved approval-card consumption", () => {
     add(1, status, "waiting");
     const before = await repo.findById(1);
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_999);
-    expect(await repo.markProcessed(1)).toBe(true);
+    expect(await repo.markProcessed(1, true)).toBe(true);
     const freshRepo = new ApprovalCardRepository(db);
     expect(await freshRepo.findById(1)).toEqual({ ...before, processed_at: 1_800_000_000 });
     for (const botId of [undefined, "bot-a"]) expect(await freshRepo.findResolvedCardWeb(50, botId)).toEqual([]);
 
     clock.mockReturnValue(1_800_000_100_000);
-    expect(await freshRepo.markProcessed(1)).toBe(true);
+    expect(await freshRepo.markProcessed(1, true)).toBe(true);
     expect(await freshRepo.findByFlowId("flow-1")).toEqual([{ ...before, processed_at: 1_800_000_000 }]);
     expect(raw.prepare("SELECT COUNT(*) AS count FROM approval_cards").get()).toEqual({ count: 1 });
   });
@@ -157,7 +157,7 @@ describe("resolved approval-card consumption", () => {
     const { raw, repo, add } = consumptionFixture();
     add(1, "approved", "completed");
     add(2, "rejected", "failed");
-    await repo.markProcessed(2);
+    await repo.markProcessed(2, true);
     const history = raw.prepare("SELECT * FROM approval_cards ORDER BY id").all();
     expect(await repo.findResolvedCardWeb(50, botId)).toEqual([]);
     raw.exec("UPDATE flow_runs SET status = 'running'");
@@ -169,7 +169,7 @@ describe("resolved approval-card consumption", () => {
     const { repo, add } = consumptionFixture();
     add(1, "rejected", "failed");
     expect(await repo.findResolvedCardWeb()).toEqual([]);
-    expect(await repo.markProcessed(1)).toBe(true);
+    expect(await repo.markProcessed(1, true)).toBe(true);
     expect((await repo.findById(1))?.processed_at).toEqual(expect.any(Number));
   });
 
@@ -178,7 +178,7 @@ describe("resolved approval-card consumption", () => {
     if (kind !== "missing") add(1, kind === "other-mode" ? "approved" : kind, "waiting");
     if (kind === "other-mode") raw.exec("UPDATE approval_cards SET delivery_mode = 'card-dingtalk', processed_at = 50");
     const before = raw.prepare("SELECT * FROM approval_cards").all();
-    expect(await repo.markProcessed(1)).toBe(false);
+    expect(await repo.markProcessed(1, true)).toBe(false);
     expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(before);
   });
 
@@ -188,7 +188,7 @@ describe("resolved approval-card consumption", () => {
       add(1, "approved", "waiting");
       const exec = vi.spyOn(db, "exec");
       const query = vi.spyOn(db, "query");
-      expect(await repo.markProcessed(id)).toBe(false);
+      expect(await repo.markProcessed(id, true)).toBe(false);
       expect(exec).not.toHaveBeenCalled();
       expect(query).not.toHaveBeenCalled();
     },
@@ -197,7 +197,7 @@ describe("resolved approval-card consumption", () => {
   it("verifies persisted consumption when MySQL reports zero affected rows on a repeated ack", async () => {
     const { db, repo, add } = consumptionFixture();
     add(1, "approved", "waiting");
-    await repo.markProcessed(1);
+    await repo.markProcessed(1, true);
     const before = await repo.findById(1);
     // MySQL may report changed rows, not matched rows, on an unchanged COALESCE update.
     const exec = db.exec.bind(db);
@@ -206,7 +206,7 @@ describe("resolved approval-card consumption", () => {
       return { affectedRows: 0 };
     });
     const query = vi.spyOn(db, "query");
-    expect(await repo.markProcessed(1)).toBe(true);
+    expect(await repo.markProcessed(1, true)).toBe(true);
     expect(query).toHaveBeenCalled();
     expect(await repo.findById(1)).toEqual(before);
   });
@@ -215,7 +215,7 @@ describe("resolved approval-card consumption", () => {
     const { db, repo, add } = consumptionFixture();
     add(1, "approved", "waiting");
     vi.spyOn(db, "exec").mockResolvedValue({ affectedRows: 0 });
-    expect(await repo.markProcessed(1)).toBe(false);
+    expect(await repo.markProcessed(1, true)).toBe(false);
     expect((await repo.findById(1))?.processed_at).toBeNull();
   });
 
@@ -223,9 +223,80 @@ describe("resolved approval-card consumption", () => {
     const { db, repo, add } = consumptionFixture();
     add(1, "approved", "waiting");
     const exec = vi.spyOn(db, "exec").mockRejectedValue(new Error("write unavailable"));
-    await expect(repo.markProcessed(1)).rejects.toThrow("write unavailable");
+    await expect(repo.markProcessed(1, true)).rejects.toThrow("write unavailable");
     exec.mockResolvedValue({ affectedRows: 0 });
     vi.spyOn(db, "query").mockRejectedValue(new Error("verification unavailable"));
-    await expect(repo.markProcessed(1)).rejects.toThrow("verification unavailable");
+    await expect(repo.markProcessed(1, true)).rejects.toThrow("verification unavailable");
+  });
+});
+
+describe("legacy approval-card acknowledgment", () => {
+  it.each([
+    ["approved", "waiting"], ["rejected", "waiting"],
+    ["approved", "completed"], ["rejected", "failed"],
+  ])("validates %s on a %s flow by reading only", async (status, flowStatus) => {
+    const { raw, db, repo, add } = consumptionFixture();
+    add(1, status, flowStatus);
+    const history = raw.prepare("SELECT * FROM approval_cards").all();
+    const flows = raw.prepare("SELECT * FROM flow_runs").all();
+    const exec = vi.spyOn(db, "exec");
+    const query = vi.spyOn(db, "query");
+
+    expect(await repo.markProcessed(1)).toBe(true);
+    expect(await repo.markProcessed(1, false)).toBe(true);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(exec).not.toHaveBeenCalled();
+    expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(history);
+    expect(raw.prepare("SELECT * FROM flow_runs").all()).toEqual(flows);
+    if (flowStatus === "waiting") {
+      expect((await repo.findResolvedCardWeb()).map((row) => row.id)).toEqual([1]);
+    }
+  });
+
+  it.each(["approved", "rejected"])("leaves a durable %s timestamp intact on later legacy ACKs", async (status) => {
+    const { raw, db, repo, add } = consumptionFixture();
+    add(1, status, "completed");
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_999);
+    expect(await repo.markProcessed(1, true)).toBe(true);
+    const history = raw.prepare("SELECT * FROM approval_cards").all();
+    const exec = vi.spyOn(db, "exec");
+    expect(await repo.markProcessed(1)).toBe(true);
+    expect(await repo.markProcessed(1, false)).toBe(true);
+    expect(exec).not.toHaveBeenCalled();
+    expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(history);
+    expect((await repo.findById(1))?.processed_at).toBe(1_800_000_000);
+  });
+
+  it.each(["pending", "expired", "other-mode", "missing"])("rejects %s without writing", async (kind) => {
+    const { raw, db, repo, add } = consumptionFixture();
+    if (kind !== "missing") add(1, kind === "other-mode" ? "approved" : kind, "waiting");
+    if (kind === "other-mode") raw.exec("UPDATE approval_cards SET delivery_mode = 'card-dingtalk', processed_at = 50");
+    const history = raw.prepare("SELECT * FROM approval_cards").all();
+    const exec = vi.spyOn(db, "exec");
+    const query = vi.spyOn(db, "query");
+    expect(await repo.markProcessed(1)).toBe(false);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(exec).not.toHaveBeenCalled();
+    expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(history);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid legacy IDs without database calls (%s)", async (id) => {
+      const { db, repo } = consumptionFixture();
+      const exec = vi.spyOn(db, "exec");
+      const query = vi.spyOn(db, "query");
+      expect(await repo.markProcessed(id)).toBe(false);
+      expect(exec).not.toHaveBeenCalled();
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
+  it("propagates legacy eligibility read errors without attempting a write", async () => {
+    const { db, repo, add } = consumptionFixture();
+    add(1, "approved", "waiting");
+    const exec = vi.spyOn(db, "exec");
+    vi.spyOn(db, "query").mockRejectedValue(new Error("legacy read unavailable"));
+    await expect(repo.markProcessed(1)).rejects.toThrow("legacy read unavailable");
+    expect(exec).not.toHaveBeenCalled();
   });
 });

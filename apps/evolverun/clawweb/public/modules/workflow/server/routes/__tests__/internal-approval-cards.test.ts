@@ -103,9 +103,9 @@ function makeRepo(opts: {
   };
 }
 
-async function createServer(repo: ApprovalCardRepository) {
+async function createServer(repo: ApprovalCardRepository, strictJson = true) {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ strict: strictJson }));
   app.use("/approval-cards", createInternalApprovalCardsRouter(repo));
   const server = app.listen(0, "127.0.0.1");
   servers.push(server);
@@ -301,8 +301,11 @@ async function pollIds(base: string, query = "") {
   return body.data.map((row: { id: number }) => row.id);
 }
 
-function acknowledge(base: string, id: string | number) {
-  return fetch(`${base}/${id}/processed`, { method: "POST" });
+function acknowledge(base: string, id: string | number, body?: unknown) {
+  return fetch(`${base}/${id}/processed`, {
+    method: "POST",
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
 }
 
 describe("approval poller consumption over HTTP with SQLite", () => {
@@ -347,7 +350,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     for (const [index, query] of queries.entries()) expect(await pollIds(base, query)).toEqual(before[index]);
     expect(find).toHaveBeenCalledTimes(4);
 
-    const response = await acknowledge(base, 1);
+    const response = await acknowledge(base, 1, { consumed: true });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
     const after = raw.prepare("SELECT * FROM approval_cards WHERE id = 1").get() as Record<string, unknown>;
@@ -357,7 +360,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     for (const [index, query] of queries.entries()) expect(await pollIds(base, query)).toEqual(expected[index]);
     expect(find).toHaveBeenCalledTimes(8);
 
-    const repeated = await acknowledge(base, 1);
+    const repeated = await acknowledge(base, 1, { consumed: true });
     expect(repeated.status).toBe(200);
     expect(await repeated.json()).toEqual({ success: true });
     expect(raw.prepare("SELECT * FROM approval_cards WHERE id = 1").get()).toEqual(after);
@@ -404,9 +407,11 @@ describe("approval poller consumption over HTTP with SQLite", () => {
       const history = raw.prepare("SELECT * FROM approval_cards").all();
       const mark = vi.spyOn(repo, "markProcessed");
       const { base } = await createServer(repo);
-      const response = await acknowledge(base, id);
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ success: false, error: "Bad Request" });
+      for (const body of [undefined, {}, { consumed: true }]) {
+        const response = await acknowledge(base, id, body);
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ success: false, error: "Bad Request" });
+      }
       expect(mark).not.toHaveBeenCalled();
       expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(history);
     },
@@ -416,7 +421,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     const { repo, add } = sqliteFixture();
     add(Number(id));
     const { base } = await createServer(repo);
-    const response = await acknowledge(base, id);
+    const response = await acknowledge(base, id, { consumed: true });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
     expect((await repo.findById(Number(id)))?.processed_at).toEqual(expect.any(Number));
@@ -426,7 +431,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     const { raw, repo, add } = sqliteFixture();
     add(1, { flowStatus: "completed" });
     add(2, { status: "rejected", flowStatus: "failed" });
-    await repo.markProcessed(2);
+    await repo.markProcessed(2, true);
     const history = raw.prepare("SELECT * FROM approval_cards ORDER BY id").all();
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { base } = await createServer(repo);
@@ -449,7 +454,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     const find = vi.spyOn(repo, "findResolvedCardWeb");
     const { base } = await createServer(repo);
     expect(await pollIds(base)).toEqual([1]);
-    const response = await acknowledge(base, 2);
+    const response = await acknowledge(base, 2, { consumed: true });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ success: false, error: "Conflict", message: expect.stringMatching(/not found|resolved card-web/i) });
     expect(await pollIds(base)).toEqual([1]);
@@ -466,14 +471,14 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     expect(await pollIds(base)).toEqual([1]);
     raw.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE ON approval_cards
       BEGIN SELECT RAISE(ABORT, 'ack persistence failed'); END;`);
-    const response = await acknowledge(base, 1);
+    const response = await acknowledge(base, 1, { consumed: true });
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ success: false, message: "ack persistence failed" });
     expect(await repo.findById(1)).toEqual(history);
     expect(await pollIds(base)).toEqual([1]);
     expect(find).toHaveBeenCalledTimes(1);
     raw.exec("DROP TRIGGER fail_ack");
-    expect((await acknowledge(base, 1)).status).toBe(200);
+    expect((await acknowledge(base, 1, { consumed: true })).status).toBe(200);
     expect(await pollIds(base)).toEqual([]);
   });
 
@@ -484,7 +489,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     const { base } = await createServer(repo);
     expect(await pollIds(base)).toEqual([1]);
     vi.spyOn(db, "exec").mockResolvedValue({ affectedRows: 0 });
-    const response = await acknowledge(base, 1);
+    const response = await acknowledge(base, 1, { consumed: true });
     expect(response.status).toBe(409);
     expect((await response.json()).success).toBe(false);
     expect((await repo.findById(1))?.processed_at).toBeNull();
@@ -500,7 +505,7 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     expect(await pollIds(base)).toEqual([1]);
     vi.spyOn(db, "exec").mockResolvedValue({ affectedRows: 0 });
     vi.spyOn(db, "query").mockRejectedValue(new Error("ack verification failed"));
-    const response = await acknowledge(base, 1);
+    const response = await acknowledge(base, 1, { consumed: true });
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ success: false, message: "ack verification failed" });
     expect(await pollIds(base)).toEqual([1]);
@@ -535,11 +540,149 @@ describe("approval poller consumption over HTTP with SQLite", () => {
     const { base } = await createServer(repo);
     const inFlight = fetch(`${base}/resolved?botId=bot-a`);
     await capturedRows;
-    const ack = await acknowledge(base, 1);
+    const ack = await acknowledge(base, 1, { consumed: true });
     release();
     expect(ack.status).toBe(200);
     expect((await (await inFlight).json()).data.map((row: { id: number }) => row.id)).toEqual([1]);
     expect(await pollIds(base, "?botId=bot-a")).toEqual([]);
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("legacy and explicit consumption protocol over HTTP", () => {
+  it.each([undefined, {}, { legacy: true }])("legacy body %j reads without writes or cache invalidation", async (body) => {
+    const { raw, db, repo, add } = sqliteFixture();
+    add(1, { status: "approved", owner: null });
+    add(2, { status: "rejected", owner: null });
+    const history = raw.prepare("SELECT * FROM approval_cards ORDER BY id").all();
+    const find = vi.spyOn(repo, "findResolvedCardWeb");
+    const mark = vi.spyOn(repo, "markProcessed");
+    const exec = vi.spyOn(db, "exec");
+    const { base } = await createServer(repo);
+    const queries = ["", "?botId=bot-a", "?botId=bot-b", "?botId=bot-a&limit=1"];
+    const expected = [[2, 1], [2, 1], [2, 1], [2]];
+    for (const [index, query] of queries.entries()) expect(await pollIds(base, query)).toEqual(expected[index]);
+    const query = vi.spyOn(db, "query");
+
+    for (const id of [1, 2]) {
+      const response = await acknowledge(base, id, body);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ success: true });
+      expect(mark).toHaveBeenLastCalledWith(id, false);
+    }
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(exec).not.toHaveBeenCalled();
+    expect(raw.prepare("SELECT * FROM approval_cards ORDER BY id").all()).toEqual(history);
+    for (const [index, key] of queries.entries()) expect(await pollIds(base, key)).toEqual(expected[index]);
+    expect(find).toHaveBeenCalledTimes(4);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["approved", "rejected"])("legacy ACKs accept a terminal %s card and preserve a prior durable timestamp", async (status) => {
+    const { raw, db, repo, add } = sqliteFixture();
+    add(1, { status, flowStatus: "completed" });
+    const { base } = await createServer(repo);
+    const history = await repo.findById(1);
+    const exec = vi.spyOn(db, "exec");
+    expect((await acknowledge(base, 1, {})).status).toBe(200);
+    expect(exec).not.toHaveBeenCalled();
+    expect(await repo.findById(1)).toEqual(history);
+    const durable = await acknowledge(base, 1, { consumed: true });
+    expect(durable.status).toBe(200);
+    expect(await durable.json()).toEqual({ success: true });
+    const consumed = await repo.findById(1);
+    expect(consumed?.processed_at).toEqual(expect.any(Number));
+    exec.mockClear();
+    for (const body of [undefined, {}, { legacy: true }]) {
+      const response = await acknowledge(base, 1, body);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ success: true });
+    }
+    expect(exec).not.toHaveBeenCalled();
+    expect(raw.prepare("SELECT * FROM approval_cards").get()).toEqual(consumed);
+  });
+
+  it.each(["pending", "expired", "other-mode", "missing"])("legacy ACK returns 409 for %s without writes or cache invalidation", async (kind) => {
+    const { raw, db, repo, add } = sqliteFixture();
+    add(1);
+    if (kind !== "missing") add(2, {
+      status: kind === "other-mode" ? "approved" : kind,
+      deliveryMode: kind === "other-mode" ? "card-dingtalk" : "card-web",
+    });
+    const history = raw.prepare("SELECT * FROM approval_cards ORDER BY id").all();
+    const find = vi.spyOn(repo, "findResolvedCardWeb");
+    const exec = vi.spyOn(db, "exec");
+    const { base } = await createServer(repo);
+    expect(await pollIds(base)).toEqual([1]);
+    const response = await acknowledge(base, 2, {});
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ success: false, error: "Conflict" });
+    expect(exec).not.toHaveBeenCalled();
+    expect(await pollIds(base)).toEqual([1]);
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(raw.prepare("SELECT * FROM approval_cards ORDER BY id").all()).toEqual(history);
+  });
+
+  it.each([
+    null, [], [true], "legacy", 1, true, false,
+    { consumed: false }, { consumed: null }, { consumed: 0 }, { consumed: 1 },
+    { consumed: "true" }, { consumed: "false" }, { consumed: "" }, { consumed: [] }, { consumed: {} },
+  ])("rejects invalid body %j before repository/database calls or cache mutation", async (body) => {
+    const { raw, db, repo, add } = sqliteFixture();
+    add(1);
+    const history = raw.prepare("SELECT * FROM approval_cards").all();
+    const find = vi.spyOn(repo, "findResolvedCardWeb");
+    const mark = vi.spyOn(repo, "markProcessed");
+    // A permissive JSON parser ensures the route, not only Express's default
+    // strict parser, enforces the plain-object transport contract.
+    const { base } = await createServer(repo, false);
+    expect(await pollIds(base)).toEqual([1]);
+    const exec = vi.spyOn(db, "exec");
+    const query = vi.spyOn(db, "query");
+    const response = await acknowledge(base, 1, body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ success: false, error: "Bad Request" });
+    expect(mark).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(await pollIds(base)).toEqual([1]);
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(raw.prepare("SELECT * FROM approval_cards").all()).toEqual(history);
+  });
+
+  it("rejects malformed JSON without reaching the repository or invalidating cache", async () => {
+    const { db, repo, add } = sqliteFixture();
+    add(1);
+    const find = vi.spyOn(repo, "findResolvedCardWeb");
+    const mark = vi.spyOn(repo, "markProcessed");
+    const { base } = await createServer(repo);
+    expect(await pollIds(base)).toEqual([1]);
+    const exec = vi.spyOn(db, "exec");
+    const query = vi.spyOn(db, "query");
+    const response = await fetch(`${base}/1/processed`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: '{"consumed":',
+    });
+    expect(response.status).toBe(400);
+    expect(mark).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(await pollIds(base)).toEqual([1]);
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns legacy read failures without writing or clearing cached polls", async () => {
+    const { db, repo, add } = sqliteFixture();
+    add(1);
+    const find = vi.spyOn(repo, "findResolvedCardWeb");
+    const { base } = await createServer(repo);
+    expect(await pollIds(base)).toEqual([1]);
+    const exec = vi.spyOn(db, "exec");
+    vi.spyOn(db, "query").mockRejectedValue(new Error("legacy eligibility failed"));
+    const response = await acknowledge(base, 1, {});
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ success: false, message: "legacy eligibility failed" });
+    expect(exec).not.toHaveBeenCalled();
+    expect(await pollIds(base)).toEqual([1]);
+    expect(find).toHaveBeenCalledTimes(1);
   });
 });

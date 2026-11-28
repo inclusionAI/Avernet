@@ -84,7 +84,7 @@ describe("file-backed approval consumption survives restarts", () => {
     }
 
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_999);
-    expect(await writer.repo.markProcessed(1)).toBe(true);
+    expect(await writer.repo.markProcessed(1, true)).toBe(true);
     const expected = before.map((row: Record<string, unknown>) => row.id === 1
       ? { ...row, processed_at: 1_800_000_000 }
       : row);
@@ -100,7 +100,7 @@ describe("file-backed approval consumption survives restarts", () => {
     expect(persistedRowsInNewProcess(file)).toEqual(expected);
     const restarted = openDatabase(file);
     clock.mockReturnValue(1_800_000_100_000);
-    expect(await restarted.repo.markProcessed(1)).toBe(true);
+    expect(await restarted.repo.markProcessed(1, true)).toBe(true);
     expect(restarted.raw.prepare("SELECT * FROM approval_cards ORDER BY id").all()).toEqual(expected);
     expect(restarted.raw.prepare("SELECT * FROM flow_runs ORDER BY flow_id").all()).toEqual(flows);
     for (const botId of [undefined, "bot-a"]) {

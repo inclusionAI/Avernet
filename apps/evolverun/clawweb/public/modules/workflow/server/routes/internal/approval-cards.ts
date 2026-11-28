@@ -185,12 +185,25 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
         res.status(400).json({ success: false, error: "Bad Request", message: "Invalid id" });
         return;
       }
-      const processed = await approvalCardRepo.markProcessed(id);
+      const body: unknown = req.body === undefined ? {} : req.body;
+      if (body === null || typeof body !== "object" || Object.getPrototypeOf(body) !== Object.prototype) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "Expected a plain JSON object" });
+        return;
+      }
+      const hasConsumed = Object.hasOwn(body, "consumed");
+      const consumed = hasConsumed && (body as Record<string, unknown>).consumed === true;
+      if (hasConsumed && !consumed) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "consumed must be true when supplied" });
+        return;
+      }
+
+      const processed = await approvalCardRepo.markProcessed(id, consumed);
       if (!processed) {
         res.status(409).json({ success: false, error: "Conflict", message: "Card not found or not a resolved card-web approval" });
         return;
       }
-      invalidateResolvedCache();
+      // Old pollers ACK even failed callbacks; only explicit consumption changes delivery.
+      if (consumed) invalidateResolvedCache();
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
