@@ -210,21 +210,25 @@ profile. A host must supply the real capabilities and schedule the worker.
 
 ## Storage, recovery and compatibility
 
-> Partial implementation, no runtime cutover: the [storage foundation](../persistence/RELATIONAL-STORAGE.md)
-> now provides five-table models, strict codecs, business creation/read UoW and isolated SQL tests.
-> The [relational-storage design](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md) proposes using five `ac_context_collab_*` business tables without separate control/identity/receipt/Outbox/slot tables, with Collet content/status and retained Profile/current-rollout associations but no runtime_collet_id/revision/execution_state columns; it records row-lock and feedback-event replay plans plus unresolved full-runtime recovery and protocol compatibility gaps. Execution/progress/feedback migration is not implemented and this does not replace the current runtime storage contract below.
+> Phase-one cutover: profile/Collet creation and business reads now use the five
+> `ac_context_collab_*` tables through the [relational adapter](../persistence/product_business_repository_adapter.py).
+> New Profiles are DRAFT; only ONLINE Profiles admit Collets. Collet creation still
+> validates execution/evidence and MultiRollout capabilities before persistence.
+> The [relational-storage design](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md)
+> deliberately omits separate control/identity/receipt/Outbox/slot tables and the
+> removed runtime control fields. Consequently execution advances, signed progress,
+> interactive successor persistence and worker dispatch are **not implemented on the
+> new five-table state** and the adapter fails closed for its missing `save` contract.
 
-Apply the [v2 DDL](../../sql/2026_11_26_product_runtime_v2.sql). Five base tables hold
-complete configuration, explicit integer identity mappings, a versioned runtime
-snapshot, operation receipts and durable intents; MultiRollout adds one tenant-wide
-candidate admission table. The runtime snapshot contains
-independent Collet/Rollout/Stage records, parent/current relationships, frozen
-Method facts, attempts, leases, sessions and evidence. It is the **single** v2
-execution authority, not a view assembled from process-local Plan/Stage dicts.
-One CAS row intentionally bounds the first serial implementation; snapshots are
-limited to 12 MiB and fail explicitly before MEDIUMTEXT overflow. No unbounded
-history/performance claim is made. Stored graphs/Method prerequisites are checked
-against the exact immutable Profile when reconstructing a runtime.
+The service reads and writes the [business DDL](../../sql/2026_11_27_product_relational_storage.sql):
+Profile, Collet, ColletRollout, StageRollout and Event rows are the authority for
+creation and business history. The adapter reconstructs frozen method declarations
+and the static stage graph from immutable configuration for current query views.
+It does not store a second complete snapshot and cannot persist runtime control facts.
+The older [v2 runtime DDL](../../sql/2026_11_26_product_runtime_v2.sql) and
+[MultiRollout upgrade](../../sql/2026_11_27_multi_rollout.sql) are retained only for
+historical deployments and unit fixtures; the new service DI does not call
+`ac_product_*` repositories. They are not valid fallbacks for the five-table path.
 
 V1 Python consumers use `LegacyProductConfiguration`, `LegacyProductProfileKey`,
 `LegacyCollet` and `LegacyArtifact`; there is no Python `ProductProfileDefinition`
@@ -336,12 +340,18 @@ expected_revision. A valid non-focus candidate may report; concurrent sibling
 reports can CAS-conflict normally. Follow the original-request replay and then
 confirmed-stale/new-technical-ID retry procedure in the L5 guide.
 
-### Storage, scheduling and deployment
+### Legacy runtime storage and scheduling compatibility
 
-New installations use the current [bootstrap DDL](../../sql/2026_11_26_product_runtime_v2.sql).
+The following paragraphs describe the historical `ac_product_*` runtime deployment
+and its unit fixtures. They are **not** instructions for the active five-table
+ProductProfileService deployment: creation/read DI is already bound to the business
+adapter and deliberately schedules no runtime worker until the missing execution
+protocol in [RELATIONAL-STORAGE.md](../persistence/RELATIONAL-STORAGE.md) is delivered.
+
+New historical installations used the old [bootstrap DDL](../../sql/2026_11_26_product_runtime_v2.sql).
 Existing v2 installations must stop writers/workers and apply the additive
-[MultiRollout upgrade](../../sql/2026_11_27_multi_rollout.sql) **once** before running
-new code: outbox logical-key/claim lease/fence columns/indexes and a tenant-wide
+[MultiRollout upgrade](../../sql/2026_11_27_multi_rollout.sql) **once** before running that
+legacy code path: outbox logical-key/claim lease/fence columns/indexes and a tenant-wide
 candidate admission table are required. No separate tables per plan/decision.
 Existing JSON snapshots and receipts are not rewritten. This is not a claim that
 the MySQL script has been executed against a production installation.

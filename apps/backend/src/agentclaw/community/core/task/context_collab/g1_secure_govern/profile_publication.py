@@ -32,3 +32,11 @@ class ProfilePublisherAllowlist:
             raise ContextCollabValidationError(
                 "ProductProfile publication is not authorized"
             )
+
+
+@dataclass(frozen=True)
+class AuthenticatedProfilePublication:
+    """Creation-path auth hook; authenticated actor is not further restricted."""
+
+    def check_publish(self, profile_id: str, version: int, actor: ActorContext) -> None:
+        PrincipalRef.from_dict(actor.actor.to_dict())

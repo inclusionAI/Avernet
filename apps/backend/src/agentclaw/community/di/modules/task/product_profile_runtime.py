@@ -5,6 +5,12 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.context_collab.g1_secure_govern.product_runtime import (
     OwnerProductRuntimeAuthorization,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
+    AuthenticatedProfilePublication,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_use import (
+    AuthenticatedProductProfileUse,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.rollout_contracts import (
     ProductRuntimeAuthorization,
     RolloutExecutionPort,
@@ -21,8 +27,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.rollout_engine impo
 from agentclaw.community.core.task.context_collab.l5_methods.rollout_worker import (
     RolloutIntentWorker,
 )
-from agentclaw.community.core.task.context_collab.l6_products.persistence.rollout_repository import (
-    SqlProductRuntimeRepository,
+from agentclaw.community.core.task.context_collab.l6_products.persistence.product_business_repository_adapter import (
+    ProductBusinessRepositoryAdapter,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.product_relational_repository import (
+    SqlProductBusinessRepository,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.ports import (
     ProductProfileRepository,
@@ -89,22 +98,27 @@ class ProductProfileRuntimeModule(Module):
 
     @singleton
     @provider
-    def repository(self, db: DatabasePlugin) -> SqlProductRuntimeRepository:
-        return SqlProductRuntimeRepository(db)
+    def business_repository(self, db: DatabasePlugin) -> SqlProductBusinessRepository:
+        return SqlProductBusinessRepository(
+            db,
+            AuthenticatedProfilePublication(),
+            AuthenticatedProductProfileUse(),
+            OwnerProductRuntimeAuthorization(),
+        )
 
     @singleton
     @provider
     def profile_repository(
-        self, repository: SqlProductRuntimeRepository
+        self, repository: SqlProductBusinessRepository
     ) -> ProductProfileRepository:
-        return repository
+        return ProductBusinessRepositoryAdapter(repository)
 
     @singleton
     @provider
     def rollout_repository(
-        self, repository: SqlProductRuntimeRepository
+        self, repository: SqlProductBusinessRepository
     ) -> RolloutRepository:
-        return repository
+        return ProductBusinessRepositoryAdapter(repository)
 
     @singleton
     @provider
