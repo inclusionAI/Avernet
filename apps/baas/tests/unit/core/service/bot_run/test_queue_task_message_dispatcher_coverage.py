@@ -260,6 +260,7 @@ class TestDispatchSendStreamEngineType:
         d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
         run = MagicMock()
         run.status = "FAILED"
+        run.error = None
         d._run_repository.get_by_run_id.return_value = run
 
         chunks = []
@@ -462,6 +463,7 @@ class TestDispatchSendStream:
             chunks.append(c)
         assert len(chunks) == 1
         assert chunks[0].type == "error"
+        assert chunks[0].content == "fail"
 
     @pytest.mark.asyncio
     async def test_stream_with_agent_chunk(self):
@@ -615,7 +617,66 @@ class TestDispatchSendStream:
             chunks.append(c)
         assert len(chunks) == 1
         assert chunks[0].type == "error"
-        assert "FAILED" in chunks[0].content
+        assert chunks[0].content == "run terminated with status FAILED"
+
+    @pytest.mark.parametrize("status", ["FAILED", "TIME_OUT"])
+    @pytest.mark.asyncio
+    async def test_stream_run_terminated_prefers_persisted_error(self, status):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = None
+        run = MagicMock()
+        run.status = status
+        run.error = (
+            "chat.send failed: WORKSPACE_PREPARE_FAILED - "
+            "application workspace warmup failed"
+        )
+        d._run_repository.get_by_run_id.return_value = run
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+
+        assert len(chunks) == 1
+        assert chunks[0].type == "error"
+        assert chunks[0].content == (
+            "chat.send failed: WORKSPACE_PREPARE_FAILED - "
+            "application workspace warmup failed"
+        )
+
+    @pytest.mark.parametrize("error", [None, "", " \t\n", {"message": "private"}])
+    @pytest.mark.parametrize("status", ["FAILED", "TIME_OUT"])
+    @pytest.mark.asyncio
+    async def test_stream_run_terminated_without_text_error_uses_status(
+        self, status, error
+    ):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = None
+        run = MagicMock()
+        run.status = status
+        run.error = error
+        d._run_repository.get_by_run_id.return_value = run
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+
+        assert len(chunks) == 1
+        assert chunks[0].type == "error"
+        assert chunks[0].content == f"run terminated with status {status}"
 
     @pytest.mark.asyncio
     async def test_stream_run_terminated_timeout(self):
@@ -623,6 +684,7 @@ class TestDispatchSendStream:
         d._cache_plugin.get.return_value = None
         run = MagicMock()
         run.status = "TIME_OUT"
+        run.error = None
         d._run_repository.get_by_run_id.return_value = run
 
         chunks = []
@@ -644,6 +706,7 @@ class TestDispatchSendStream:
         d._cache_plugin.get.return_value = None
         run = MagicMock()
         run.status = "ABORTED"
+        run.error = "must not replace abort semantics"
         d._run_repository.get_by_run_id.return_value = run
 
         chunks = []
