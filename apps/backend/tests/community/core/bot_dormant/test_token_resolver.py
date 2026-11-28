@@ -116,6 +116,9 @@ def test_dormant_service_provider_passes_common_whitelist_service():
         recycle_service=MagicMock(),
         scan_policy=MagicMock(),
         common_whitelist_service=common_whitelist_service,
+        activate_service=MagicMock(),
+        auto_reactivate_policy=MagicMock(),
+        auto_reactivate_whitelist=MagicMock(),
         config=DormantConfig(),
         notify_config=DormantNotifyConfig(),
     )
