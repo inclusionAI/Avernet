@@ -211,6 +211,11 @@ fn is_lock_wait_timeout(err: &ServiceError) -> bool {
     message.contains("1205") || message.to_ascii_lowercase().contains("lock wait timeout")
 }
 
+fn is_duplicate_key(err: &ServiceError) -> bool {
+    let message = err.to_string();
+    message.contains("1062") || message.to_ascii_lowercase().contains("duplicate entry")
+}
+
 fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -738,7 +743,7 @@ impl DbConnectService {
                 .await
             {
                 Ok(result) => return Ok(result),
-                Err(err) if is_lock_wait_timeout(&err) && attempts < 2 => {
+                Err(err) if (is_lock_wait_timeout(&err) || is_duplicate_key(&err)) && attempts < 2 => {
                     attempts += 1;
                     warn!(
                         caller = %caller,
@@ -746,7 +751,7 @@ impl DbConnectService {
                         env = %self.env,
                         attempt = attempts,
                         error = %err,
-                        "retrying edge-permission friend-edge sync after lock wait timeout"
+                        "retrying edge-permission friend-edge sync after transient db error"
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(20 * attempts)).await;
                 }
