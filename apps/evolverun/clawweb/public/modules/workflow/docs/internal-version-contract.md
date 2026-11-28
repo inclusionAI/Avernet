@@ -68,6 +68,62 @@ contracts, nor relax legacy pinned dependency-lock validation.
 
 These changes are additive and require no schema migration: the two run columns already exist. Deploy the Avernet backend before the matching ClawMind client so version metadata is retained and pack-pinned historical lookups receive pack identity.
 
+## Run completion phase
+
+`PUT /runs/:flowId/completion` accepts optional `current_phase` from ClawMind's
+`completion.currentPhase` and stores it in `flow_runs.current_phase` in the same
+accepted write as the final status and completion metadata. The completion
+response envelope is unchanged; `GET /runs/:flowId` returns the stored phase.
+
+| Request field | Persistence semantics |
+| --- | --- |
+| Omitted (`undefined` in the sender) | Preserve the stored phase for legacy callers. |
+| `null` | Explicitly clear the stored phase. |
+| String, including `""`, `"P5"`, or `"P7"` | Store verbatim, without trimming or inferring a phase. |
+| Any other JSON type | HTTP 400 before any completion write. |
+
+`FlowRunCompletion.currentPhase` has the same undefined/null/string semantics
+for direct repository callers. Phase is not derived from `result_json`,
+`input_json`, or `state_json`. This patch only carries the phase field; it does
+not add a phase-only write or change timeout, cancellation, epoch, observer, or
+closeout guards. Database write failures propagate as HTTP 500; a missing run
+returns HTTP 404 and an existing run rejected by the guards returns HTTP 409.
+
+Terminal handling follows the current completion policy, not a blanket rejection
+of every terminal row. Plain failed completion cannot overwrite normalized saved
+succeeded/cancelled/canceled states. Its first failure settlement notifies the
+terminal observer once; an accepted failed-detail supplement can update an
+explicit phase without another notification. Explicit epoch guards still apply:
+a mismatched epoch is rejected, as is a positive-epoch supplement to an already
+settled failed row. A proven duplicate timeout returns HTTP 200 **without writing
+any fields**, including an explicitly supplied phase, and without another
+observer notification. Timeout policy/evidence checks, exact snapshot CAS, and
+server-generated timeout completion timestamps remain unchanged. Late node
+counter writes still cannot change settled closeout counts. See the existing
+[timeout write policy](../../../../docs/workflow-timeout-write-policy.md).
+
+The current ClawMind sender serializes `current_phase` only when
+`completion.currentPhase !== undefined` and also sends
+`retry_epoch = executionEpoch(completion.retryEpoch)`. Do not drop that epoch or
+convert an undefined phase to null. The no-epoch behavior recorded in the
+restart-recovery compatibility section below remains for legacy callers; it is
+not the current sender's wire behavior.
+
+For **phase-field compatibility only**, deploy a supporting Avernet ClawWeb
+receiver before relying on the sender's phase field: older receivers ignore it.
+This is not a standalone rollout plan. Overall deployment must still follow the
+existing timeout/epoch isolation and coordinated rollout requirements, including
+upgrading the actual write-serving instances. This additive phase patch uses the
+existing column and needs no schema migration; it does not certify deployment or
+relax controller fences.
+
+This fix only persists future accepted completion writes. Historic missing
+`workflow_succeeded` callbacks require explicit, authorized notification-only
+compensation using authoritative terminal status and receiver deduplication
+checks. This must not rerun business nodes or weaken ownership or cancellation
+guards. No automated replay is supplied; a phase update alone is not notification
+compensation.
+
 ## Restart recovery retry compatibility
 
 Current ClawMind performs retry bookkeeping in its local journal. It uses the existing `PUT /runs/:flowId/status` with `status: running`, waits for that write, then starts execution. The status write clears the previous `completed_at`, preserving `started_at` and node history. When it reopens a non-running record with a positive epoch, the same atomic update resets that epoch to zero so the preceding explicit-epoch client cannot finish the new attempt. Already-running status updates do not reset the epoch. Schemas without the column use the original status update; other database errors are propagated. It no longer calls `retry-resume` or sends `retry_epoch` on status, completion, or timeout writes.

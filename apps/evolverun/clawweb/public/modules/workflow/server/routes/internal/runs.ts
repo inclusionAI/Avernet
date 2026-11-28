@@ -306,10 +306,11 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch } = req.body as {
+      const { status, result_json, input_json, current_phase, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch } = req.body as {
         status?: string;
         result_json?: string;
         input_json?: string;
+        current_phase?: string | null;
         total_duration_ms?: number;
         total_token_usage?: number;
         succeeded_count?: number;
@@ -327,6 +328,11 @@ export function createInternalRunsRouter(
         return;
       }
 
+      if (current_phase !== undefined && current_phase !== null && typeof current_phase !== "string") {
+        res.status(400).json({ success: false, error: "Bad Request", message: "current_phase must be a string or null" });
+        return;
+      }
+
       const completion: import("../../repositories/flow-run-repository.js").FlowRunCompletion = {
         status: status!,
         totalDurationMs: total_duration_ms ?? null,
@@ -340,6 +346,9 @@ export function createInternalRunsRouter(
       }
       if (input_json !== undefined) {
         completion.inputJson = input_json;
+      }
+      if (current_phase !== undefined) {
+        completion.currentPhase = current_phase;
       }
       if (succeeded_count !== undefined) {
         completion.succeededCount = succeeded_count;

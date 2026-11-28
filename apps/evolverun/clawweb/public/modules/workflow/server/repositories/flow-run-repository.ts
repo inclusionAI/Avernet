@@ -110,6 +110,7 @@ export type FlowRunCompletion = {
   inputJson?: string | null;
   totalDurationMs?: number | null;
   totalTokenUsage?: number | null;
+  /** undefined preserves the stored phase; null clears it; strings are stored verbatim. */
   currentPhase?: string | null;
   succeededCount?: number;
   failedCount?: number;

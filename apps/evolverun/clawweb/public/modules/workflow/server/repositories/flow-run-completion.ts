@@ -3,11 +3,12 @@ import type { FlowRunCompletion } from './flow-run-repository.js';
 import { isTimeoutResult, writeTimeoutFailure, type CompletionOutcome } from './flow-run-timeout-write.js';
 
 function completionPatch(db: IDatabase, flowId: string, completion: FlowRunCompletion) {
-  // undefined preserves the previous result/input; null explicitly overwrites it.
+  // undefined preserves the previous result/input/phase; null explicitly overwrites it.
   const sets = ['status = ?', 'total_duration_ms = ?', 'total_token_usage = ?',
-    'current_phase = ?', 'completed_at = ?', 'gmt_modified = ?'];
+    'completed_at = ?', 'gmt_modified = ?'];
   const values: unknown[] = [completion.status, completion.totalDurationMs ?? null,
-    completion.totalTokenUsage ?? null, completion.currentPhase ?? null, completion.completedAt, db.dialect.now()];
+    completion.totalTokenUsage ?? null, completion.completedAt, db.dialect.now()];
+  if (completion.currentPhase !== undefined) { sets.push('current_phase = ?'); values.push(completion.currentPhase); }
   if (completion.resultJson !== undefined) { sets.push('result_json = ?'); values.push(completion.resultJson); }
   if (completion.inputJson !== undefined) { sets.push('input_json = ?'); values.push(completion.inputJson); }
   if (completion.succeededCount !== undefined) {
