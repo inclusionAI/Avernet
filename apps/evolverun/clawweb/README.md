@@ -16,6 +16,7 @@ launching, and product boundaries.
 
 ## Workflow safety
 
+- [Success callback compensation](public/modules/workflow/docs/callback-compensation.md): administrator-only notification recovery in the native ClawWeb run overview, reviewed receiver/generation evidence, protected persistent batches and fail-closed execution.
 - [Approval consumption contract](public/modules/workflow/docs/approval-consumption-contract.md): terminal-run polling exclusion, durable approval acknowledgments, and schema-first rollout.
 - [Workflow timeout write policy](docs/workflow-timeout-write-policy.md): the executor decides
   when a run times out; Clawweb fences the database write and notifies the

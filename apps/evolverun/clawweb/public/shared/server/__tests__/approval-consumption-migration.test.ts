@@ -78,7 +78,7 @@ describe('approval consumption migration v159', () => {
       .toEqual([[], []]);
   });
 
-  it('creates a complete fresh SQLite schema and ledger through v159, once', async () => {
+  it('creates a complete fresh SQLite schema and ledger through v160, once', async () => {
     const db = new SqliteDatabase(new Database(':memory:'));
     opened.push(db);
     await runMigrations(db, 'sqlite');

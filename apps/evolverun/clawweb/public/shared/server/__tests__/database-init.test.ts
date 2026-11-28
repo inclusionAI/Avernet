@@ -34,6 +34,7 @@ vi.mock("../schema-ordinary-run-request.js", async original => ({
 vi.mock("../schema-distributed-lock.js", () => ({ distributedLockMigrations: [] }));
 vi.mock("../schema-aistudio-train.js", () => ({ aistudioTrainMigrations: [] }));
 vi.mock("../schema-approval-consumption.js", () => ({ approvalConsumptionMigrations: [] }));
+vi.mock("../schema-callback-compensation.js", () => ({ callbackCompensationMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";
 const ledgerInsert = "INSERT INTO schema_version (version, description) VALUES (?, ?)";

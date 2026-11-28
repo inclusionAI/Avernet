@@ -20,6 +20,7 @@
  * - SQLite: Uses AFTER UPDATE triggers for gmt_modified auto-update
  */
 
+import { callbackCompensationMigrations } from './schema-callback-compensation.js';
 import type { Migration } from './schema-types.js';
 export type { DbType, Migration } from './schema-types.js';
 import { migrationsV1To36 } from './schema-v1-36.js';
@@ -115,4 +116,5 @@ export const migrations: readonly Migration[] = [
   ...workflowAiDraftMigrations,
   ...botDiagnosisRecoveryMigrations,
   ...flowRunLineageMigrations,
+  ...callbackCompensationMigrations,
 ];

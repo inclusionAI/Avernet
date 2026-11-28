@@ -15,6 +15,7 @@ import ErrorState from '../ErrorState'
 import { formatTimeShort, formatDuration } from '../../utils/time'
 import type { FlowRun, WorkflowTypeRow } from '@avernet/clawweb-shared/web/types'
 import TimeRangeFilter, { toTimeRange } from '../TimeRangeFilter'
+import { CallbackCompensation } from '../callback-compensation/CallbackCompensation'
 
 function TrendTabs({
   workflowId,
@@ -550,27 +551,30 @@ function OverviewContent({ workflow }: OverviewTabProps) {
               节点分析
             </button>
           </div>
-          <button
-            onClick={() => { void refetch(); void refetchMetrics() }}
-            disabled={isRefreshing}
-            aria-busy={isRefreshing}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <svg
-              className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <div className="flex flex-wrap items-center gap-2">
+            <CallbackCompensation workflowId={workflowId} title={workflow.workflow_title ?? undefined} visible={activeSubTab === 'runs'} />
+            <button
+              onClick={() => { void refetch(); void refetchMetrics() }}
+              disabled={isRefreshing}
+              aria-busy={isRefreshing}
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            刷新
-          </button>
+              <svg
+                className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              刷新
+            </button>
+          </div>
         </div>
 
         {activeSubTab === 'runs' && (

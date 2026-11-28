@@ -1,6 +1,7 @@
 import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { callbackCompensationDdl } from '../schema-callback-compensation.js';
 import { distributedLockMigrations } from '../schema-distributed-lock.js';
 import { approvalConsumptionMigrations } from '../schema-approval-consumption.js';
 import { aistudioTrainMigrations } from '../schema-aistudio-train.js';
@@ -36,6 +37,7 @@ describe('AIStudio schema migration', () => {
       raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
       // Provision later additive schema before asserting retired migrations are no-DDL.
       await distributedLockMigrations[0].migrate!(db);
+      for (const ddl of callbackCompensationDdl) await db.exec(db.dialect.renderDdl(ddl));
       seedLegacyApprovalCards(raw);
       await approvalConsumptionMigrations[0].migrate!(db);
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
@@ -68,6 +70,7 @@ describe('AIStudio schema migration', () => {
       raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
       // Provision later additive schema before asserting retired migrations are no-DDL.
       await distributedLockMigrations[0].migrate!(db);
+      for (const ddl of callbackCompensationDdl) await db.exec(db.dialect.renderDdl(ddl));
       seedLegacyApprovalCards(raw);
       await approvalConsumptionMigrations[0].migrate!(db);
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
