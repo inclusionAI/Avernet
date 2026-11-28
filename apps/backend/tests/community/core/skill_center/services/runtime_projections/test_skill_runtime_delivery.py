@@ -20,6 +20,14 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeProjectionResolver,
 )
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    LAYOUT_CONTRACT_VERSION,
+    MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
+    RUNTIME_NOT_BOUND_REASON,
+    RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
     SkillRuntimeDelivery,
 )
@@ -78,6 +86,9 @@ class _MissingLayoutRepository:
 
 
 class _DeviceContexts:
+    def __init__(self, *, bot_type: str = "desktop") -> None:
+        self.bot_type = bot_type
+
     def resolve_for_bot(self, bot_id: str, owner_id: str) -> DeviceContext:
         return DeviceContext(
             provider="baas",
@@ -85,7 +96,7 @@ class _DeviceContexts:
             binding_id=19,
             bot_id=bot_id,
             user_id=owner_id,
-            bot_type="desktop",
+            bot_type=self.bot_type,
         )
 
 
@@ -102,9 +113,15 @@ class _CenterContent:
 
 
 class _RecordingPoolRuntime:
-    def __init__(self, *, fallback: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fallback: bool = False,
+        probe_result: RuntimeLayoutProbeResult | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.fallback = fallback
+        self.probe_result = probe_result
 
     async def apply_mappings(self, **kwargs):
         self.calls.append(("apply", kwargs))
@@ -138,7 +155,18 @@ class _RecordingPoolRuntime:
 
     async def probe(self, **kwargs):
         self.calls.append(("probe", kwargs))
-        return type("Probe", (), {"evidence": {}})()
+        if self.probe_result is not None:
+            return self.probe_result
+        return RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.READY,
+            engine=str(kwargs.get("engine") or "openclaw"),
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id="prep-1",
+            evidence={
+                "mapping_contract_version": MAPPING_CONTRACT_VERSION,
+                "supported_mapping_contract_versions": [MAPPING_CONTRACT_VERSION],
+            },
+        )
 
     async def publish_mappings(self, **kwargs):
         self.calls.append(("publish", kwargs))
@@ -171,6 +199,7 @@ class _Factory:
 
 def _plan(
     *assets: RegisteredSkillAsset,
+    bot_type: str = "desktop",
 ) -> ResolvedSkillPlan:
     return ResolvedSkillPlan(
         bot_id="bot-1",
@@ -179,18 +208,24 @@ def _plan(
             "env": "pre",
             "entity_id": "owner-1",
             "active_engine": "openclaw",
-            "bot_type": "desktop",
+            "bot_type": bot_type,
         },
         engine="openclaw",
         projection=RuntimeProjectionResolver().resolve_skills(tuple(assets)),
     )
 
 
-def _delivery(pool_runtime, pool_layouts, *, center_content=None):
+def _delivery(
+    pool_runtime,
+    pool_layouts,
+    *,
+    center_content=None,
+    device_contexts=None,
+):
     return SkillRuntimeDelivery(
         pool_runtime=pool_runtime,
         pool_layouts=pool_layouts,
-        device_contexts=_DeviceContexts(),
+        device_contexts=device_contexts or _DeviceContexts(),
         center_content=center_content or _CenterContent(),
     )
 
@@ -599,6 +634,226 @@ async def test_legacy_verify_contract_unsupported_is_non_retryable() -> None:
     assert result.issues[0].code == "ENGINE_SKILL_MAPPING_UNSUPPORTED"
     assert result.issues[0].retryable is False
     assert [name for name, _ in pool.calls] == ["apply", "publish", "verify"]
+
+
+def _center_asset() -> RegisteredSkillAsset:
+    return RegisteredSkillAsset(
+        skill_id=9,
+        name="writer",
+        git_path="center://external-code",
+        skill_uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sc_version_number="17",
+    )
+
+
+def _probe_result(
+    status: RuntimeLayoutProbeStatus,
+    *,
+    supported: tuple[str, ...] = (),
+    reason: str | None = None,
+    center_mount: dict | None = None,
+) -> RuntimeLayoutProbeResult:
+    evidence: dict[str, object] = {}
+    if supported:
+        evidence["supported_mapping_contract_versions"] = list(supported)
+    if reason is not None:
+        evidence["reason"] = reason
+    if center_mount is not None:
+        evidence["center_mount"] = center_mount
+    return RuntimeLayoutProbeResult(
+        status=status,
+        engine="openclaw",
+        layout_contract_version=LAYOUT_CONTRACT_VERSION,
+        preparation_id=(
+            "prep-1" if status is RuntimeLayoutProbeStatus.READY else None
+        ),
+        evidence=evidence,
+    )
+
+
+@pytest.mark.asyncio
+async def test_center_probe_transient_error_stays_retryable() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert [issue.code for issue in result.issues] == ["SKILL_RUNTIME_UNAVAILABLE"]
+    assert result.issues[0].retryable is True
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_probe_not_capable_degrades_without_raising() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            reason="runtime_layout_probe_endpoint_absent",
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert [issue.code for issue in result.issues] == [
+        "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    ]
+    assert result.issues[0].retryable is False
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_not_bound_probe_stays_retryable() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            reason=RUNTIME_NOT_BOUND_REASON,
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert [issue.code for issue in result.issues] == ["SKILL_RUNTIME_UNAVAILABLE"]
+    assert result.issues[0].retryable is True
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_invalid_probe_degrades_without_raising() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(RuntimeLayoutProbeStatus.INVALID),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert [issue.code for issue in result.issues] == [
+        "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    ]
+    assert result.issues[0].retryable is False
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_ready_without_v3_degrades_without_raising() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.READY,
+            supported=(MAPPING_CONTRACT_VERSION,),
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert [issue.code for issue in result.issues] == [
+        "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    ]
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_restart_required_without_v3_asks_for_restart() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.READY,
+            supported=(MAPPING_CONTRACT_VERSION,),
+            center_mount={
+                "status": "NOT_READY",
+                "reason": "center_mount_not_loaded",
+                "restart_required": True,
+            },
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert [issue.code for issue in result.issues] == [
+        "CENTER_RUNTIME_RESTART_REQUIRED"
+    ]
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_ready_with_v3_publishes_logical_mapping() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.READY,
+            supported=(MAPPING_CONTRACT_VERSION, MAPPING_V3_CONTRACT_VERSION),
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert [name for name, _ in pool.calls] == [
+        "apply",
+        "probe",
+        "publish",
+        "verify",
+    ]
+    publish_request = pool.calls[2][1]
+    assert publish_request["mapping_contract_version"] == MAPPING_V3_CONTRACT_VERSION
 
 
 @pytest.mark.asyncio
