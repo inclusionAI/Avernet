@@ -5,6 +5,7 @@
 //! - Custom tag-based log level control (e.g. `target: "audit"`)
 //! - Multiple file outputs with target-based routing
 //! - Daily log rotation: current log is `bcs.log`, rotated to `bcs.log.2026-04-07`
+//! - Sparse-output roll at creation: an existing file whose last write predates the current period is rolled first
 //! - Automatic cleanup of old log files (`max_keep_days`)
 
 use crate::config::{LogOutputConfig, LogOutputFormat, LoggingConfig};
@@ -220,9 +221,33 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
         .with_target(A2A_HTTP_CLIENT_DIGEST_TARGET, LevelFilter::OFF)
 }
 
-/// Get today's date string in local time (YYYY-MM-DD).
-fn today_local() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
+/// Period key under the active rotation cadence. Today the key is one local
+/// calendar day (`YYYY-MM-DD`) and doubles as the archive suffix; both the
+/// write-path roll and the creation roll share this key, so a cadence change
+/// (e.g. hourly `YYYY-MM-DD-HH`) edits one function, not two roll sites.
+fn rotation_period_key(modified: SystemTime) -> String {
+    chrono::DateTime::<chrono::Local>::from(modified).format("%Y-%m-%d").to_string()
+}
+
+/// Archive path of a finished period (uuid suffix on name collision).
+fn archive_log_path(dir: &Path, file_name: &str, period_key: &str) -> PathBuf {
+    let rotated = dir.join(format!("{}.{}", file_name, period_key));
+    if rotated.exists() { dir.join(format!("{}.{}.{}", file_name, period_key, uuid::Uuid::new_v4().simple())) } else { rotated }
+}
+
+/// Roll an existing active log whose last write predates the current period
+/// (sparse outputs stay quiet for days across restarts, so the write-path
+/// period check never fires for them). Best-effort: stderr, never panic.
+fn roll_stale_active_log(dir: &Path, file_name: &str, current_key: &str) {
+    let file_path = dir.join(file_name);
+    let Some(modified) = file_path.metadata().ok().and_then(|m| m.modified().ok()) else { return };
+    let file_key = rotation_period_key(modified);
+    // Same-period (or clock-skewed future) files stay untouched.
+    if file_key.as_str() >= current_key { return; }
+    let rotated = archive_log_path(dir, file_name, &file_key);
+    if let Err(error) = fs::rename(&file_path, &rotated) {
+        eprintln!("[logging] WARNING: failed to roll stale log '{}' to '{}': {error}", file_path.display(), rotated.display());
+    }
 }
 
 fn console_ansi_enabled() -> bool {
@@ -236,10 +261,9 @@ fn console_ansi_enabled_for(is_terminal: bool, no_color: Option<&OsStr>) -> bool
 
 // ─── RotatingFileWriter ─────────────────────────────────────────────────────
 
-/// A daily-rotating file writer.
-///
-/// Current log is always `{dir}/{file_name}` (no date suffix).
-/// On date change, renames to `{dir}/{file_name}.{YYYY-MM-DD}` and creates a new file.
+/// A period-rotating file writer (currently one local calendar day).
+/// Current log is always `{dir}/{file_name}` (no suffix); on period change it
+/// is renamed to `{dir}/{file_name}.{YYYY-MM-DD}` and recreated.
 #[derive(Clone)]
 struct RotatingFileWriter {
     inner: Arc<Mutex<RotatingInner>>,
@@ -248,14 +272,17 @@ struct RotatingFileWriter {
 struct RotatingInner {
     dir: PathBuf,
     file_name: String,
-    current_date: String,
+    current_period: String,
     file: File,
 }
 
 impl RotatingFileWriter {
     fn new(dir: &Path, file_name: &str) -> Self {
-        let current_date = today_local();
+        let current_period = rotation_period_key(SystemTime::now());
         let file_path = dir.join(file_name);
+        // Sparse outputs may hold pre-period content across restarts; the
+        // write-path period check only fires on a write.
+        roll_stale_active_log(dir, file_name, &current_period);
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -268,7 +295,7 @@ impl RotatingFileWriter {
             inner: Arc::new(Mutex::new(RotatingInner {
                 dir: dir.to_path_buf(),
                 file_name: file_name.to_string(),
-                current_date,
+                current_period,
                 file,
             })),
         }
@@ -281,21 +308,17 @@ struct RotatingWriterGuard<'a>(std::sync::MutexGuard<'a, RotatingInner>);
 impl<'a> Write for RotatingWriterGuard<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let inner = &mut *self.0;
-        let today = today_local();
-        if today != inner.current_date {
+        let period_key = rotation_period_key(SystemTime::now());
+        if period_key != inner.current_period {
             let current_path = inner.dir.join(&inner.file_name);
-            let rotated = inner.dir.join(format!("{}.{}", inner.file_name, inner.current_date));
-
+            let rotated = archive_log_path(&inner.dir, &inner.file_name, &inner.current_period);
             inner.file.flush()?;
-            let rotated = if rotated.exists() {
-                inner.dir.join(format!("{}.{}.{}", inner.file_name, inner.current_date, uuid::Uuid::new_v4().simple()))
-            } else { rotated };
             fs::rename(&current_path, &rotated)?;
             match OpenOptions::new().create(true).append(true).open(&current_path) {
                 Ok(file) => inner.file = file,
                 Err(error) => { let _ = fs::rename(&rotated, &current_path); return Err(error); }
             }
-            inner.current_date = today;
+            inner.current_period = period_key;
         }
         inner.file.write(buf)
     }
@@ -651,7 +674,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut writer = RotatingFileWriter::new(dir.path(), "message-delivery.log");
         writer.write_all(b"old\n").unwrap();
-        writer.inner.lock().unwrap().current_date = "2000-01-01".into();
+        writer.inner.lock().unwrap().current_period = "2000-01-01".into();
         writer.write_all(b"new\n").unwrap(); writer.flush().unwrap();
         let rotated = dir.path().join("message-delivery.log.2000-01-01");
         assert_eq!(fs::read_to_string(&rotated).unwrap(), "old\n");
@@ -661,6 +684,28 @@ mod tests {
         output.path = dir.path().to_string_lossy().into_owned();
         cleanup_old_logs(&output);
         assert!(!rotated.exists()); assert!(dir.path().join("message-delivery.log").exists());
+    }
+
+    #[test]
+    fn writer_creation_rolls_stale_active_log_but_not_todays() {
+        let dir = tempfile::tempdir().unwrap();
+        let stale = dir.path().join("sparse.log");
+        fs::write(&stale, "old\n").unwrap();
+        let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 86400);
+        File::open(&stale).unwrap().set_times(fs::FileTimes::new().set_modified(two_days_ago)).unwrap();
+        let warm = dir.path().join("warm.log");
+        fs::write(&warm, "keep\n").unwrap();
+        let now = SystemTime::now();
+        File::open(&warm).unwrap().set_times(fs::FileTimes::new().set_modified(now)).unwrap();
+        let _stale_writer = RotatingFileWriter::new(dir.path(), "sparse.log");
+        let mut warm_writer = RotatingFileWriter::new(dir.path(), "warm.log");
+        warm_writer.write_all(b"new\n").unwrap(); warm_writer.flush().unwrap();
+        let file_key = rotation_period_key(two_days_ago);
+        assert_ne!(file_key, rotation_period_key(SystemTime::now()));
+        assert_eq!(fs::read_to_string(dir.path().join(format!("sparse.log.{file_key}"))).unwrap(), "old\n");
+        assert_eq!(fs::metadata(&stale).unwrap().len(), 0);
+        assert_eq!(fs::read_to_string(&warm).unwrap(), "keep\nnew\n");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
     }
 
     #[test]
