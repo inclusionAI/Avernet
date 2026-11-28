@@ -188,6 +188,23 @@ def test_auto_approval_atomically_grants_admin_and_notifies_applicant(setup):
         repo.create_bot_editor_request(**request)
 
 
+def test_pending_copy_shows_applicant_nickname(setup):
+    db, repo, request, _ = setup
+    request["applicant_name"] = "花花"
+    result = repo.create_bot_editor_request(**request)
+    assert result.status is WorkOrderStatus.PENDING
+    with db.orm_session() as session:
+        pending_notice = (
+            session.query(WorkOrderNotificationModel)
+            .filter_by(recipient_user_id="owner")
+            .one()
+        )
+        assert (
+            pending_notice.content
+            == "用户「花花」申请共同编辑 Bot「Test Bot」，请及时处理。"
+        )
+
+
 def test_policy_changes_only_affect_new_applications(setup):
     db, repo, request, policy = setup
     pending = repo.create_bot_editor_request(**request)
