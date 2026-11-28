@@ -1577,6 +1577,62 @@ impl DbBotAuthorityStore {
             // remainder (already registry-filtered); they
             // only classify into restores (revoked row)
             // and fresh inserts.
+            //
+            // Before classifying, filter out members who
+            // already have ANY edge (not just manager) —
+            // the unique constraint uk_edge_from_to_env_ref
+            // spans all grant_kinds and a non-manager row
+            // (e.g. owner) would cause a duplicate-key INSERT.
+            // We check grant_ref_id = 0 without filtering on
+            // rules because the unique constraint does not
+            // include the rules column.
+            let (pending_adds, skipped_pending) = {
+                let mut existing = std::collections::HashSet::new();
+                for chunk in pending_adds.chunks(MANAGER_CHUNK) {
+                    let mut params = vec![self.env_param(), DbValue::from(command.bot_id.as_str())];
+                    params.extend(
+                        chunk.iter().map(|member| DbValue::from(member.as_str())),
+                    );
+                    let rows = self
+                        .query(
+                            "authority_existing_edges_chunk",
+                            DbStatement::with_params(
+                                format!(
+                                    "SELECT from_id FROM edge_grants                                      WHERE env = ? AND {}                                        AND grant_kind <> 'manager'                                        AND grant_ref_id = 0                                        AND {}",
+                                    self.to_id_eq(),
+                                    self.from_id_in(chunk.len())
+                                )
+                                .as_str(),
+                                params,
+                            ),
+                        )
+                        .await?;
+                    for row in &rows {
+                        let from_id = crate::required_string(row, "from_id")?;
+                        existing.insert(from_id);
+                    }
+                }
+                let mut filtered: Vec<String> = Vec::new();
+                let mut skipped: Vec<String> = Vec::new();
+                for actor in pending_adds {
+                    if existing.contains(&actor) {
+                        skipped.push(actor);
+                    } else {
+                        filtered.push(actor);
+                    }
+                }
+                if !skipped.is_empty() {
+                    warn!(
+                        operation = op,
+                        env = %self.env(),
+                        bot_id = %command.bot_id,
+                        mutation_id = %command.mutation.mutation_id,
+                        skipped = ?skipped,
+                        "manager sync skipped members with existing non-manager edge"
+                    );
+                }
+                (filtered, skipped)
+            };
             if !pending_adds.is_empty() {
                 let states = self
                     .pre_read_member_states(
@@ -1594,10 +1650,11 @@ impl DbBotAuthorityStore {
                     }
                 }
             }
+            let final_count = valid_input.len() - skipped_pending.len();
             let change = ManagerSetChange {
                 added: added.len() as u64,
                 removed: removed.len() as u64,
-                total: valid_input.len() as u64,
+                total: final_count as u64,
             };
             let sequences = assign_sequences(&removed, &added);
 
@@ -1675,7 +1732,7 @@ impl DbBotAuthorityStore {
             // with exactly that set (possibly empty).
             self.post_state_guard_step(
                 &mut builder,
-                valid_input.len() as u64,
+                final_count as u64,
             );
             let steps = builder.finish();
 
