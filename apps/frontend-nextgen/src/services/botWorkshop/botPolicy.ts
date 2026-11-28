@@ -216,7 +216,9 @@ export function getBotCollaborationMode(
   bot: BotDomain,
   isOwner: boolean,
 ): BotCollaborationMode | undefined {
-  if (bot.serviceMode === 'non-service' && !bot.runtime.isAgentCodingBot) return undefined;
+  // 团队空间的协作入口不按服务化区分：Owner 可授权编辑者、空间成员可申请，
+  // 服务 Bot、AI Coding Bot 与团队空间内的非服务 Bot（如迁入团队的个人 Bot）
+  // 统一由空间协作契约治理。个人空间 Bot 仍不开放协作入口。
   if (bot.spaceKind !== 'team') return undefined;
   if (isOwner) return 'authorize';
 

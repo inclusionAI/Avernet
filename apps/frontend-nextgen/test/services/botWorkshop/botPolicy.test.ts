@@ -250,23 +250,27 @@ describe('服务化 Coding Bot 的草稿/预发独立入口', () => {
 });
 
 describe('Bot 授权入口门禁', () => {
-  test('非 AI Coding 的个人 Bot 在任何空间都不展示授权或申请入口', () => {
-    const teamBot = mapBotDto({
+  test('个人空间的非服务 Bot 不展示授权或申请入口', () => {
+    const personalSpaceBot = mapBotDto({
+      bot_id: 'personal-openclaw-personal-bot',
+      bot_type: 'personal',
+      engine: 'openclaw',
+      space: { space_id: 'personal:owner', kind: 'personal' },
+      actions: ['view'],
+    }).item;
+
+    expect(getBotCollaborationMode(personalSpaceBot, true)).toBeUndefined();
+    expect(getBotCollaborationMode(personalSpaceBot, false)).toBeUndefined();
+  });
+
+  test('团队空间内的非服务 Bot 与服务 Bot、AI Coding Bot 一样保留协作入口', () => {
+    const personalOpenclawBot = mapBotDto({
       bot_id: 'personal-openclaw-team-bot',
       bot_type: 'personal',
       engine: 'openclaw',
       space: { space_id: '12', kind: 'team' },
       actions: ['view'],
     }).item;
-    const personalSpaceBot = { ...teamBot, spaceKind: 'personal' as const };
-
-    expect(getBotCollaborationMode(teamBot, true)).toBeUndefined();
-    expect(getBotCollaborationMode(teamBot, false)).toBeUndefined();
-    expect(getBotCollaborationMode(personalSpaceBot, true)).toBeUndefined();
-    expect(getBotCollaborationMode(personalSpaceBot, false)).toBeUndefined();
-  });
-
-  test('AI Coding 个人 Bot 与非个人 Bot 保留团队空间协作入口', () => {
     const codingPersonalBot = mapBotDto({
       bot_id: 'personal-coding-team-bot',
       bot_type: 'personal',
@@ -284,10 +288,22 @@ describe('Bot 授权入口门禁', () => {
       actions: ['view'],
     }).item;
 
-    expect(getBotCollaborationMode(codingPersonalBot, true)).toBe('authorize');
-    expect(getBotCollaborationMode(codingPersonalBot, false)).toBe('request');
-    expect(getBotCollaborationMode(serviceBot, true)).toBe('authorize');
-    expect(getBotCollaborationMode(serviceBot, false)).toBe('request');
+    for (const bot of [personalOpenclawBot, codingPersonalBot, serviceBot]) {
+      expect(getBotCollaborationMode(bot, true)).toBe('authorize');
+      expect(getBotCollaborationMode(bot, false)).toBe('request');
+    }
+  });
+
+  test('团队空间非服务 Bot 的显式编辑者不再看到授权或申请入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'personal-openclaw-team-editor-bot',
+      bot_type: 'personal',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view', 'edit', 'chat'],
+    }).item;
+
+    expect(getBotCollaborationMode(bot, false)).toBeUndefined();
   });
 
   test('服务 Bot 的 view_config 表明当前用户已有显式协作关系', () => {

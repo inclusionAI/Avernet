@@ -88,8 +88,8 @@ interface FriendApprovalSettingsProps extends FriendApprovalSectionCallbacks {
  * 仅 internal × 团队空间 Bot 渲染（形态经 capability getGeneralConfigPublishApprovalEnabled 承载，
  * 空间经 spaceKind==='team' 判定，均由弹窗容器组合后决定是否渲染本组件）。
  * 开关为受控本地态（配置展示级：不持久化、不走工单，弹窗关闭即恢复默认关）；
- * 开关仅服务 Bot 可用——团队空间内的非服务 Bot（如切到团队空间的个人 Bot）无协作者语义，
- * 禁用置关并提示原因，容器同时不发审批配置请求。
+ * 开关仅服务 Bot 可用——发布审批由服务 Bot 的发布链路消费，团队空间内的非服务 Bot
+ * 即使有编辑者成员也不走该链路，禁用置关并提示原因，容器同时不发审批配置请求。
  * 不跟随 joinedBcn 只读（平台治理配置，不依赖 BCN 网络）。
  */
 export function PublishApprovalSettings({
@@ -101,7 +101,7 @@ export function PublishApprovalSettings({
   onChange,
 }: {
   checked: boolean;
-  /** 非服务 Bot 禁用置关：无协作者语义，审批配置不可用也不请求。 */
+  /** 非服务 Bot 禁用置关：发布审批仅服务 Bot 链路可用，配置不可用也不请求。 */
   disabled?: boolean;
   /** 禁用原因提示（与 error 段落同布局的 muted 弱提示）。 */
   notice?: string;

@@ -99,8 +99,8 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   const displayId = targetBot?.id ?? bot.id;
   const showPublishApproval =
     getCapabilities().getGeneralConfigPublishApprovalEnabled().value && bot.spaceKind === 'team';
-  // 分区仍仅团队空间渲染；开关仅服务 Bot 可用——个人 Bot 切到团队空间后无协作者语义，
-  // 禁用置关并提示原因，且不发审批配置请求（后端对非服务 Bot 拒绝）。
+  // 分区仍仅团队空间渲染；开关仅服务 Bot 可用——发布审批由服务 Bot 的发布链路消费，
+  // 非服务 Bot 即使有编辑者成员也不走该链路，禁用置关并提示原因，且不发审批配置请求。
   const publishApprovalEnabled = showPublishApproval && bot.serviceMode === 'service';
   const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, publishApprovalEnabled);
   // 公开风险检测进度与失败恢复入口仅在「对用户」行展示。
@@ -110,7 +110,7 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
     <PublishApprovalSettings
       checked={publishApproval.required}
       disabled={!publishApprovalEnabled}
-      notice={publishApprovalEnabled ? undefined : '个人 Bot 暂不支持协作者申请'}
+      notice={publishApprovalEnabled ? undefined : '发布审批仅服务 Bot 可配置'}
       loading={publishApproval.loading || publishApproval.updating}
       error={publishApproval.error}
       onChange={(checked) => void publishApproval.update(checked)}
