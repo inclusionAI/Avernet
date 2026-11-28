@@ -1,0 +1,38 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 669-671,692-698
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/event_envelope.py
+  h_059e888e5e4e82 43-44,52-54,61
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/event_payload_codec.py
+  h_059e888e5e4e82 1-112
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py
+  h_059e888e5e4e82 141-146
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/row_codec.py
+  h_059e888e5e4e82 24-28,70,87,94-95,123-129
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/task_storage.py
+  h_059e888e5e4e82 23-25,170-178,223
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  h_059e888e5e4e82 35
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_13_context_collab_task.sql
+  h_059e888e5e4e82 4-5
+apps/backend/tests/community/repository/task/context_collab/context_spec_test_support.py
+  h_059e888e5e4e82 15-42
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_business_history.py
+  h_059e888e5e4e82 1,67
+apps/backend/tests/community/repository/task/context_collab/test_event_payload_codec.py
+  h_059e888e5e4e82 1-57
+apps/backend/tests/community/repository/task/context_collab/test_repository_create_get.py
+  h_059e888e5e4e82 19-21,129-132
+apps/backend/tests/community/repository/task/context_collab/test_task_authority.py
+  h_059e888e5e4e82 53,55,155,177,371-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d57104a379e4823a755fad9d9b5839d68041bca3",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
