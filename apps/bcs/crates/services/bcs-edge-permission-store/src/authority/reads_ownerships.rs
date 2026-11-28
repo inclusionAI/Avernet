@@ -63,6 +63,9 @@ impl DbBotAuthorityStore {
                     && !owners.contains_key(*bot)
             })
             .collect();
+        // Also query created_by for live orphaned bots (version > 0, no
+        // owner edge) as a fallback owner in one chunked pass.
+        let mut orphan_creators: HashMap<String, String> = HashMap::new();
         for chunk in chunked(&unowned_initialized) {
             let live: HashSet<String> = self
                 .bot_states_in(&chunk)
@@ -70,9 +73,14 @@ impl DbBotAuthorityStore {
                 .into_iter()
                 .map(|(bot_id, _)| bot_id)
                 .collect();
-            for bot_id in chunk {
-                if !live.contains(bot_id) {
-                    states.remove(bot_id);
+            for (bot_id, creator) in self.legacy_creators_in(&chunk).await? {
+                if let Some(creator) = creator {
+                    orphan_creators.insert(bot_id, creator);
+                }
+            }
+            for bot_id in &chunk {
+                if !live.contains(*bot_id) {
+                    states.remove(*bot_id);
                 }
             }
         }
@@ -112,9 +120,21 @@ impl DbBotAuthorityStore {
             }
             match owners.get(bot_id).map_or(0, Vec::len) {
                 0 => {
-                    return Err(owner_integrity_error(format!(
-                        "bot {bot_id} has no approved owner edge"
-                    )));
+                    // Orphaned ownership: use created_by as fallback
+                    // owner when available; otherwise retain the
+                    // strict integrity error.
+                    if let Some(creator) = orphan_creators.get(bot_id) {
+                        results.push(Some(BotOwnershipView {
+                            bot_id: bot_id.clone(),
+                            owner_user_id: creator.clone(),
+                            owner_actor_id: human_actor_id(creator),
+                        }));
+                    } else {
+                        return Err(owner_integrity_error(format!(
+                            "bot {bot_id} has no approved owner edge"
+                        )));
+                    }
+                    continue;
                 }
                 1 => {
                     let owner = owners.get(bot_id).and_then(|v| v.first()).expect("one owner").clone();
