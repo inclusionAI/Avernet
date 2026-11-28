@@ -210,6 +210,7 @@ async fn local_terminal_keeps_sending_or_cancel_unknown_supervised_until_definit
                 did: did.clone(),
                 me: connector,
                 request_id: RequestId("claim".into()),
+                partition: None,
             })
             .await
             .unwrap()

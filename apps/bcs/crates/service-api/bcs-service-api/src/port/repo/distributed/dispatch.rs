@@ -98,6 +98,9 @@ pub enum ClaimOutcome {
     HeldByOther(Holder),
     Ended,
     NotFound,
+    /// The claim carried a partition ownership proof that the current owner
+    /// record does not confirm: another instance owns the partition now.
+    NotOwner,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +108,12 @@ pub struct DispatchClaimRequest {
     pub did: Did,
     pub me: Instance,
     pub request_id: RequestId,
+    /// The claimant's ownership of the dispatch's command partition, as
+    /// granted by the partition owner record. With it, the claim succeeds
+    /// only while that record still names exactly this claim, and may then
+    /// take the call over from any other holder. Without it, only a holder
+    /// proven dead may be taken over.
+    pub partition: Option<super::ownership::ShardClaim>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +125,10 @@ pub struct ResumeOwnedDispatch {
 
 #[async_trait]
 pub trait DispatchQueuePort: Send + Sync {
+    /// Number of command partitions of a pool (the same for every pool).
+    fn command_partitions(&self) -> u32;
+    /// The command partition a dispatch's hints are posted to, `0..N`.
+    fn partition_of(&self, did: &Did) -> u32;
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError>;
     /// Only after the local actor is stopped/joined. Atomically advances generation.
     async fn resume_owned(&self, request: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError>;
@@ -124,6 +137,19 @@ pub trait DispatchQueuePort: Send + Sync {
         pool: PoolId,
         me: Instance,
     ) -> Result<Box<dyn CommandFeedPort>, StoreError>;
+    /// Unfinished calls listed for one command partition of `pool`, oldest
+    /// first, at most `limit`. May list too much (ended calls whose removal
+    /// failed), never too little.
+    async fn held_in(
+        &self,
+        _pool: &PoolId,
+        _partition: u32,
+        _limit: NonZeroU32,
+    ) -> Result<Vec<Did>, StoreError> {
+        Err(StoreError::NotApplied {
+            code: "held_listing_unsupported".into(),
+        })
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -144,6 +170,10 @@ pub trait CommandFeedPort: Send {
     ) -> Result<Vec<CommandDelivery>, StoreError>;
     /// Reliable takeover/no-action determination, NOT remote completion.
     async fn ack(&mut self, delivery: &CommandDelivery) -> Result<(), StoreError>;
+    /// Read only these partitions from now on (the ones this instance owns).
+    /// Reads already in flight may still deliver; the claim decides. The
+    /// default ignores it and keeps reading every partition.
+    fn assign(&mut self, _partitions: &[u32]) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -86,6 +86,9 @@ pub struct Host {
     pub coordination: Arc<CoordinationStore>,
     pub dispatch: Arc<StoreDispatch>,
     pub queue: bcs_dist_connector_store::StoreDispatchQueue,
+    /// Connector partition owner records (one pool's worth; the story's
+    /// dispatches share one pool).
+    pub partitions: Arc<CoordinationStore>,
     pub runner: Arc<Runner>,
     pub workers: Vec<Worker>,
     pub supervisor: DispatchSupervisor,
@@ -143,11 +146,18 @@ impl Host {
             )
             .unwrap(),
         );
+        let partitions = Arc::new(
+            CoordinationStore::new(model.clone(), model.clone(), model.clone(), layout.clone())
+                .unwrap()
+                .with_partition_owners(PoolId("a2a".into()))
+                .unwrap(),
+        );
         let queue = bcs_dist_connector_store::StoreDispatchQueue::new(
             model.clone(),
             model.clone(),
             model.clone(),
             coordination.clone(),
+            partitions.clone(),
             layout.clone(),
             Arc::new(SystemClock),
             bcs_dist_connector_store::DispatchBoardConfig::new(
@@ -194,6 +204,7 @@ impl Host {
             archive,
             coordination,
             queue,
+            partitions,
             dispatch,
             runner: Arc::new(Runner::default()),
             workers: vec![],

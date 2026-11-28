@@ -24,8 +24,10 @@
 //! disp:       bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
 //!             claim patch: {"execution": {"holder": {"instance": {"node":
 //!             "conn-03", "incarnation": "1794370950"}, "epoch": 2}}}
-//! held index: bcn:v1:held:c01:main:conn-03:1794370950
-//!             member "s0042.7f3a9c.b21e.n2.a1", score = claim time in ms
+//! held index: bcn:v1:c01:main:a2a:p0003:held
+//!             member "s0042.7f3a9c.b21e.n2.a1", score = first listed, in ms
+//! owner:      bcn:v1:c01:main:a2a:p0003:owner (read only, through
+//!             `ShardLeasePort::current`, when the claim carries a proof)
 //! ```
 //!
 //! Glossary:
@@ -33,8 +35,14 @@
 //!   `OwnedByMe` (this instance already holds it, under some epoch),
 //!   `HeldByOther` (a live, or not provably dead, other instance holds it),
 //!   `Ended`, `NotFound`.
-//! - **Takeover**: a claim of a dispatch another instance holds; allowed only
-//!   when membership says that instance is `Dead`.
+//! - **Takeover**: a claim of a dispatch another instance holds; allowed when
+//!   membership says that instance is `Dead`, or when the claimant owns the
+//!   dispatch's command partition (the claim carries the ownership proof and
+//!   the partition's owner record still names it).
+//! - **Partition owner**: the one Connector instance the owner record of a
+//!   command partition names; it runs that partition's calls.
+//! - **`NotOwner`**: the claim carried a proof the owner record no longer
+//!   confirms; nothing was written.
 //! - **Resume**: a re-claim, at the next epoch, of a call this instance holds
 //!   but no actor runs.
 
@@ -54,7 +62,7 @@ use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::dispatch::{
     ClaimOutcome, CommandFeedPort, DispatchClaimRequest, DispatchQueuePort, ResumeOwnedDispatch,
 };
-use bcs_service_api::port::repo::distributed::ownership::{Liveness, MembershipPort};
+use bcs_service_api::port::repo::distributed::ownership::{Liveness, MembershipPort, ShardClaim, ShardLeasePort};
 use bcs_store_api::StoreCapability;
 use bcs_store_api::json::JsonStorePlugin;
 use bcs_store_api::stream::StreamStorePlugin;
@@ -136,6 +144,9 @@ const CLAIM_ATTEMPTS: u32 = 3;
 #[derive(Clone)]
 pub struct StoreDispatchQueue {
     shared: Arc<Shared>,
+    /// The owner records of the command partitions (a `CoordinationStore`
+    /// built `with_partition_owners`); read to check a claim's proof.
+    partitions: Arc<dyn ShardLeasePort>,
 }
 
 impl StoreDispatchQueue {
@@ -143,11 +154,13 @@ impl StoreDispatchQueue {
     /// Checked at startup so a Connector never starts on a store that cannot
     /// fence or group-read (spec rule B21). Also fails (`dispatch_board_config`)
     /// when `write_attempts` is 0 or `read_block` is zero.
+    #[allow(clippy::too_many_arguments, reason = "one handle per store port")]
     pub fn new(
         json: Arc<dyn JsonStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
         stream: Arc<dyn StreamStorePlugin>,
         membership: Arc<dyn MembershipPort>,
+        partitions: Arc<dyn ShardLeasePort>,
         layout: KeyLayout,
         clock: Arc<dyn Clock>,
         config: DispatchBoardConfig,
@@ -173,20 +186,24 @@ impl StoreDispatchQueue {
                 clock,
                 config,
             }),
+            partitions,
         })
     }
 
-    /// The dispatches `instance` is listed as holding (it may list too much).
-    /// First page only, oldest claim first. Not used by the engine: a dead
-    /// Connector's calls are recovered through the Worker's supervisor
-    /// re-posting their hints and a takeover once the holder is `Dead`.
-    pub async fn held_by(
-        &self,
-        instance: &Instance,
-        limit: NonZeroU32,
-    ) -> Result<Vec<Did>, StoreError> {
-        let page = held_index::page(&self.shared, instance, None, limit).await?;
-        Ok(page.into_iter().map(|entry| Did(entry.member)).collect())
+    /// Whether the partition owner record still names exactly `proof`, for
+    /// the partition `did`'s hints go to. A proof for another partition is
+    /// refused (`partition_proof_mismatch`).
+    async fn owns_partition(&self, did: &Did, proof: &ShardClaim) -> Result<bool, StoreError> {
+        if proof.shard.0 != self.shared.config.streams.partition_of(did) {
+            return Err(StoreError::Invalid {
+                code: "partition_proof_mismatch".into(),
+            });
+        }
+        Ok(self
+            .partitions
+            .current(proof.shard)
+            .await?
+            .is_some_and(|record| record.claim == *proof))
     }
 
     /// Whether `holder` may be taken over. Only a clear `Dead` allows it;
@@ -233,8 +250,8 @@ impl StoreDispatchQueue {
             instance: me.clone(),
             epoch,
         };
-        // Listed as held right before the claim, so the index never misses a call.
-        held_index::add(&self.shared, me, did).await?;
+        // Listed right before the claim, so the index never misses a call.
+        held_index::add(&self.shared, &doc.view.spec.pool, did).await?;
         let first_claim = doc.view.execution.phase == DispatchPhase::Created;
         let mutation = crate::doc::claim_write(&holder, first_claim, !doc.has_connector)?;
         let wrote = self.shared.mutate(did, version::claim(epoch)?, mutation).await?;
@@ -255,7 +272,7 @@ impl StoreDispatchQueue {
         match claimed {
             // The former holder ended the call just before the claim landed.
             Some(now) if now.view.execution.phase == DispatchPhase::Ended => {
-                self.unlist(me, did).await;
+                self.unlist(&now.view.spec.pool, did).await;
                 Ok(Some(ClaimOutcome::Ended))
             }
             Some(now) => Ok(Some(ClaimOutcome::Acquired(Box::new(StoreHeldDispatch::new(
@@ -264,21 +281,16 @@ impl StoreDispatchQueue {
                 now.view,
                 now.version,
             ))))),
-            // The write may still land after this read-back. The call then
-            // names this instance, so it must stay listed: the index may list
-            // too much, never too little.
-            None if unknown => Ok(None),
-            None => {
-                self.unlist(me, did).await;
-                Ok(None)
-            }
+            // Lost a race: the call stays listed, it is not finished (and
+            // an unknown write may still land and name this instance).
+            None => Ok(None),
         }
     }
 
-    /// Removes `did` from this instance's held index because there is
-    /// nothing to hold. A failure only leaves the index listing too much.
-    async fn unlist(&self, me: &Instance, did: &Did) {
-        if let Err(error) = held_index::remove(&self.shared, me, did).await {
+    /// Removes an ended call from its partition's held index. A failure only
+    /// leaves the index listing too much.
+    async fn unlist(&self, pool: &PoolId, did: &Did) {
+        if let Err(error) = held_index::remove(&self.shared, pool, did).await {
             tracing::warn!(?error, did = %did.0, "held index cleanup failed");
         }
     }
@@ -288,26 +300,40 @@ impl StoreDispatchQueue {
     /// - missing -> `NotFound`; ended -> `Ended`;
     /// - held by this instance (any epoch) -> `OwnedByMe`; the engine then
     ///   pokes the running actor or resumes the call;
-    /// - held by another instance that is not proven dead -> `HeldByOther`;
-    /// - otherwise (no holder, or a dead one) -> claim at the next epoch.
+    /// - held by another instance: with a partition ownership proof, take it
+    ///   over (the owner runs the partition's calls; a former owner stopped
+    ///   its calls before handing the partition over); without one, take it
+    ///   over only if that instance is proven dead, else `HeldByOther`;
+    /// - otherwise (no holder) -> claim at the next epoch.
+    ///
+    /// A proof is checked once, before anything is written: a stale one
+    /// answers `NotOwner`.
     ///
     /// A lost race goes to the next round. When every round lost, a final
     /// read answers with whoever holds it now (or the dead holder last seen);
     /// with no holder at all it is `NotApplied` (`disp_claim_contended`).
     async fn decide_claim(&self, request: &DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
+        if let Some(proof) = &request.partition
+            && (proof.owner.instance != request.me || !self.owns_partition(&request.did, proof).await?)
+        {
+            return Ok(ClaimOutcome::NotOwner);
+        }
+        let owner = request.partition.is_some();
         let mut last_holder = None;
         for _ in 0..CLAIM_ATTEMPTS {
             let Some(doc) = self.shared.read(&request.did).await? else {
                 return Ok(ClaimOutcome::NotFound);
             };
             if doc.view.execution.phase == DispatchPhase::Ended {
+                // A listing left behind (its removal failed) is cleaned here.
+                self.unlist(&doc.view.spec.pool, &request.did).await;
                 return Ok(ClaimOutcome::Ended);
             }
             if let Some(holder) = &doc.view.execution.holder {
                 if holder.instance == request.me {
                     return Ok(ClaimOutcome::OwnedByMe(holder.clone()));
                 }
-                if !self.holder_is_dead(holder).await {
+                if !owner && !self.holder_is_dead(holder).await {
                     return Ok(ClaimOutcome::HeldByOther(holder.clone()));
                 }
                 last_holder = Some(holder.clone());
@@ -349,6 +375,14 @@ fn next_epoch(doc: &DispatchDoc) -> Result<HolderEpoch, StoreError> {
 
 #[async_trait]
 impl DispatchQueuePort for StoreDispatchQueue {
+    fn command_partitions(&self) -> u32 {
+        self.shared.config.streams.partitions()
+    }
+
+    fn partition_of(&self, did: &Did) -> u32 {
+        self.shared.config.streams.partition_of(did)
+    }
+
     /// Claims `request.did` for `request.me`; see `decide_claim`. The caller
     /// acknowledges the hint after any `Ok` answer (B2).
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
@@ -406,7 +440,8 @@ impl DispatchQueuePort for StoreDispatchQueue {
     }
 
     /// Opens this instance's command feed for `pool`: joins the consumer
-    /// group on every partition. One feed per Connector process run.
+    /// group on every partition. One feed per Connector process run. It reads
+    /// nothing until `assign` names the partitions this instance owns.
     async fn notifications(
         &self,
         pool: PoolId,
@@ -414,5 +449,15 @@ impl DispatchQueuePort for StoreDispatchQueue {
     ) -> Result<Box<dyn CommandFeedPort>, StoreError> {
         let feed = StoreCommandFeed::open(self.shared.clone(), pool, &me).await?;
         Ok(Box::new(feed))
+    }
+
+    /// The calls listed in one partition's held index, oldest first.
+    async fn held_in(&self, pool: &PoolId, partition: u32, limit: NonZeroU32) -> Result<Vec<Did>, StoreError> {
+        if partition >= self.shared.config.streams.partitions() {
+            return Err(StoreError::Invalid {
+                code: "partition_out_of_range".into(),
+            });
+        }
+        held_index::page(&self.shared, pool, partition, limit).await
     }
 }

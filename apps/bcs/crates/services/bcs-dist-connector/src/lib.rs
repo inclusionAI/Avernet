@@ -25,6 +25,11 @@
 //!   they name, and acks the hint once the claim decision is made (B2). A
 //!   claim that wins makes this process the **holder** of the call and starts
 //!   one **actor** for it.
+//! - Each command **partition** has one owner Connector (`engine::partitions`):
+//!   the engine reads only the partitions it owns, and its claims carry the
+//!   ownership as proof, which lets it take a call over from any former
+//!   holder. On drain, calls stop at a safe point and each partition is
+//!   handed to a peer.
 //! - The **actor** (`Call`, private module `call`) owns that one call for one
 //!   holder generation: it sends the start, follows the remote task, reports
 //!   events, forwards human replies and carries out cancels until the call
@@ -36,7 +41,8 @@
 //!
 //! # Where to start reading
 //!
-//! 1. [`engine`]: the main loop (receive → claim → ack), drain and snapshot.
+//! 1. [`engine`]: the main loop (receive → claim → ack), drain and snapshot;
+//!    `engine/partitions.rs`: partition ownership and handoff.
 //! 2. `call.rs`: the actor's life (`run`, `drive`, `follow`, `tick`).
 //! 3. `send.rs` (start, resolve an uncertain start, re-attach),
 //!    `control.rs` (replies and cancels), `report.rs` (events to the inbox).

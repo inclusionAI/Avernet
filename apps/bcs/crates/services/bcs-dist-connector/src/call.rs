@@ -14,7 +14,9 @@
 //!                    │       └──▶ follow: loop until ended
 //!                    │              select! { next agent event | timer tick | poke }
 //!                    │
-//!                    └─ on Stop::Invalid ──▶ park (stay held, re-read until lost/ended)
+//!                    ├─ on Stop::Invalid ──▶ park (stay held, re-read until lost/ended)
+//!                    └─ on Stop::Yielded ──▶ return (drain: the call stays held for
+//!                                             the partition's next owner)
 //! ```
 //!
 //! `run` and `drive` run once per actor; everything repeated happens in
@@ -36,6 +38,10 @@
 //!   did not (`NotSent`). Only a cancel is acted on then (B17).
 //! - **blind**: the remote task is known but cannot be followed; replies
 //!   and cancels still work.
+//! - **safe point**: where a draining process may stop the actor without
+//!   cutting anything off: the top of `follow`'s loop (no send, reply or
+//!   cancel in flight) while no event stream is open, or a parked actor.
+//!   The drain sets the shared `yielding` flag and pokes every actor.
 //! - **two backoffs**: [`Backoff`] sleeps and retries in place (a store
 //!   write the actor must complete before anything else, see `held_write!`);
 //!   the tick backoff (`retry_after`) only says "not before time X" for a
@@ -79,6 +85,9 @@ pub(crate) enum Stop {
     /// a transition, or answered with a permanent error (`Invalid`,
     /// `UnsupportedFormat`). `run` then parks the actor.
     Invalid,
+    /// The process is draining and the actor reached a safe point. The call
+    /// stays held; the partition's next owner takes it over.
+    Yielded,
 }
 
 /// Result of an actor step: `Ok` to go on, `Err(Stop)` to stop the actor.
@@ -108,6 +117,9 @@ pub(crate) struct Call {
     pub status: Arc<CallStatus>,
     /// Signalled by the engine to make the actor tick at once (a poke).
     pub poke: Arc<Notify>,
+    /// Set once by a drain, shared by every actor of the process: stop at
+    /// the next safe point.
+    pub yielding: Arc<AtomicBool>,
     /// Holder epoch and last seq of the events reported by this actor; seq
     /// restarts at 1 for every new holder generation (B7).
     pub cursor: ReportCursor,
@@ -210,6 +222,7 @@ impl Call {
         held: Box<dyn HeldDispatchPort>,
         status: Arc<CallStatus>,
         poke: Arc<Notify>,
+        yielding: Arc<AtomicBool>,
     ) -> Self {
         // A new holder generation reports from sequence 1.
         let cursor = ReportCursor {
@@ -224,6 +237,7 @@ impl Call {
             capability_retry_at: None,
             status,
             poke,
+            yielding,
             cursor,
             events: None,
             reattach_due: false,
@@ -302,6 +316,7 @@ impl Call {
         match self.drive().await {
             Ok(()) => tracing::debug!(did = %did.0, "call ended"),
             Err(Stop::Lost) => tracing::info!(did = %did.0, "holder lost; actor stopped"),
+            Err(Stop::Yielded) => tracing::info!(did = %did.0, "draining; stopped at a safe point"),
             Err(Stop::Invalid) => {
                 tracing::error!(did = %did.0, "unexpected dispatch state; the call stays held and visible");
                 self.park().await;
@@ -315,16 +330,26 @@ impl Call {
     /// a pending effect until another holder takes it or it is ended.
     ///
     /// Parking re-reads `disp` every poll interval and returns only on `Lost`
-    /// or phase `ended`. It does not carry out cancels and ignores pokes.
-    /// Another process can take the call over only once membership proves
-    /// this one dead, so a parked call usually stays parked until `drain`
-    /// stops it (or the process exits).
+    /// or phase `ended`. It does not carry out cancels; a poke only re-reads early.
+    /// A drain ends it at once (parking is a safe point): the call stays
+    /// held for the partition's next owner.
     async fn park(&mut self) {
         self.events = None;
         self.status.pending_effect.store(true, Ordering::SeqCst);
         let interval = self.config.poll_interval_of(self.did());
         loop {
-            tokio::time::sleep(interval).await;
+            if self.yielding.load(Ordering::SeqCst) {
+                return;
+            }
+            let poke = self.poke.clone();
+            tokio::select! {
+                () = tokio::time::sleep(interval) => {}
+                // Only a drain's poke matters here; others re-read early.
+                () = poke.notified() => {}
+            }
+            if self.yielding.load(Ordering::SeqCst) {
+                return;
+            }
             match self.held.refresh().await {
                 Err(HolderError::Lost) => return,
                 Ok(view) if view.execution.phase == DispatchPhase::Ended => return,
@@ -355,10 +380,17 @@ impl Call {
     /// tick deadline is kept in `next_tick`, an unconsumed poke permit stays
     /// in the `Notify`, and a stream's `next()` takes no item unless it
     /// completes. A poke tick does not move `next_tick`.
+    ///
+    /// The top of the loop is the safe point: a draining process stops the
+    /// actor there unless an event stream is open (the agent is mid-turn; the
+    /// stream usually ends when the turn does).
     async fn follow(&mut self) -> Flow {
         let interval = self.config.poll_interval_of(self.did());
         let mut next_tick = Instant::now() + interval;
         while !self.ended {
+            if self.yielding.load(Ordering::SeqCst) && self.events.is_none() {
+                return Err(Stop::Yielded);
+            }
             let poke = self.poke.clone();
             tokio::select! {
                 event = next_event(&mut self.events) => match event {

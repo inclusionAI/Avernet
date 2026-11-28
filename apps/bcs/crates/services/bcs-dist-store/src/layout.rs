@@ -3,7 +3,7 @@
 //! Shard keys: `bcn:v1:<cluster>:<namespace>:s<shard>:<kind>[:<id>]`, e.g.
 //! `bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c`. Cross-shard keys:
 //! `bcn:v1:cmd:<cluster>:<namespace>:<pool>:p<n>`,
-//! `bcn:v1:held:<cluster>:<namespace>:<node>:<incarnation>`,
+//! `bcn:v1:<cluster>:<namespace>:<pool>:p<partition>:<owner|held>`,
 //! `bcn:v1:hb:<cluster>:<namespace>:<a|b>:<node>:<incarnation>`,
 //! `bcn:v1:<cluster>:<namespace>:member(s):…`.
 //!
@@ -155,13 +155,38 @@ impl KeyLayout {
             self.cluster, self.namespace, pool.0
         ))
     }
-    /// A Connector's held index: `bcn:v1:held:c01:main:conn-03:1794370950`.
-    pub fn held(&self, instance: &Instance) -> Result<String, StoreError> {
-        let (node, inc) = instance_segments(instance)?;
+    /// Text form of a Connector partition, at least four digits: `p0003`.
+    pub fn partition_text(partition: u32) -> String {
+        format!("p{partition:04}")
+    }
+    /// Owner record of a Connector partition of `pool`:
+    /// `bcn:v1:c01:main:a2a:p0003:owner`. The pool segment keeps it apart
+    /// from the Worker's shard owner `bcn:v1:c01:main:s0042:owner`.
+    pub fn partition_owner(&self, pool: &PoolId, partition: u32) -> Result<String, StoreError> {
+        Ok(format!("{}:owner", self.partition_prefix(pool, partition)?))
+    }
+    /// The unfinished calls of a Connector partition (a sorted set of
+    /// dispatch ids): `bcn:v1:c01:main:a2a:p0003:held`.
+    pub fn partition_held(&self, pool: &PoolId, partition: u32) -> Result<String, StoreError> {
+        Ok(format!("{}:held", self.partition_prefix(pool, partition)?))
+    }
+    fn partition_prefix(&self, pool: &PoolId, partition: u32) -> Result<String, StoreError> {
+        segment(&pool.0)?;
+        if pool.0.contains(':') {
+            return Err(invalid("pool_contains_colon"));
+        }
         Ok(format!(
-            "{PREFIX}:held:{}:{}:{node}:{inc}",
-            self.cluster, self.namespace
+            "{PREFIX}:{}:{}:{}:{}",
+            self.cluster,
+            self.namespace,
+            pool.0,
+            Self::partition_text(partition)
         ))
+    }
+    /// `<node>:<incarnation>` of a valid instance: `conn-03:1794370950`.
+    pub fn instance_text(instance: &Instance) -> Result<String, StoreError> {
+        let (node, inc) = instance_segments(instance)?;
+        Ok(format!("{node}:{inc}"))
     }
     /// `bcn:v1:hb:c01:main:a:worker-07:1794370900`.
     pub fn heartbeat(

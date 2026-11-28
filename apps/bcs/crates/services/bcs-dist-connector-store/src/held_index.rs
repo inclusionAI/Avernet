@@ -1,56 +1,54 @@
-//! The held index: the dispatches one Connector instance holds.
+//! The held index: the unfinished calls of one command partition.
 //!
-//! A dispatch is added before its claim and removed only after it ended (or
-//! when the claim found nothing to hold), so the index may list too much but
-//! never misses a call. It only speeds recovery up; the holder recorded in the
-//! dispatch document is the truth.
+//! A dispatch is listed in its partition (the partition its hints go to)
+//! before its first claim, and removed only once it ended or its document is
+//! gone. It is shared by every holder the call ever has, so a claim that
+//! loses a race, or a former holder, never removes it: the index may list too
+//! much, never too little (spec rule B6). The holder recorded in the dispatch
+//! document stays the truth; the index only tells the partition's owner which
+//! calls to look at when it acquires the partition.
 //!
-//! Spec rule B6: listed from before the claim until after the call ended.
-//! Removing too early could hide a call from recovery; removing too late (or
-//! never, after a failed removal) only costs a wasted look at an ended call.
-//!
-//! One sorted set per Connector process run:
+//! One sorted set per partition of a pool:
 //!
 //! ```text
-//! key:    bcn:v1:held:<cluster>:<ns>:<node>:<incarnation>
-//!         bcn:v1:held:c01:main:conn-03:1794370950
+//! key:    bcn:v1:<cluster>:<ns>:<pool>:p<nnnn>:held
+//!         bcn:v1:c01:main:a2a:p0003:held
 //! member: dispatch id, e.g. s0042.7f3a9c.b21e.n2.a1
-//! score:  claim time in ms (wall clock), e.g. 1794370950456
+//! score:  time first listed in ms (wall clock), e.g. 1794370950456
 //! ```
-//!
-//! Who reads it: nothing in production today; `StoreDispatchQueue::held_by`
-//! pages it. A dead Connector's calls are recovered without it: the Worker's
-//! supervisor re-posts their hints and a takeover follows once membership
-//! answers `Dead`.
 
 use crate::shared::Shared;
-use bcs_dist_model::{Did, Instance};
+use bcs_dist_model::{Did, PoolId};
 use bcs_dist_store::error::{from_read, from_write};
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetRange};
 use std::num::NonZeroU32;
 use std::ops::Bound;
 
-/// Lists `did` under `me`, with the current time as score. Called right
-/// before a claim write; re-adding an existing member only moves its score.
-pub(crate) async fn add(shared: &Shared, me: &Instance, did: &Did) -> Result<(), StoreError> {
-    let key = shared.layout.held(me)?;
+/// The index key of `did` in `pool`.
+fn key(shared: &Shared, pool: &PoolId, did: &Did) -> Result<String, StoreError> {
+    let partition = shared.config.streams.partition_of(did);
+    shared.layout.partition_held(pool, partition)
+}
+
+/// Lists `did`, keeping its first score. Called right before a claim write.
+pub(crate) async fn add(shared: &Shared, pool: &PoolId, did: &Did) -> Result<(), StoreError> {
+    let key = key(shared, pool, did)?;
     let entry = ZSetEntry {
         member: did.0.clone(),
         score: shared.clock.now().0 as f64,
     };
     shared
         .zset
-        .add(&key, &[entry], ZAddMode::Upsert)
+        .add(&key, &[entry], ZAddMode::InsertOnly)
         .await
         .map(|_| ())
         .map_err(|e| from_write(&e, &did.0))
 }
 
-/// Unlists `did` from `me`. Called after the call ended, or when a claim
-/// found nothing to hold. The count of removed members is ignored.
-pub(crate) async fn remove(shared: &Shared, me: &Instance, did: &Did) -> Result<(), StoreError> {
-    let key = shared.layout.held(me)?;
+/// Unlists `did`. Called only when the call ended or its document is gone.
+pub(crate) async fn remove(shared: &Shared, pool: &PoolId, did: &Did) -> Result<(), StoreError> {
+    let key = key(shared, pool, did)?;
     shared
         .zset
         .remove(&key, std::slice::from_ref(&did.0))
@@ -59,20 +57,20 @@ pub(crate) async fn remove(shared: &Shared, me: &Instance, did: &Did) -> Result<
         .map_err(|e| from_write(&e, &did.0))
 }
 
-/// One page of an instance's held dispatches, oldest claim first; pass the
-/// last entry of a page back as `after` to continue.
+/// The first `limit` calls listed in one partition, oldest first.
 pub(crate) async fn page(
     shared: &Shared,
-    instance: &Instance,
-    after: Option<ZSetEntry>,
+    pool: &PoolId,
+    partition: u32,
     limit: NonZeroU32,
-) -> Result<Vec<ZSetEntry>, StoreError> {
-    let key = shared.layout.held(instance)?;
+) -> Result<Vec<Did>, StoreError> {
+    let key = shared.layout.partition_held(pool, partition)?;
     let range = ZSetRange {
         min: Bound::Unbounded,
         max: Bound::Unbounded,
-        after,
+        after: None,
         limit,
     };
-    shared.zset.range(&key, &range).await.map_err(|e| from_read(&e))
+    let entries = shared.zset.range(&key, &range).await.map_err(|e| from_read(&e))?;
+    Ok(entries.into_iter().map(|entry| Did(entry.member)).collect())
 }

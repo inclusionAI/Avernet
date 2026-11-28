@@ -112,6 +112,7 @@ async fn repeated_claim_must_not_start_a_second_actor() -> ContractResult {
             did: dispatch_view().spec.did,
             me: instance(),
             request_id: RequestId("claim-dispatch-a".into()),
+            partition: None,
         };
         let second = if duplicate_actor {
             ClaimOutcome::Acquired(held())

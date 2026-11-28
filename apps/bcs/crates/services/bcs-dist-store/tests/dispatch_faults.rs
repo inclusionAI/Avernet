@@ -116,6 +116,7 @@ async fn command_ack_retries_are_scoped_and_do_not_exhaust_the_feed() {
     let f = Fixture::new().await;
     f.create().await;
     let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
+    assign_all(feed.as_mut());
     for _ in 0..130 {
         f.board.notify(&spec().pool, &spec().did).await.unwrap();
         let delivery = feed
@@ -137,6 +138,7 @@ async fn command_ack_retries_are_scoped_and_do_not_exhaust_the_feed() {
         )
         .await
         .unwrap();
+    assign_all(other.as_mut());
     f.board.notify(&spec().pool, &spec().did).await.unwrap();
     let delivery = feed
         .receive(NonZeroU32::MIN, Duration::from_millis(50))
@@ -280,6 +282,7 @@ async fn duplicate_notifications_each_ack_their_physical_id() {
     let f = Fixture::new().await;
     f.create().await;
     let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
+    assign_all(feed.as_mut());
     for _ in 0..3 {
         f.board.notify(&spec().pool, &spec().did).await.unwrap();
     }
@@ -321,6 +324,7 @@ async fn pending_redelivery_does_not_spawn_a_second_local_delivery() {
     let f = Fixture::new().await;
     f.create().await;
     let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
+    assign_all(feed.as_mut());
     f.board.notify(&spec().pool, &spec().did).await.unwrap();
     let original = feed
         .receive(NonZeroU32::MIN, Duration::from_millis(50))
@@ -526,6 +530,7 @@ async fn lost_or_trimmed_command_hints_do_not_remove_independent_recovery() {
         .await
         .unwrap();
     let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
+    assign_all(feed.as_mut());
     assert!(
         feed.receive(NonZeroU32::MIN, Duration::from_millis(50))
             .await

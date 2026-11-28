@@ -75,16 +75,18 @@ async fn drain_stops_claiming_and_stops_calls_still_running_at_the_deadline() {
     let running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
 
+    // The open event stream keeps the call from a safe point until the
+    // deadline; with no peer, the partition is not handed over either.
     let outcome = running.engine.drain(Duration::from_millis(60)).await.unwrap();
-    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 2 });
     let snapshot = running.engine.snapshot().await.unwrap();
     assert!(snapshot.draining && !snapshot.ready);
     assert_eq!(snapshot.active_work, 0, "the call's actor is stopped, not left running");
-    // The dispatch stays held, so another Connector takes it over once this
-    // instance is dead and the Worker re-posts its hint.
+    // The dispatch stays held, so the partition's next owner (here: whoever
+    // claims it once this instance is dead) takes it over.
     assert_eq!(rig.phase().await, "accepted");
     assert_eq!(rig.doc().await["execution"]["holder"]["instance"]["node"], "conn-03");
-    assert_eq!(held_members(&rig.store, &instance("conn-03")).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&rig.store).await, vec![DID.to_owned()]);
     assert!(running.task.await.unwrap().is_ok(), "the loop ended cleanly");
 
     // A stopped actor reports nothing more, and no new claims happen.
@@ -96,7 +98,11 @@ async fn drain_stops_claiming_and_stops_calls_still_running_at_the_deadline() {
     assert_eq!(rig.inbox_events().await.len(), reported, "a stopped actor reports nothing more");
     assert_eq!(rig.agent.count("start"), 1);
     assert_eq!(rig.phase().await, "accepted");
-    assert_eq!(running.engine.drain(Duration::from_millis(50)).await.unwrap(), DrainOutcome::Drained);
+    assert_eq!(
+        running.engine.drain(Duration::from_millis(50)).await.unwrap(),
+        DrainOutcome::DeadlineReached { remaining: 2 },
+        "a later drain reports the one shutdown's outcome"
+    );
 }
 
 #[tokio::test]
@@ -112,7 +118,9 @@ async fn drain_returns_as_soon_as_held_calls_end() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     events.send(final_event()).unwrap();
     let outcome = tokio::time::timeout(Duration::from_secs(2), drain).await.unwrap().unwrap().unwrap();
-    assert_eq!(outcome, DrainOutcome::Drained);
+    // No peer to take the partition: it is left for a claim once retired.
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(rig.phase().await, "ended");
 }
 
 #[tokio::test]
@@ -174,7 +182,11 @@ async fn the_connector_registers_renews_and_marks_draining() {
     let running = rig.start();
     until("renewed", || async { leases.renewals.load(Ordering::SeqCst) >= 2 }).await;
     assert_eq!(leases.calls.lock().unwrap()[0], "register conn-03 Connector 3");
-    assert_eq!(running.engine.drain(Duration::from_millis(50)).await.unwrap(), DrainOutcome::Drained);
+    assert_eq!(
+        running.engine.drain(Duration::from_millis(50)).await.unwrap(),
+        DrainOutcome::DeadlineReached { remaining: 1 },
+        "no peer took the partition"
+    );
     let calls = leases.calls.lock().unwrap().clone();
     let at = |call: &str| calls.iter().position(|c| c == call).unwrap_or_else(|| panic!("{call} missing: {calls:?}"));
     assert!(at("draining conn-03") < at("retire conn-03"), "marked draining first, retired at the end");
@@ -191,7 +203,7 @@ async fn a_drain_that_stops_calls_retires_after_they_stopped() {
     let running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
     let outcome = running.engine.drain(Duration::from_millis(60)).await.unwrap();
-    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 2 });
     assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
     assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }
@@ -299,7 +311,7 @@ async fn the_registration_is_kept_alive_during_the_drain_grace_period() {
     // look dead to other Connectors while it waits.
     until("renewed during the grace period", || async { leases.renewals.load(Ordering::SeqCst) >= before + 3 }).await;
     events.send(final_event()).unwrap();
-    assert_eq!(drain.await.unwrap().unwrap(), DrainOutcome::Drained);
+    assert_eq!(drain.await.unwrap().unwrap(), DrainOutcome::DeadlineReached { remaining: 1 });
 }
 
 #[tokio::test]
@@ -321,6 +333,12 @@ async fn a_feed_outage_does_not_let_the_registration_expire() {
     struct BrokenQueue;
     #[async_trait]
     impl DispatchQueuePort for BrokenQueue {
+        fn command_partitions(&self) -> u32 {
+            1
+        }
+        fn partition_of(&self, _: &Did) -> u32 {
+            0
+        }
         async fn claim(&self, _: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
             Ok(ClaimOutcome::NotFound)
         }
@@ -356,6 +374,12 @@ struct GatedQueue {
 
 #[async_trait]
 impl DispatchQueuePort for GatedQueue {
+    fn command_partitions(&self) -> u32 {
+        self.inner.command_partitions()
+    }
+    fn partition_of(&self, did: &Did) -> u32 {
+        self.inner.partition_of(did)
+    }
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
         let _permit = self.gate.acquire().await.unwrap();
         self.inner.claim(request).await
@@ -388,7 +412,7 @@ async fn a_claim_that_wins_after_the_drain_began_starts_no_actor() {
     // The main loop is held inside the claim past the deadline. Draining
     // already refuses new actors, so the drain can retire at once.
     let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
-    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 0 });
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 }, "only the partition");
     assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 
     // The claim then wins, but no actor starts: the call stays held by this
@@ -417,7 +441,10 @@ async fn concurrent_drains_both_end_with_every_actor_stopped() {
         running.engine.drain(Duration::from_millis(60)),
     );
     let outcomes = [first.unwrap(), second.unwrap()];
-    assert!(outcomes.contains(&DrainOutcome::DeadlineReached { remaining: 1 }), "{outcomes:?}");
+    // One shutdown, one outcome: the call aborted at the deadline and the
+    // partition nobody took.
+    let expected = DrainOutcome::DeadlineReached { remaining: 2 };
+    assert_eq!(outcomes, [expected.clone(), expected], "{outcomes:?}");
     assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
     assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }

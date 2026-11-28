@@ -85,6 +85,7 @@ async fn unknown_holder_cannot_be_taken_over_and_resume_fences_old_actor() {
             incarnation: "two".into(),
         },
         request_id: RequestId("other".into()),
+        partition: None,
     };
     assert!(matches!(
         f.queue.claim(other.clone()).await.unwrap(),
@@ -308,6 +309,7 @@ async fn takeover_preserves_a_concurrent_worker_cancel_in_the_same_document() {
                 did: spec().did,
                 me: me(),
                 request_id: RequestId("interleaved".into()),
+                partition: None,
             })
             .await
     });

@@ -293,12 +293,63 @@ impl BlobStorePort for MemoryBlobs {
     }
 }
 
+/// In-process peer channel: a handoff goes straight to the target engine's
+/// control port.
+#[derive(Default)]
+pub struct LocalPeers {
+    pub engines: Mutex<HashMap<String, ConnectorEngine>>,
+    /// Every handoff offered, as `<partition> -> <target node>`.
+    pub offers: Mutex<Vec<String>>,
+    /// While set, an offer never gets an answer.
+    pub hang: std::sync::atomic::AtomicBool,
+}
+
+impl LocalPeers {
+    pub fn add(&self, engine: &ConnectorEngine, node: &str) {
+        self.engines.lock().unwrap().insert(node.to_owned(), engine.clone());
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::port::dist_runtime::DistWorkerPeerPort for LocalPeers {
+    async fn handoff(
+        &self,
+        target: &bcs_service_api::port::repo::distributed::ownership::MemberRecord,
+        request: bcs_service_api::port::repo::distributed::ownership::HandoffRequest,
+    ) -> Result<bcs_service_api::port::repo::distributed::ownership::HandoffOutcome, bcs_service_api::types::dist_runtime::RuntimeError> {
+        self.offers
+            .lock()
+            .unwrap()
+            .push(format!("{} -> {}", request.from.shard.0, target.instance.node));
+        if self.hang.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        let engine = self.engines.lock().unwrap().get(&target.instance.node).cloned();
+        match engine {
+            Some(engine) => engine.accept_handoff(request).await,
+            None => Err(bcs_service_api::types::dist_runtime::RuntimeError { code: "peer_offline".into() }),
+        }
+    }
+    async fn source_done(
+        &self,
+        _: &bcs_service_api::port::repo::distributed::ownership::MemberRecord,
+        _: Instance,
+        _: bcs_service_api::port::repo::distributed::ownership::ShardClaim,
+        _: RequestId,
+    ) -> Result<bool, bcs_service_api::types::dist_runtime::RuntimeError> {
+        Ok(false)
+    }
+}
+
 pub struct Rig {
     pub store: Arc<Recorder>,
     pub worker: WorkerFixture,
     pub agent: Arc<ScriptedAgent>,
     pub blobs: Arc<MemoryBlobs>,
     pub membership: Arc<dyn MembershipPort>,
+    /// Partition owner records, shared by every engine of the rig.
+    pub owners: MemoryOwners,
+    pub peers: Arc<LocalPeers>,
     pub config: ConnectorConfig,
 }
 
@@ -333,11 +384,18 @@ impl Rig {
         config.backoff_min = Duration::from_millis(5);
         config.backoff_max = Duration::from_millis(20);
         config.membership_renew = Duration::from_millis(20);
+        config.ownership_interval = Duration::from_millis(20);
+        config.candidate_backoff = Duration::from_millis(20);
+        config.peer_timeout = Duration::from_millis(200);
+        config.handoff_reserve = Duration::from_millis(100);
+        config.control_address = "http://conn-03.example.test:8080".into();
         Self {
             worker: WorkerFixture::new(&store),
             agent: Arc::new(ScriptedAgent::new(&store)),
             blobs: Arc::new(MemoryBlobs::default()),
             membership: Arc::new(PendingMembership),
+            owners: MemoryOwners::default(),
+            peers: Arc::new(LocalPeers::default()),
             config,
             store,
         }
@@ -370,10 +428,17 @@ impl Rig {
 
     pub fn ports(&self) -> ConnectorPorts {
         ConnectorPorts {
-            queue: Arc::new(queue_with(&self.store, self.membership.clone(), self.board_config())),
+            queue: Arc::new(queue_owned(
+                &self.store,
+                self.membership.clone(),
+                Arc::new(self.owners.clone()),
+                self.board_config(),
+            )),
             inbox: self.inbox(),
             agent: self.agent.clone(),
             membership: self.membership.clone(),
+            partitions: Arc::new(self.owners.clone()),
+            peers: self.peers.clone(),
             blobs: self.blobs.clone(),
             rules: Arc::new(DistConnectorRules),
         }
@@ -383,9 +448,23 @@ impl Rig {
         ConnectorEngine::new(self.config.clone(), self.ports()).unwrap()
     }
 
+    /// Another Connector process on the same stores, owner records and peer
+    /// channel, reachable through `peers`.
+    pub fn start_as(&self, node: &str) -> Running {
+        let mut config = self.config.clone();
+        config.me = instance(node);
+        config.control_address = format!("http://{node}.example.test:8080");
+        let engine = ConnectorEngine::new(config, self.ports()).unwrap();
+        self.peers.add(&engine, node);
+        let looped = engine.clone();
+        let task = tokio::spawn(async move { looped.run().await });
+        Running { engine, task }
+    }
+
     /// Builds an engine and runs its loop in the background.
     pub fn start(&self) -> Running {
         let engine = self.engine();
+        self.peers.add(&engine, &self.config.me.node);
         let looped = engine.clone();
         let task = tokio::spawn(async move { looped.run().await });
         Running { engine, task }
@@ -493,4 +572,96 @@ where
 /// Lets the engine run for a few poll intervals.
 pub async fn settle() {
     tokio::time::sleep(Duration::from_millis(120)).await;
+}
+
+/// Membership with a live member list: registered processes are `Alive`
+/// and listed until retired (then `Dead`); draining ones are not listed.
+#[derive(Default)]
+pub struct Members {
+    pub records: Mutex<Vec<bcs_service_api::port::repo::distributed::ownership::MemberRecord>>,
+    pub dead: Mutex<Vec<String>>,
+    pub renewals: std::sync::atomic::AtomicUsize,
+    /// While set, `members` does not answer.
+    pub stall_members: std::sync::atomic::AtomicBool,
+    /// Extra time every `members` answer takes, in ms.
+    pub members_delay_ms: std::sync::atomic::AtomicU64,
+    /// How many times `members` was called.
+    pub member_reads: std::sync::atomic::AtomicUsize,
+    /// While set, `set_draining` panics.
+    pub panic_on_draining: std::sync::atomic::AtomicBool,
+}
+
+impl Members {
+    pub fn kill(&self, node: &str) {
+        self.dead.lock().unwrap().push(node.to_owned());
+        self.records.lock().unwrap().retain(|r| r.instance.node != node);
+    }
+}
+
+#[async_trait]
+impl MembershipPort for Members {
+    async fn register(
+        &self,
+        instance: Instance,
+        role: bcs_service_api::port::repo::distributed::ownership::RuntimeRole,
+        control_address: String,
+        _: Duration,
+    ) -> Result<bcs_service_api::port::repo::distributed::ownership::MembershipLease, StoreError> {
+        let mut records = self.records.lock().unwrap();
+        if !records.iter().any(|r| r.instance == instance) {
+            records.push(bcs_service_api::port::repo::distributed::ownership::MemberRecord {
+                instance: instance.clone(),
+                role,
+                control_address,
+                draining: false,
+            });
+        }
+        Ok(bcs_service_api::port::repo::distributed::ownership::MembershipLease { instance })
+    }
+    async fn renew(
+        &self,
+        _: &bcs_service_api::port::repo::distributed::ownership::MembershipLease,
+        _: Duration,
+    ) -> Result<bcs_service_api::port::repo::distributed::ownership::Renewal, StoreError> {
+        self.renewals.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(bcs_service_api::port::repo::distributed::ownership::Renewal::Renewed)
+    }
+    async fn set_draining(
+        &self,
+        lease: &bcs_service_api::port::repo::distributed::ownership::MembershipLease,
+    ) -> Result<bcs_service_api::port::repo::distributed::ownership::Renewal, StoreError> {
+        assert!(!self.panic_on_draining.load(std::sync::atomic::Ordering::SeqCst), "set_draining panics");
+        for record in self.records.lock().unwrap().iter_mut() {
+            if record.instance == lease.instance {
+                record.draining = true;
+            }
+        }
+        Ok(bcs_service_api::port::repo::distributed::ownership::Renewal::Renewed)
+    }
+    async fn retire(&self, lease: &bcs_service_api::port::repo::distributed::ownership::MembershipLease) -> Result<(), StoreError> {
+        self.kill(&lease.instance.node);
+        Ok(())
+    }
+    async fn liveness(&self, instance: &Instance) -> Result<bcs_service_api::port::repo::distributed::ownership::Liveness, StoreError> {
+        use bcs_service_api::port::repo::distributed::ownership::Liveness;
+        if self.dead.lock().unwrap().contains(&instance.node) {
+            return Ok(Liveness::Dead);
+        }
+        let listed = self.records.lock().unwrap().iter().any(|r| r.instance == *instance);
+        Ok(if listed { Liveness::Alive } else { Liveness::Unknown })
+    }
+    async fn members(
+        &self,
+        _: bcs_service_api::port::repo::distributed::ownership::RuntimeRole,
+        _: bcs_service_api::port::repo::distributed::common::PageRequest,
+    ) -> Result<bcs_service_api::port::repo::distributed::common::Page<bcs_service_api::port::repo::distributed::ownership::MemberRecord>, StoreError> {
+        self.member_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let delay = self.members_delay_ms.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+        while self.stall_members.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let items = self.records.lock().unwrap().iter().filter(|r| !r.draining).cloned().collect();
+        Ok(bcs_service_api::port::repo::distributed::common::Page { items, next: None })
+    }
 }

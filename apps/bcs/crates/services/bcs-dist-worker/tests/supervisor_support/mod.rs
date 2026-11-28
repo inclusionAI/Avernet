@@ -359,6 +359,7 @@ impl Harness {
                 did: self.did.clone(),
                 me,
                 request_id: RequestId("claim".into()),
+                partition: None,
             })
             .await
             .unwrap()

@@ -1,5 +1,6 @@
-//! Instance-bound Worker control client. Composition supplies the headers used
-//! to bind this exact registration lifetime at a trusted receiver.
+//! Instance-bound Worker (or Connector) control client. Composition supplies
+//! the headers used to bind this exact registration lifetime at a trusted
+//! receiver.
 use async_trait::async_trait;
 use bcs_dist_model::{Instance, RequestId};
 use bcs_service_api::{
@@ -14,6 +15,9 @@ pub struct HttpWorkerPeer {
     instance: Instance,
     client: Client,
     headers: HeaderMap,
+    /// Route prefix of the receiving role: `/internal/bcn/worker` or
+    /// `/internal/bcn/connector`.
+    routes: &'static str,
 }
 #[derive(Serialize)]
 struct DoneRequest {
@@ -30,6 +34,24 @@ impl HttpWorkerPeer {
         headers: HeaderMap,
         timeout: Duration,
     ) -> Result<Self, RuntimeError> {
+        Self::with_routes(instance, headers, timeout, "/internal/bcn/worker")
+    }
+    /// A client of the Connector peer route (`connector_router`): a draining
+    /// Connector offers its partitions with `handoff`. `source_done` is not
+    /// served there.
+    pub fn connector(
+        instance: Instance,
+        headers: HeaderMap,
+        timeout: Duration,
+    ) -> Result<Self, RuntimeError> {
+        Self::with_routes(instance, headers, timeout, "/internal/bcn/connector")
+    }
+    fn with_routes(
+        instance: Instance,
+        headers: HeaderMap,
+        timeout: Duration,
+        routes: &'static str,
+    ) -> Result<Self, RuntimeError> {
         if headers.is_empty() || timeout.is_zero() {
             return Err(error("worker_peer_configuration"));
         }
@@ -43,6 +65,7 @@ impl HttpWorkerPeer {
             instance,
             client,
             headers,
+            routes,
         })
     }
     async fn send<T: Serialize + Sync, R: DeserializeOwned>(
@@ -101,7 +124,7 @@ impl DistWorkerPeerPort for HttpWorkerPeer {
             return Err(error("worker_peer_identity"));
         }
         let response = self
-            .send(target, "/internal/bcn/worker/handoff", &request)
+            .send(target, &format!("{}/handoff", self.routes), &request)
             .await?;
         if let HandoffOutcome::Accepted(record) = &response
             && (record.claim.owner.instance != target.instance
@@ -124,7 +147,7 @@ impl DistWorkerPeerPort for HttpWorkerPeer {
         }
         self.send(
             target,
-            "/internal/bcn/worker/source-done",
+            &format!("{}/source-done", self.routes),
             &DoneRequest {
                 source,
                 target: claim,

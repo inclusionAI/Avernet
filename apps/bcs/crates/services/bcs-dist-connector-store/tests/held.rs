@@ -57,7 +57,7 @@ async fn one_call_from_send_to_end() {
     assert_eq!(doc["execution"]["phase"], "ended");
     assert_eq!(doc["execution"]["outcome"], "completed");
     assert_eq!(doc["connector"]["finish_evidence"], "final_admitted");
-    assert!(held_members(&store, &instance("conn-03")).await.is_empty(), "unlisted after ENDED");
+    assert!(held_members(&store).await.is_empty(), "unlisted after ENDED");
     // Unlisted only after the ENDED write.
     let calls = store.calls();
     let ended = calls.iter().rposition(|c| c.starts_with("json.mutate")).unwrap();
@@ -312,7 +312,7 @@ async fn every_write_reports_a_definite_failure() {
     failed(held.finish(FinalDispatchOutcome::Completed, "ok".into()).await.map(|_| ()));
     let (doc, _) = stored(&store).await;
     assert_eq!(doc["execution"]["phase"], "accepted", "a failed write is never reported as success");
-    assert_eq!(held_members(&store, &instance("conn-03")).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 
     // The held-index removal failing after ENDED does not undo the end.
     store.fail_write(2);
@@ -320,7 +320,7 @@ async fn every_write_reports_a_definite_failure() {
         held.finish(FinalDispatchOutcome::Completed, "ok".into()).await.unwrap(),
         IdempotentWrite::Applied
     );
-    assert_eq!(held_members(&store, &instance("conn-03")).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 }
 
 #[tokio::test]

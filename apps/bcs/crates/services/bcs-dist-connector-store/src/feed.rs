@@ -1,11 +1,13 @@
 //! The `CommandFeedPort` provider: command-stream partitions read through the
 //! consumer group `connectors`.
 //!
-//! - Every Connector reads every partition, one blocking group read per
-//!   partition (one key per call). The group hands each entry to one consumer.
+//! - A Connector reads only the partitions it owns (`assign`), one blocking
+//!   group read per partition (one key per call). Before the first `assign`
+//!   it reads nothing. The group hands each entry to one consumer.
 //! - A group read that was started is never dropped: it may already have
 //!   registered deliveries. Its future is kept across `receive` calls.
-//! - Entries a dead Connector left pending are taken over after an idle time.
+//! - Entries a former owner left pending are taken over after an idle time,
+//!   by the partition's new owner.
 //! - The group is created from the beginning, so a hint posted before any
 //!   Connector existed is not skipped. Re-reading an old hint is harmless: the
 //!   claim checks the dispatch document.
@@ -104,21 +106,26 @@ pub struct StoreCommandFeed {
     /// the next page starts, e.g. `Some(1794370950123-0)`; `None` = from the
     /// start (a full pass ended, or none began).
     reclaim_cursor: Vec<Option<StreamId>>,
+    /// `assigned[p]`: partition `p` is read (this instance owns it). A read
+    /// already in flight on a partition no longer assigned is still
+    /// collected; the claim then answers `NotOwner` for its hints.
+    assigned: Vec<bool>,
 }
 
 impl StoreCommandFeed {
     /// Builds the partition keys and joins (creates if needed) the group on
     /// every partition. Fails if a key is invalid or a group cannot be created.
     pub(crate) async fn open(shared: Arc<Shared>, pool: PoolId, me: &Instance) -> Result<Self, StoreError> {
-        // The held-index key validates the instance (no ':' inside its parts).
-        shared.layout.held(me)?;
+        // Validates the instance (no ':' inside its parts).
+        let consumer = bcs_dist_store::layout::KeyLayout::instance_text(me)?;
         let mut keys = Vec::new();
         for partition in 0..shared.config.streams.partitions() {
             keys.push(shared.layout.command(&pool, partition)?);
         }
         let feed = Self {
-            consumer: format!("{}:{}", me.node, me.incarnation),
+            consumer,
             reading: vec![false; keys.len()],
+            assigned: vec![false; keys.len()],
             reads: FuturesUnordered::new(),
             buffer: VecDeque::new(),
             reclaimed_at: None,
@@ -133,12 +140,12 @@ impl StoreCommandFeed {
         Ok(feed)
     }
 
-    /// Starts a group read on every partition that has none in flight.
+    /// Starts a group read on every assigned partition that has none in flight.
     /// Only queues the futures; they make progress while `receive` polls
     /// `reads`.
     fn start_reads(&mut self) {
         for (partition, key) in self.keys.iter().enumerate() {
-            if self.reading[partition] {
+            if self.reading[partition] || !self.assigned[partition] {
                 continue;
             }
             self.reading[partition] = true;
@@ -206,6 +213,9 @@ impl StoreCommandFeed {
                 break;
             }
             let partition = (self.reclaim_from + step) % partitions;
+            if !self.assigned[partition] {
+                continue;
+            }
             let page = self
                 .shared
                 .stream
@@ -301,8 +311,13 @@ impl CommandFeedPort for StoreCommandFeed {
                 return Ok(Vec::new());
             }
             self.start_reads();
-            // Deadline passed (`Err`) or no read in flight (`None`, not
-            // expected after `start_reads`): return empty; the reads stay.
+            if self.reads.is_empty() {
+                // Nothing assigned: wait out the timeout like an empty read.
+                tokio::time::sleep_until(deadline).await;
+                return Ok(Vec::new());
+            }
+            // Deadline passed (`Err`) or no read in flight (`None`): return
+            // empty; the reads stay.
             let Ok(Some((partition, result))) =
                 tokio::time::timeout_at(deadline, self.reads.next()).await
             else {
@@ -349,5 +364,15 @@ impl CommandFeedPort for StoreCommandFeed {
             .await
             .map(|_| ())
             .map_err(|e| from_write(&e, &delivery.opaque))
+    }
+
+    /// Reads only `partitions` from now on; numbers out of range are ignored.
+    fn assign(&mut self, partitions: &[u32]) {
+        self.assigned.iter_mut().for_each(|assigned| *assigned = false);
+        for partition in partitions {
+            if let Some(assigned) = self.assigned.get_mut(*partition as usize) {
+                *assigned = true;
+            }
+        }
     }
 }

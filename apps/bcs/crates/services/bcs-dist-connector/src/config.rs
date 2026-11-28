@@ -14,15 +14,18 @@
 //! receive_timeout    1 s        max_inline_bytes  64 KiB
 //! backoff_min/max    200 ms / 5 s (doubling)
 //! not_sent_retries   3          membership_ttl/renew  3 s / 1 s
-//! control_address    "" (no control endpoint yet)
+//! control_address    "" (set by the composition)
+//! ownership_interval 1 s        candidate_backoff 500 ms
+//! peer_timeout       2 s        handoff_reserve   5 s
 //! ```
 
 use bcs_dist_model::{Did, Instance, PoolId};
 use bcs_service_api::core::dist_connector::DistConnectorCoreService;
 use bcs_service_api::port::dist_agent::DistAgentClientPort;
+use bcs_service_api::port::dist_runtime::DistWorkerPeerPort;
 use bcs_service_api::port::repo::distributed::dispatch::DispatchQueuePort;
 use bcs_service_api::port::repo::distributed::inbox::InboxProducerPort;
-use bcs_service_api::port::repo::distributed::ownership::MembershipPort;
+use bcs_service_api::port::repo::distributed::ownership::{MembershipPort, ShardLeasePort};
 use bcs_service_api::port::repo::distributed::result::BlobStorePort;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,7 +40,8 @@ pub struct ConnectorConfig {
     /// The command-stream pool this Connector serves.
     pub pool: PoolId,
     /// Calls held at once (live actors). At the limit the engine reads no
-    /// hints at all, so other Connectors take them: pull-based load balancing.
+    /// hints at all; the hints of its partitions wait until an actor ends
+    /// (only the owner reads a partition, and owners are not rebalanced).
     pub max_active_calls: usize,
     /// How often a held call's dispatch is re-read for replies and cancels
     /// (the actor's tick, B14). Each call uses its own value spread over
@@ -68,11 +72,27 @@ pub struct ConnectorConfig {
     pub membership_ttl: Duration,
     /// How often the membership record is renewed; well below the TTL.
     pub membership_renew: Duration,
-    /// URL where other processes reach this process's control endpoint;
-    /// stored in the member record at registration. Empty until a control
-    /// endpoint exists; the real membership provider refuses an empty or
-    /// non-http value (today the Connector runs with the stub membership).
+    /// URL where other processes reach this process's control endpoint
+    /// (where a draining Connector offers it a partition); stored in the
+    /// member record at registration. The composition sets it per instance;
+    /// the real membership provider refuses an empty or non-http value.
     pub control_address: String,
+    /// How often the partition owner records are looked at: partitions this
+    /// process owns are confirmed, unowned ones and those of a dead owner are
+    /// claimed (see `engine::partitions`).
+    pub ownership_interval: Duration,
+    /// HRW stagger of partition claims: the Connector ranked `r` for a
+    /// partition waits `r x candidate_backoff` after it first saw the
+    /// partition claimable, so the best-ranked one normally wins. Also how
+    /// long a draining Connector skips a peer that refused a handoff.
+    pub candidate_backoff: Duration,
+    /// Longest wait of one handoff request to a peer, and of one partition
+    /// owner write.
+    pub peer_timeout: Duration,
+    /// Part of a drain's grace period kept for handing the partitions over:
+    /// calls still running this long before the deadline are stopped. At
+    /// most half the grace period is kept.
+    pub handoff_reserve: Duration,
 }
 
 impl ConnectorConfig {
@@ -91,6 +111,10 @@ impl ConnectorConfig {
             membership_ttl: Duration::from_secs(3),
             membership_renew: Duration::from_secs(1),
             control_address: String::new(),
+            ownership_interval: Duration::from_secs(1),
+            candidate_backoff: Duration::from_millis(500),
+            peer_timeout: Duration::from_secs(2),
+            handoff_reserve: Duration::from_secs(5),
         }
     }
 
@@ -118,10 +142,18 @@ pub struct ConnectorPorts {
     /// The downstream agents (A2A): start, send input, query, subscribe,
     /// cancel.
     pub agent: Arc<dyn DistAgentClientPort>,
-    /// Registration of this process and proof of death of others: the
-    /// composition injects the real provider (`CoordinationStore`); without
-    /// one, the stub `PendingMembership` answers `need_contract_not_implemented`.
+    /// Registration of this process, the list of live Connectors and proof
+    /// of death of others: the composition injects the real provider
+    /// (`CoordinationStore`); without one, the stub `PendingMembership`
+    /// answers `need_contract_not_implemented` and this process counts as
+    /// the only Connector.
     pub membership: Arc<dyn MembershipPort>,
+    /// Owner records of the command partitions of `pool`: a
+    /// `CoordinationStore` built `with_partition_owners(pool)`.
+    pub partitions: Arc<dyn ShardLeasePort>,
+    /// Reaches another Connector's control endpoint to offer it a partition
+    /// on drain (`HttpWorkerPeer::connector`).
+    pub peers: Arc<dyn DistWorkerPeerPort>,
     /// Immutable blobs: large event payloads, and requests or replies the
     /// Worker stored by reference.
     pub blobs: Arc<dyn BlobStorePort>,

@@ -340,6 +340,7 @@ impl Fixture {
             model.clone(),
             model.clone(),
             coordination.clone(),
+            Arc::new(CoordinationStore::new(model.clone(), model.clone(), model.clone(), layout.clone()).unwrap().with_partition_owners(PoolId("a2a".into())).unwrap()),
             layout.clone(),
             clock.clone(),
             bcs_dist_connector_store::DispatchBoardConfig::new(

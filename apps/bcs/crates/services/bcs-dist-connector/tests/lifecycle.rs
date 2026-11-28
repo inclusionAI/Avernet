@@ -78,7 +78,7 @@ async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
     assert!(admitted < ended, "final before finish");
 
     until("the actor is gone", || async { running.active().await == 0 }).await;
-    assert!(held_members(&rig.store, &instance("conn-03")).await.is_empty());
+    assert!(held_members(&rig.store).await.is_empty());
     assert_eq!(rig.agent.count("start"), 1, "no second send");
     assert_eq!(running.pending_effects().await, 0);
 }

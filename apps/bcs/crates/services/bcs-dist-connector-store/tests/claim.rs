@@ -7,7 +7,8 @@ use bcs_dist_model::*;
 use bcs_dist_store::error::NEED_CONTRACT;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::dispatch::*;
-use bcs_service_api::port::repo::distributed::ownership::Liveness;
+use bcs_service_api::port::repo::distributed::ownership::{Liveness, MembershipPort};
+use bcs_dist_connector_store::membership::PendingMembership;
 use bcs_store_api::StoreCapability;
 use common::*;
 use std::sync::Arc;
@@ -37,7 +38,7 @@ async fn first_claim_takes_the_call_at_the_claim_version() {
     // The Worker's objects are untouched.
     assert_eq!(doc["spec"]["did"], DID);
     assert_eq!(doc["control"], serde_json::json!({"cancel": null, "pending_input": []}));
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 
     // Listed as held before the claim write.
     let calls = store.calls();
@@ -61,10 +62,9 @@ async fn two_claimers_one_winner() {
     assert_eq!(names.iter().filter(|n| **n == "held_by_other").count(), 1, "{names:?}");
     let (doc, version) = stored(&store).await;
     assert_eq!(version, 1_000_000_000);
-    let winner = doc["execution"]["holder"]["instance"]["node"].as_str().unwrap().to_owned();
-    let (won, lost) = if winner == "conn-a" { (&a, &b) } else { (&b, &a) };
-    assert!(held_members(&store, lost).await.is_empty(), "the loser unlists the call");
-    assert_eq!(held_members(&store, won).await, vec![DID.to_owned()]);
+    assert!(doc["execution"]["holder"]["instance"]["node"].is_string());
+    // The partition index is shared: the loser leaves the call listed.
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
     assert_eq!(store.count("json.mutate") + store.count("json.rejected"), 2, "both tried to claim");
 }
 
@@ -101,7 +101,7 @@ async fn same_instance_gets_owned_by_me_not_a_second_handle() {
         other => panic!("{}", outcome_name(&other)),
     }
     assert_eq!(stored(&store).await.1, 1_000_000_000, "no second claim write");
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn missing_and_ended_calls_are_not_held() {
     let me = instance("conn-03");
     let q = queue(&store);
     assert_eq!(outcome_name(&q.claim(claim_request(&me)).await.unwrap()), "not_found");
-    assert!(held_members(&store, &me).await.is_empty());
+    assert!(held_members(&store).await.is_empty());
 
     WorkerFixture::new(&store).create().await;
     let mut held = acquire(&q, &me).await;
@@ -120,7 +120,7 @@ async fn missing_and_ended_calls_are_not_held() {
         outcome_name(&q.claim(claim_request(&instance("conn-07"))).await.unwrap()),
         "ended"
     );
-    assert!(held_members(&store, &instance("conn-07")).await.is_empty());
+    assert!(held_members(&store).await.is_empty());
 }
 
 #[tokio::test]
@@ -150,7 +150,8 @@ async fn pending_membership_means_held_by_other() {
         outcome => panic!("{}", outcome_name(&outcome)),
     }
     assert_eq!(stored(&store).await.1, 1_000_000_000);
-    assert!(held_members(&store, &other).await.is_empty());
+    // Listed once, by the holder's claim.
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 }
 
 #[tokio::test]
@@ -200,7 +201,7 @@ async fn only_a_dead_holder_is_taken_over() {
         assert_eq!(doc["execution"]["phase"], "accepted");
         assert_eq!(doc["execution"]["remote"]["task_id"], "rt-77c2");
         assert_eq!(second.view().execution.remote, Some(remote()));
-        assert_eq!(held_members(&store, &other).await, vec![DID.to_owned()]);
+        assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 
         // The former holder can change nothing any more.
         assert_eq!(first.refresh().await, Err(HolderError::Lost));
@@ -224,7 +225,7 @@ async fn lost_claim_response_is_resolved_by_reading_back() {
     let held = acquire(&queue(&store), &me).await;
     assert_eq!(held.holder().epoch, HolderEpoch(1));
     assert_eq!(stored(&store).await.1, 1_000_000_000);
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 }
 
 #[tokio::test]
@@ -240,7 +241,7 @@ async fn definite_claim_failure_is_an_error_and_changes_nothing() {
     assert!(matches!(error, StoreError::NotApplied { .. }), "{error:?}");
     assert_eq!(stored(&store).await.1, 1, "still as created");
     // Listed too much is allowed; a retry then claims normally.
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
     assert_eq!(acquire(&queue(&store), &me).await.holder().epoch, HolderEpoch(1));
 
     // A held-index failure stops the claim before the document is touched.
@@ -312,6 +313,7 @@ async fn startup_fails_without_a_required_capability() {
             store.clone(),
             store.clone(),
             Arc::new(PendingMembership),
+            Arc::new(MemoryOwners::default()),
             layout(),
             Arc::new(FixedClock(NOW)),
             config(1),
@@ -332,6 +334,7 @@ async fn startup_fails_without_a_required_capability() {
             store.clone(),
             store.clone(),
             Arc::new(PendingMembership),
+            Arc::new(MemoryOwners::default()),
             layout(),
             Arc::new(FixedClock(NOW)),
             bad,
@@ -355,16 +358,67 @@ async fn unsupported_document_version_is_refused() {
 }
 
 #[tokio::test]
-async fn held_by_lists_the_instance_index() {
+async fn held_in_lists_the_partition_index() {
+    use bcs_service_api::port::repo::distributed::dispatch::DispatchQueuePort;
     use std::num::NonZeroU32;
     let store = store();
     WorkerFixture::new(&store).create().await;
-    let me = instance("conn-03");
     let q = queue(&store);
-    let _held = acquire(&q, &me).await;
+    let _held = acquire(&q, &instance("conn-03")).await;
     let limit = NonZeroU32::new(10).unwrap();
-    assert_eq!(q.held_by(&me, limit).await.unwrap(), vec![did()]);
-    assert!(q.held_by(&instance("conn-07"), limit).await.unwrap().is_empty());
+    assert_eq!(q.held_in(&pool(), 0, limit).await.unwrap(), vec![did()]);
+    assert!(q.held_in(&pool(), 1, limit).await.is_err(), "one partition only");
+}
+
+/// A claim made as the owner of the call's partition.
+fn owner_claim(me: &Instance, proof: &bcs_service_api::port::repo::distributed::ownership::ShardClaim) -> DispatchClaimRequest {
+    DispatchClaimRequest {
+        partition: Some(proof.clone()),
+        ..claim_request(me)
+    }
+}
+
+#[tokio::test]
+async fn the_partition_owner_takes_over_a_live_holder() {
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let owners = MemoryOwners::default();
+    // A live holder (every liveness answer is `Alive`).
+    let alive: Arc<dyn MembershipPort> = Arc::new(FixedLiveness(Liveness::Alive));
+    let q = queue_owned(&store, alive, Arc::new(owners.clone()), config(1));
+    let _old = acquire(&q, &instance("conn-01")).await;
+    let me = instance("conn-03");
+    assert_eq!(outcome_name(&q.claim(claim_request(&me)).await.unwrap()), "held_by_other");
+
+    let proof = owners.set(0, &me, 4);
+    let ClaimOutcome::Acquired(held) = q.claim(owner_claim(&me, &proof)).await.unwrap() else {
+        panic!("the owner did not take the call over");
+    };
+    assert_eq!(held.holder().instance, me);
+    assert_eq!(held.holder().epoch, HolderEpoch(2));
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
+}
+
+#[tokio::test]
+async fn a_stale_or_foreign_ownership_proof_claims_nothing() {
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let owners = MemoryOwners::default();
+    let q = queue_owned(&store, Arc::new(PendingMembership), Arc::new(owners.clone()), config(1));
+    let me = instance("conn-03");
+    let stale = owners.set(0, &me, 1);
+    owners.set(0, &instance("conn-07"), 2);
+    assert_eq!(outcome_name(&q.claim(owner_claim(&me, &stale)).await.unwrap()), "not_owner");
+    // A proof naming another instance than the claimant.
+    let theirs = owners.set(0, &instance("conn-07"), 3);
+    assert_eq!(outcome_name(&q.claim(owner_claim(&me, &theirs)).await.unwrap()), "not_owner");
+    // A proof for another partition is refused.
+    let mut wrong = owners.set(0, &me, 4);
+    wrong.shard = ShardId(5);
+    assert!(q.claim(owner_claim(&me, &wrong)).await.is_err());
+    // Nothing was written or listed.
+    assert!(stored(&store).await.0["execution"]["holder"].is_null());
+    assert!(held_members(&store).await.is_empty());
 }
 
 /// A raw holder write, as a former holder landing it at `version`.
@@ -400,7 +454,7 @@ async fn a_takeover_never_undoes_the_former_holders_last_write() {
     let (doc, _) = stored(&store).await;
     assert_eq!(doc["execution"]["phase"], "ended");
     assert_eq!(doc["execution"]["outcome"], "completed");
-    assert!(held_members(&store, &other).await.is_empty());
+    assert!(held_members(&store).await.is_empty());
 }
 
 #[tokio::test]
@@ -443,7 +497,7 @@ async fn a_claim_write_that_did_not_land_is_made_again() {
     // An unknown claim write may still land later: the call is never
     // unlisted on it (the index may list too much, never too little).
     assert_eq!(store.count("zset.remove"), 0, "{:?}", store.calls());
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
 }
 
 #[tokio::test]
@@ -459,6 +513,6 @@ async fn an_unreadable_document_after_an_unknown_claim_is_outcome_unknown() {
     };
     assert_eq!(error, StoreError::OutcomeUnknown { operation_id: DID.into() });
     // The claim landed; the index still lists it and a retry finds it.
-    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(held_members(&store).await, vec![DID.to_owned()]);
     assert_eq!(outcome_name(&queue(&store).claim(claim_request(&me)).await.unwrap()), "owned_by_me");
 }
