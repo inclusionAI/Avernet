@@ -79,7 +79,8 @@ describe('retired ClawWeb operation migration 149', () => {
           expect([...exec.mock.calls, ...query.mock.calls].some(([sql]) => sql.includes('clawweb_pack_operations'))).toBe(false);
           expect(exec.mock.calls.some(([sql, params]) => sql.includes('INSERT INTO schema_version') && params?.[0] === 149)).toBe(false);
           const recorded = exec.mock.calls.filter(([sql]) => sql.includes('INSERT INTO schema_version')).map(([, params]) => params?.[0]);
-          expect(recorded).toEqual(canDdl && current < 150 && dbType !== 'zdas' ? [150, 151] : []);
+          const activeVersions = dbType === 'zdas' ? [159] : [150, 151, 159];
+          expect(recorded).toEqual(canDdl ? activeVersions.filter(version => version > current) : []);
         }
       }
     },

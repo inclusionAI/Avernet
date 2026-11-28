@@ -6,6 +6,7 @@ import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
 import { ordinaryRunRequestDdl } from '../schema-ordinary-run-request.js';
 import { distributedLockDdl } from '../schema-distributed-lock.js';
+import { approvalConsumptionColumnDdl, approvalConsumptionIndexDdl, approvalConsumptionMigrations } from '../schema-approval-consumption.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -65,6 +66,7 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       ...migrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       ...workflowSnapshotMigrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       probes.ordinaryCallback, probes.healingCallback, tagAlter, flowRunLinkMysqlUpgradeDdl,
+      approvalConsumptionColumnDdl, approvalConsumptionIndexDdl.mysql,
       `${dialectFor(dbType).renderDdl(ordinaryRunRequestDdl)} ENGINE=InnoDB`,
       dialectFor(dbType).renderDdl(distributedLockDdl) + (dbType === 'mysql' ? ' ENGINE=InnoDB' : ''),
       'ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker VARCHAR(64) DEFAULT NULL',
@@ -175,7 +177,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
-  it.each([0, 1, 2, 145, 146, 147, 148, 149, 150, 154, 155, 156, 200])('preserves version gating at %i when DDL is available', async current => {
+  it.each([0, 1, 2, 145, 146, 147, 148, 149, 150, 154, 155, 156, 158, 159, 200])('preserves version gating at %i when DDL is available', async current => {
     const { db, exec, query } = createDb(dbType, { canDdl: true, current });
 
     await runMigrations(db, dbType);
@@ -195,6 +197,36 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(exec).toHaveBeenCalledWith(expect.stringContaining(tagAlter));
     expect(healing.migrate).toHaveBeenCalledExactlyOnceWith(db);
     expect(exec).toHaveBeenCalledWith(probes.healingSql);
+    expect(exec.mock.calls.some(([sql]) => sql === approvalConsumptionColumnDdl)).toBe(current < 159);
+    expect(exec.mock.calls.some(([sql]) => sql === approvalConsumptionIndexDdl.mysql)).toBe(current < 159);
+  });
+
+  it.each([
+    { sqlPrefix: approvalConsumptionColumnDdl, message: "Duplicate column name 'processed_at'" },
+    { sqlPrefix: approvalConsumptionIndexDdl.mysql, message: "Duplicate key name 'idx_approval_cards_polling'" },
+  ])('tolerates already-applied approval DDL at $sqlPrefix', async ({ sqlPrefix, message }) => {
+    const { db, exec } = createDb(dbType, {
+      canDdl: true, current: 158, failure: { sqlPrefix, error: new Error(message) },
+    });
+    await expect(runMigrations(db, dbType)).resolves.toBeUndefined();
+    expect(exec).toHaveBeenCalledWith(approvalConsumptionColumnDdl);
+    expect(exec).toHaveBeenCalledWith(approvalConsumptionIndexDdl.mysql);
+    expect(exec).toHaveBeenLastCalledWith(ledgerInsert, [159, approvalConsumptionMigrations[0].description]);
+  });
+
+  it.each([
+    { sqlPrefix: approvalConsumptionColumnDdl, message: 'ALTER command denied' },
+    { sqlPrefix: approvalConsumptionColumnDdl, message: 'Duplicate key name unrelated' },
+    { sqlPrefix: approvalConsumptionIndexDdl.mysql, message: 'Duplicate column name unrelated' },
+    { sqlPrefix: approvalConsumptionIndexDdl.mysql, message: 'no such column: status' },
+    { sqlPrefix: approvalConsumptionIndexDdl.mysql, message: 'already exists' },
+    { sqlPrefix: approvalConsumptionIndexDdl.mysql, message: 'disk full' },
+  ])('propagates approval DDL failure: $message at $sqlPrefix', async ({ sqlPrefix, message }) => {
+    const error = new Error(message);
+    const { db, exec } = createDb(dbType, { canDdl: true, current: 158, failure: { sqlPrefix, error } });
+    await expect(runMigrations(db, dbType)).rejects.toBe(error);
+    expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [159, expect.any(String)]);
+    if (sqlPrefix === approvalConsumptionColumnDdl) expect(exec).not.toHaveBeenCalledWith(approvalConsumptionIndexDdl.mysql);
   });
 
   it('does not record v148 when the post-DDL schema remains too narrow', async () => {
@@ -294,7 +326,7 @@ it('defers v151 on an explicit ALTER permission denial without applying or recor
     const originalExec = second.db.exec;
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : originalExec(sql, params);
     await runMigrations(second.db, 'mysql');
-    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152, 155, 156, 158]);
+    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152, 155, 156, 158, 159]);
   } finally { mutableMigrations.pop(); }
 });
 
@@ -312,7 +344,7 @@ it('defers v150 on explicit table CREATE denial, blocks higher versions, and res
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : exec(sql, params);
     await runMigrations(second.db, 'mysql');
     expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158]);
+      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158, 159]);
   } finally { mutableMigrations.pop(); }
 });
 
@@ -417,7 +449,7 @@ it.each(['missing', 'nullable', 'narrow', 'engine', 'prefix'])
       repaired.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : execute(sql, params);
       await runMigrations(repaired.db, 'mysql');
       expect(repaired.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158]);
+        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158, 159]);
     } finally { mutableMigrations.pop(); }
   });
 

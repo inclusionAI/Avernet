@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import { allMigrations as currentMigrations } from '../db.js';
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
@@ -18,6 +19,7 @@ it('rejects a v150 ledger BUSY race and retries when a peer has completed v151',
   const later = { version: latestSchemaVersion + 1, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-advanced-busy-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version,description) VALUES (149,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT);

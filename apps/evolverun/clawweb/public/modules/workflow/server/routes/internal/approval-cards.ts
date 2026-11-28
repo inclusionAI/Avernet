@@ -14,8 +14,8 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 
 // ── Resolved-cards cache ───────────────────────────────────────────────
 // workflow runtime's card-web-poller hits GET /resolved at high frequency.
-// Since the result set changes infrequently (only when an approver acts),
-// a short TTL cache dramatically reduces DB load without meaningful
+// Decisions, acknowledgments, and run status changes affect the result set.
+// A short TTL cache dramatically reduces DB load without meaningful
 // latency impact — the poller already runs on 60s+ intervals.
 
 const RESOLVED_CACHE_TTL_MS = 30_000; // 30 seconds
@@ -23,9 +23,11 @@ const RESOLVED_CACHE_TTL_MS = 30_000; // 30 seconds
 type CachedResult = { data: unknown; timestamp: number };
 
 const _resolvedCache = new Map<string, CachedResult>();
+let resolvedCacheGeneration = 0;
 
 /** Invalidate the resolved-cards cache (call on writes that change the set). */
 export function invalidateResolvedCache(): void {
+  resolvedCacheGeneration += 1;
   _resolvedCache.clear();
 }
 
@@ -144,7 +146,8 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       const botId = typeof _req.query.botId === "string" && _req.query.botId.trim()
         ? _req.query.botId.trim()
         : undefined;
-      const cacheKey = `${botId ?? "*"}:${limit}`;
+      // Distinguish legacy polling from a literal "*" Bot ID.
+      const cacheKey = JSON.stringify([botId ?? null, limit]);
 
       // Serve from TTL cache if fresh — avoids hitting DB on every poll
       const cached = getResolvedCache(cacheKey);
@@ -153,9 +156,13 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
         return;
       }
 
+      const generation = resolvedCacheGeneration;
       const cards = await approvalCardRepo.findResolvedCardWeb(limit, botId);
       const body = { success: true, data: cards };
-      _resolvedCache.set(cacheKey, { data: body, timestamp: Date.now() });
+      // An in-flight pre-write read must not repopulate invalidated cache.
+      if (generation === resolvedCacheGeneration) {
+        _resolvedCache.set(cacheKey, { data: body, timestamp: Date.now() });
+      }
       res.json(body);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -172,12 +179,31 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
     }
 
     try {
-      const id = parseInt(String(req.params.id), 10);
-      if (isNaN(id)) {
+      const rawId = String(req.params.id);
+      const id = Number(rawId);
+      if (!/^\d+$/.test(rawId) || !Number.isSafeInteger(id) || id <= 0) {
         res.status(400).json({ success: false, error: "Bad Request", message: "Invalid id" });
         return;
       }
-      await approvalCardRepo.markProcessed(id);
+      const body: unknown = req.body === undefined ? {} : req.body;
+      if (body === null || typeof body !== "object" || Object.getPrototypeOf(body) !== Object.prototype) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "Expected a plain JSON object" });
+        return;
+      }
+      const hasConsumed = Object.hasOwn(body, "consumed");
+      const consumed = hasConsumed && (body as Record<string, unknown>).consumed === true;
+      if (hasConsumed && !consumed) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "consumed must be true when supplied" });
+        return;
+      }
+
+      const processed = await approvalCardRepo.markProcessed(id, consumed);
+      if (!processed) {
+        res.status(409).json({ success: false, error: "Conflict", message: "Card not found or not a resolved card-web approval" });
+        return;
+      }
+      // Old pollers ACK even failed callbacks; only explicit consumption changes delivery.
+      if (consumed) invalidateResolvedCache();
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

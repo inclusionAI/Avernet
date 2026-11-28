@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import { allMigrations as currentMigrations } from '../db.js';
 import { expect, it, vi } from 'vitest';
 import { ordinaryRunRequestMigrations } from '../schema-ordinary-run-request.js';
@@ -17,6 +18,7 @@ function seedBaseTriggers(db: Database.Database) {
 
 it('provisions v150 once on an existing SQLite schema', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   const db = new SqliteDatabase(raw);
   raw.exec("CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'previous')");
   await runMigrations(db, 'sqlite');
@@ -29,6 +31,7 @@ it('provisions v150 once on an existing SQLite schema', async () => {
 
 it('upgrades old associations without modifying rows and resumes after a partially applied SQLite upgrade', async () => {
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT, ordinary_run_marker VARCHAR(64));
     INSERT INTO flow_runs (flow_id) VALUES ('parent'), ('child');
@@ -66,6 +69,7 @@ it('concurrently migrates two SQLite connections after both inspect the old sche
   const { join } = await import('node:path');
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-migration-'));
   const raw1 = new Database(join(dir, 'db.sqlite'));
+  seedLegacyApprovalCards(raw1);
   const raw2 = new Database(join(dir, 'db.sqlite'));
   raw1.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT);
@@ -268,6 +272,7 @@ it('defers a duplicate-column race when a peer adds a non-text marker', async ()
 
 it('retries SQLite migration after a non-text marker is repaired', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version,description) VALUES (150,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT, ordinary_run_marker NUMERIC);
@@ -291,6 +296,7 @@ it.each([
   ['missing unique child index', 'index'],
 ])('defers v150 for existing SQLite storage with %s and retries without losing data', async (_label, defect) => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   const columns = [
     `request_key_hash TEXT ${defect === 'request_key_hash' ? '' : 'NOT NULL'} PRIMARY KEY`,
     'parent_flow_id TEXT NOT NULL',
@@ -382,6 +388,7 @@ it.each(['partial', 'composite'])('defers v150 for SQLite %s child index', async
 
 it('accepts a SQLite unique index whose name contains a quote', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
@@ -428,6 +435,7 @@ it('defers v151 when a SQLite marker is generated rather than writable', async (
 it.each(['SQLITE_BUSY', 'SQLITE_READONLY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_READONLY_DBMOVED'])
   ('defers optional SQLite DDL on %s, retains readable business data, and retries', async code => {
     const raw = new Database(':memory:');
+    seedLegacyApprovalCards(raw);
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
       CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
     seedBaseTriggers(raw);
@@ -472,6 +480,7 @@ it('defers v150 when an explicitly supplied SQLite identifier is generated', asy
 
 it.each(['ALTER', 'ledger'])('defers SQLite v151 on READONLY during %s and retries', async where => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
@@ -509,6 +518,7 @@ it('rejects initDatabase on SQLite v150 READONLY and retries without a close', a
   const { initDatabase, closeDatabase } = await import('../db.js');
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-init-readonly-')); const path = join(dir, 'db.sqlite');
   const seed = new Database(path);
+  seedLegacyApprovalCards(seed);
   seed.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
@@ -542,6 +552,7 @@ it('rejects initDatabase on SQLite v150 READONLY and retries without a close', a
 
 it('permits a SQLite extra required column with a usable default', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
@@ -557,6 +568,7 @@ it('defers a real SQLite lock encountered by v150 and resumes after release', as
   const { join } = await import('node:path');
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-init-busy-')); const path = join(dir, 'db.sqlite');
   const raw = new Database(path); const peer = new Database(path);
+  seedLegacyApprovalCards(raw);
   raw.pragma('journal_mode = WAL'); raw.pragma('busy_timeout = 1');
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
@@ -585,6 +597,7 @@ it('rejects SQLite initialization when a peer records v150 before a busy ledger 
   const { initDatabase, closeDatabase } = await import('../db.js');
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-ledger-race-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
@@ -703,6 +716,7 @@ it('rejects SQLite initialization when a peer completes v151 before a busy marke
   migrations.push(later);
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-ddl-ledger-race-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (150,'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');

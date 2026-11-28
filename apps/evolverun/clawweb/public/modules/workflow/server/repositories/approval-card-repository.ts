@@ -8,6 +8,7 @@
  *   - approver_ids: comma-separated empIds
  *   - approved_by / rejected_by: comma-separated empIds (appended on action)
  *   - status: pending | approved | rejected
+ *   - processed_at: nullable unix-seconds acknowledgment by the workflow runtime
  */
 
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -43,6 +44,8 @@ export type ApprovalCardRow = {
   delivery_mode: string;
   created_at: number;
   resolved_at: number | null;
+  /** Durable consumption timestamp in unix seconds; absent in legacy response shapes. */
+  processed_at?: number | null;
   /** Structured or plain-text comment from the approver. */
   comment: string | null;
 };
@@ -313,45 +316,66 @@ export class ApprovalCardRepository {
   }
 
   /**
-   * Find resolved (non-pending) card-web cards that workflow runtime should process.
+   * Find unconsumed approved/rejected card-web cards that runtime should process.
+   * Confirmed terminal flows are filtered without changing approval history, so
+   * unconsumed cards become eligible again if their flow is reopened.
    *
    * New runtimes send their botId so they do not scan other bots' cards.
    * Rows without origin metadata remain visible for historical workflows, and
-   * omitting botId preserves the legacy unfiltered contract for old runtimes.
+   * omitting botId preserves the legacy cross-bot contract for old runtimes.
    */
   async findResolvedCardWeb(limit = 50, botId?: string): Promise<ApprovalCardRow[]> {
     const normalizedBotId = botId?.trim();
-    if (normalizedBotId) {
-      const escapedBotId = normalizedBotId.replace(/[!%_]/g, "!$&");
-      return this.db.query<ApprovalCardRow>(
-        `SELECT ac.* FROM approval_cards ac
-         LEFT JOIN flow_runs fr ON fr.flow_id = ac.flow_id
-         WHERE ac.status != 'pending'
-           AND ac.delivery_mode = 'card-web'
-           AND (fr.origin_bot_id = ?
-                OR fr.origin_bot_id LIKE ? ESCAPE '!'
-                OR fr.origin_bot_id IS NULL
-                OR fr.origin_bot_id = '')
-         ORDER BY ac.resolved_at DESC LIMIT ?`,
-        [normalizedBotId, `${escapedBotId}:%`, limit],
-      );
-    }
-
+    const botFilter = normalizedBotId
+      ? `AND (fr.origin_bot_id = ?
+              OR fr.origin_bot_id LIKE ? ESCAPE '!'
+              OR fr.origin_bot_id IS NULL
+              OR fr.origin_bot_id = '')`
+      : "";
+    const escapedBotId = normalizedBotId?.replace(/[!%_]/g, "!$&");
+    const params = normalizedBotId ? [normalizedBotId, `${escapedBotId}:%`, limit] : [limit];
     return this.db.query<ApprovalCardRow>(
-      `SELECT * FROM approval_cards
-       WHERE status != 'pending' AND delivery_mode = 'card-web'
-       ORDER BY resolved_at DESC LIMIT ?`,
-      [limit],
+      `SELECT ac.* FROM approval_cards ac
+       LEFT JOIN flow_runs fr ON fr.flow_id = ac.flow_id
+       WHERE ac.status IN ('approved', 'rejected')
+         AND ac.delivery_mode = 'card-web'
+         AND ac.processed_at IS NULL
+         AND (fr.status IS NULL OR fr.status NOT IN ('succeeded', 'failed', 'cancelled', 'canceled', 'completed'))
+         ${botFilter}
+       ORDER BY ac.resolved_at DESC LIMIT ?`,
+      params,
     );
   }
 
-  /** Mark a card as processed by workflow runtime (set resolved_at or a processed flag). */
-  async markProcessed(cardId: number): Promise<void> {
-    // We use a soft approach: if resolved_at is set, workflow runtime has the data.
-    // No extra column needed — workflow runtime uses (flowId, nodeId, status) to resume.
-    await this.db.exec(
-      "UPDATE approval_cards SET gmt_modified = ? WHERE id = ?",
-      [this.db.dialect.now(), cardId],
+  /**
+   * Validate legacy ACKs without writes. Only explicit consumption persists the
+   * first durable timestamp; receiving an ACK alone does not prove consumption.
+   */
+  async markProcessed(cardId: number, consumed = false): Promise<boolean> {
+    if (!Number.isSafeInteger(cardId) || cardId <= 0) return false;
+    if (consumed !== true) {
+      const rows = await this.db.query<{ id: number }>(
+        `SELECT id FROM approval_cards
+         WHERE id = ? AND status IN ('approved', 'rejected') AND delivery_mode = 'card-web'`,
+        [cardId],
+      );
+      return rows.length > 0;
+    }
+    const result = await this.db.exec(
+      `UPDATE approval_cards SET processed_at = COALESCE(processed_at, ?)
+       WHERE id = ? AND status IN ('approved', 'rejected') AND delivery_mode = 'card-web'`,
+      [Math.floor(Date.now() / 1000), cardId],
     );
+    if (result.affectedRows > 0) return true;
+
+    // MySQL can report zero changed rows for an already acknowledged card.
+    // Verify persisted eligibility rather than mistaking any no-op for success.
+    const rows = await this.db.query<{ id: number }>(
+      `SELECT id FROM approval_cards
+       WHERE id = ? AND status IN ('approved', 'rejected') AND delivery_mode = 'card-web'
+         AND processed_at IS NOT NULL`,
+      [cardId],
+    );
+    return rows.length > 0;
   }
 }

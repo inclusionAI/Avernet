@@ -42,6 +42,11 @@ async function applyHistory(db: SqliteDatabase, history: HistoricalMigration[], 
   // The captured Evolve-only history omits the existing Workflow run table.
   // Later global migrations still need its pre-existing baseline.
   await db.exec('CREATE TABLE IF NOT EXISTS flow_runs (flow_id TEXT PRIMARY KEY, status TEXT)');
+  // Approval cards predate this Evolve-only history (global v15). Restore the
+  // omitted baseline rather than making later production migrations skip it.
+  for (const sql of migrations.find(m => m.version === 15)!.sql) {
+    await db.exec(db.dialect.renderDdl(sql));
+  }
   // Bench predates these Evolve histories too. Model its pre-v143 table;
   // the fixture ledger skips that earlier global DDL during upgrades.
   await db.exec(`CREATE TABLE cm_bench_domains (

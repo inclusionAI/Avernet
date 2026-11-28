@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import { allMigrations as currentMigrations } from '../db.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,7 @@ it.each([false, true])('handles a real writer lock with trigger already installe
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-trigger-lock-'));
   const path = join(dir, 'test.sqlite');
   const peer = new Database(path);
+  seedLegacyApprovalCards(peer);
   peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149, 'old');
@@ -48,6 +50,7 @@ it.each([false, true])('handles a real writer lock with trigger already installe
 
 it('rejects an existing trigger with an incompatible definition instead of assuming readiness', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (151, 'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER);
     CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs BEGIN SELECT 1; END;`);
@@ -61,6 +64,7 @@ it('rejects locked missing triggers, closes the connection and repairs on the ne
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-trigger-init-'));
   const path = join(dir, 'test.sqlite');
   const peer = new Database(path);
+  seedLegacyApprovalCards(peer);
   peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149, 'old');
@@ -99,6 +103,7 @@ it('rejects locked missing triggers, closes the connection and repairs on the ne
 
 it.each(['metadata', 'create'] as const)('propagates trigger %s errors', async phase => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (151, 'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER);`);
   const db = new SqliteDatabase(raw);
@@ -139,6 +144,7 @@ it('detects a conflicting trigger created by a peer between inspection and creat
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-trigger-race-'));
   const path = join(dir, 'test.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (151, 'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER);`);
   const db = new SqliteDatabase(new Database(path)); const original = db.exec.bind(db);
@@ -152,6 +158,7 @@ it('detects a conflicting trigger created by a peer between inspection and creat
 
 it('accepts the equivalent trigger SQLite rewrites when a table is renamed away and back', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (151, 'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);`);
   raw.exec(flowTrigger);
@@ -166,6 +173,7 @@ it('accepts the equivalent trigger SQLite rewrites when a table is renamed away 
 
 it.each(["'unixepoch()'", '"unixepoch()"'])('rejects a trigger using %s as a literal rather than the timestamp function', async literal => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (151, 'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER);
     CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN
@@ -179,6 +187,7 @@ it('does not cache a ready SQLite connection after a real deferred migration and
   const { closeDatabase, getRepositories, initDatabase } = await import('../db.js');
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-deferred-retry-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149, 'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);
