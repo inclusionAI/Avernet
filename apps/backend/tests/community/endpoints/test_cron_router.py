@@ -969,7 +969,7 @@ def _seed_bot_no_device(world):
 
 def _seed_user_no_bot(world):
     """Seed only a user — a request for a specific bot_id will 404 in
-    get_bot, which the relay propagates and the router maps to a 500."""
+    get_bot, which the relay propagates and the list endpoint maps to 404."""
     make_staff_user(world, user_id="u001")
 
 
@@ -984,11 +984,11 @@ def _seed_user_no_bot(world):
     seed=_seed_user_no_bot,
     expect=ExpectError(
         status=200,
-        json_contains={"success": False, "error_code": 500},
+        json_contains={"success": False, "error_code": 404},
     ),
 )
 def list_crons_error():
-    """list_crons surfaces a BotNotFoundError as an error envelope."""
+    """list_crons maps a BotNotFoundError to a 404 client error envelope."""
 
 
 @endpoint_test(

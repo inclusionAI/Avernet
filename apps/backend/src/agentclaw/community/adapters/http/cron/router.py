@@ -23,6 +23,8 @@
   - owner_id 不存在：owner 本人视角，以当前用户身份操作
 """
 
+import re
+
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import ValidationError
 
@@ -36,6 +38,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -49,6 +52,21 @@ router = APIRouter(prefix="/api/cron", tags=["cron"])
 # =============================================================================
 # 辅助函数
 # =============================================================================
+
+# Same shape the task-id check in core/cron/services/cron_admin.py accepts.
+# The GET query endpoints use it to reject obviously malformed ids (e.g.
+# injected probe payloads) before reaching the cron relay and to answer with a
+# 400 instead of letting the lookup failure surface as a server error.
+# ``all`` is the list endpoint's aggregate sentinel.
+_BOT_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}")
+
+
+def _is_valid_bot_id(bot_id: str | None) -> bool:
+    """Return True for the ``all`` sentinel, a missing value, or a well-formed id."""
+    if bot_id is None or bot_id == "all":
+        return True
+    return _BOT_ID_PATTERN.fullmatch(bot_id) is not None
+
 
 def _resolve_user_identity(
     owner_id: str | None,
@@ -130,6 +148,17 @@ async def list_crons(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> CronListApiResponse:
     """获取定时任务列表（平铺展示）"""
+    if not _is_valid_bot_id(bot_id):
+        # Do not echo the caller-supplied value: it is untrusted input, and
+        # keeping it out of the logs is the point of rejecting it here.
+        logger.warning("[list_crons] Rejected malformed bot_id, user=%s", user.staffId)
+        return CronListApiResponse(
+            success=False,
+            data=[],
+            message="Invalid bot_id format",
+            error_code=400,
+            failed_targets=[],
+        )
     logger.info(f"[list_crons] user={user.staffId}, bot_id={bot_id}, owner_id={owner_id}")
     try:
         target_parameters = _target_parameters(runtime_stage, device_uuid, operator_id, user)
@@ -151,8 +180,19 @@ async def list_crons(
         )
     except CronRelayError as e:
         return CronListApiResponse(success=False, data=[], message=str(e), error_code=e.error_code)
+    except BotNotFoundError:
+        # A well-formed id for a Bot the caller cannot see is a client-scope
+        # condition, not a server fault: answer 404 at WARNING.
+        logger.warning("[list_crons] Bot not found, user=%s", user.staffId)
+        return CronListApiResponse(
+            success=False,
+            data=[],
+            message="Bot not found",
+            error_code=404,
+            failed_targets=[],
+        )
     except Exception as e:
-        logger.error(f"[list_crons] Error: {e}")
+        logger.warning(f"[list_crons] Error: {e}")
         return CronListApiResponse(
             success=False,
             data=[],
@@ -540,6 +580,9 @@ async def get_cron_runs(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """获取任务执行历史"""
+    if not _is_valid_bot_id(bot_id):
+        logger.warning("[get_cron_runs] Rejected malformed bot_id, user=%s", user.staffId)
+        return ApiResponse(success=False, message="Invalid bot_id format", error_code=400)
     try:
         target_parameters = _target_parameters(runtime_stage, device_uuid, operator_id, user)
         if device_uuid and not runtime_stage:
@@ -569,6 +612,9 @@ async def get_cron_runs(
     except CronRelayError as e:
         logger.warning(f"[get_cron_runs] Business error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=e.error_code)
+    except BotNotFoundError:
+        logger.warning("[get_cron_runs] Bot not found, user=%s", user.staffId)
+        return ApiResponse(success=False, message="Bot not found", error_code=404)
     except Exception as e:
-        logger.error(f"[get_cron_runs] Error: {e}")
+        logger.warning(f"[get_cron_runs] Error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500)
