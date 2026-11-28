@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train.test.ts
+  h_bb3ca6fb13c5df 3,38,69
+apps/frontend-nextgen/src/hooks/taskEscortParity/callbackCompensation/useCallbackCompensation.ts
+  h_bb3ca6fb13c5df 20,39-40,158,160,162,177
+apps/frontend-nextgen/src/hooks/taskEscortParity/callbackCompensation/useCallbackCompensationPending.ts
+  h_bb3ca6fb13c5df 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f6ba65efdcb745115aed441c016ca7ee286850e9",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
