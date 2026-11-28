@@ -2,8 +2,10 @@
 
 from secbaas.community.core.service.paas import dispatch_start_hook
 
+from ._creation_scoped_service import (
+    CreationScopedDeviceService as DefaultDeviceService,
+)
 from ._device_service import (
-    DefaultDeviceService,
     common_sm4_decrypt,
     common_sm4_encrypt,
     device_record_to_response,
