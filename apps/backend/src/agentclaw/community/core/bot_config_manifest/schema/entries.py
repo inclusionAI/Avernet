@@ -593,7 +593,9 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
             )
 
     endpoint_env = config.get("endpoint_env")
-    if "endpoint_env" in config and endpoint_env not in _MCP_ENDPOINT_ENVS:
+    if "endpoint_env" in config and (
+        not isinstance(endpoint_env, str) or endpoint_env not in _MCP_ENDPOINT_ENVS
+    ):
         ctx.add(
             f"{config_location}.endpoint_env",
             "invalid_endpoint_env",
@@ -604,7 +606,9 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
     if isinstance(protocol, str):
         protocol = protocol.upper()
         config["transport_protocol"] = protocol
-    if "transport_protocol" in config and protocol not in _MCP_TRANSPORT_PROTOCOLS:
+    if "transport_protocol" in config and (
+        not isinstance(protocol, str) or protocol not in _MCP_TRANSPORT_PROTOCOLS
+    ):
         ctx.add(
             f"{config_location}.transport_protocol",
             "invalid_transport_protocol",

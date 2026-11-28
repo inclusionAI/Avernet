@@ -363,6 +363,33 @@ manifest:
     assert "invalid_mcp_url" in _codes(document)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("endpoint_env", "[PROD]", "invalid_endpoint_env"),
+        ("transport_protocol", "[sse]", "invalid_transport_protocol"),
+    ],
+)
+def test_mcp_config_rejects_non_string_remote_values_without_crashing(
+    field, value, code
+):
+    """A malformed scalar must surface as a violation, not an unhashable TypeError.
+
+    ``endpoint_env`` and ``transport_protocol`` are closed sets; a caller that
+    sends a list instead of a string used to reach ``x not in frozenset(...)``
+    and crash the whole document instead of naming the bad field.
+    """
+    document = f"""schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        {field}: {value}
+"""
+
+    assert code in _codes(document)
+
+
 def test_mcp_config_rejects_blank_header_name():
     document = """schema_version: 1
 manifest:
