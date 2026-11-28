@@ -55,7 +55,7 @@ contextCompression:
   defaultMaxTokens: 8000
 
 llm:
-  defaultModel: "claude-sonnet-4-20250514"
+  defaultModel: "claude-sonnet-5-5"
   maxTokens: 16384
 
 flowControl:

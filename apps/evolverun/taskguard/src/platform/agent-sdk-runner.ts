@@ -37,7 +37,7 @@ export interface AgentSdkRunnerConfig {
    * built-in auth (OAuth, stored credentials, etc.).
    */
   apiKey?: string;
-  /** Model to use. Defaults to "claude-sonnet-4-20250514". */
+  /** Model to use. Defaults to "claude-sonnet-5-5". */
   model?: string;
   /** Inline MCP server from `createClawmindInlineServer()`. */
   inlineMcpServer?: McpSdkServerConfigWithInstance;
@@ -54,7 +54,7 @@ export interface AgentSdkRunnerConfig {
 
 // ── Constants ──
 
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "claude-sonnet-5-5";
 const DEFAULT_MAX_TURNS = 20;
 const DEFAULT_MAX_BUDGET_USD = 0.5;
 
