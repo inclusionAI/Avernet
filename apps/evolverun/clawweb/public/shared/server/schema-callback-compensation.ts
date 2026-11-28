@@ -53,7 +53,7 @@ export const callbackCompensationDdl = [
   )`,
 ];
 export const callbackCompensationMigrations: readonly Migration[] = [{
-  version: 159,
+  version: 160,
   description: 'Add protected, fail-closed workflow success callback compensation',
   sql: callbackCompensationDdl,
 }];

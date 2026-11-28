@@ -149,3 +149,31 @@ upgrades; restore writes only after validating the coordinated contracts. Old
 status-reopen and retry-failed callers fail closed rather than silently disabling epoch
 protection. See the app's [terminal admission and timeout write policy](../../../../docs/workflow-timeout-write-policy.md)
 for CAS, duplicate identity, phase and release-gate requirements.
+
+## Run completion phase
+
+`PUT /runs/:flowId/completion` maps `current_phase` to
+`FlowRunCompletion.currentPhase`. For an admitted first settlement:
+
+| Wire field | Phase persistence |
+| --- | --- |
+| Omitted (`undefined` before serialization) | Preserve the stored phase. |
+| `null` | Clear the phase to SQL NULL. |
+| String, including `""` or surrounding whitespace | Store verbatim. |
+| Any other JSON type | HTTP 400 before repository admission or a write. |
+
+Direct repository callers use the same undefined/null/string semantics. Phase
+is not inferred from `result_json`, `input_json`, or `state_json`; accepted
+status, phase and completion metadata are persisted in one fenced update.
+Omitted `retry_epoch` means zero only (including stored NULL), never the latest
+positive attempt. A positive attempt requires its captured, matching epoch.
+
+A terminal replay is read-only: an omitted phase makes no new assertion, while
+an explicit string or null must equal the saved phase. A different phase or
+other conflicting settlement intent returns HTTP 409 without UPDATE or another
+terminal observer. This also forbids backfilling a missing phase after closeout;
+a failed row with no completion timestamp is not a supplement path. Identical
+replays preserve the winning timestamp and final counts. This phase contract
+does not change timeout/epoch implementations or deployment requirements; the
+existing [terminal admission and release gate](../../../../docs/workflow-timeout-write-policy.md)
+remain authoritative.

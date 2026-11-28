@@ -3,10 +3,17 @@ import { expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase, runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { ordinaryRunRequestDdl } from '@avernet/clawweb-shared/server/schema-ordinary-run-request';
+import { migrations, sqliteTriggers } from '@avernet/clawweb-shared/server/schema';
 import { assertOrdinaryRequestSchema } from '../ordinary-run-request-repository.js';
+
+function seedLegacyApprovalCards(raw: Database.Database): void {
+  raw.exec(migrations.find(migration => migration.version === 15)!.sql[0]);
+  raw.exec(sqliteTriggers.find(ddl => ddl.includes('trg_approval_cards_update'))!);
+}
 
 it('leaves old SQLite storage usable but ordinary requests unavailable when ALTER is denied', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
     CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY,
       parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);
@@ -36,6 +43,7 @@ it('leaves old SQLite storage usable but ordinary requests unavailable when ALTE
 
 it('defers a SQLite v150 CREATE authorization denial without recording progress and resumes after provisioning', async () => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
     CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY,
       parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);
@@ -65,6 +73,7 @@ it.each([
   ["DEFAULT 'x'", 'non-null default'],
 ])('defers incompatible existing SQLite marker (%s) without changing old data, and retries after repair', async (definition) => {
   const raw = new Database(':memory:');
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT); INSERT INTO schema_version (version,description) VALUES (150,'old');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT NOT NULL UNIQUE, ordinary_run_marker VARCHAR(64) ${definition},
       parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);

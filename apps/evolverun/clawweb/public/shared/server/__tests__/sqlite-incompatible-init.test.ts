@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import { allMigrations as currentMigrations } from '../db.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,7 @@ it.each([150, 151] as const)('rejects real SQLite v%s incompatible schema and re
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-incompatible-init-'));
   const path = join(dir, 'test.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
+  seedLegacyApprovalCards(peer);
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, version INTEGER, description TEXT, gmt_modified INTEGER);
     INSERT INTO schema_version (version, description) VALUES (${version - 1}, 'old');
     CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER${version === 151 ? ', ordinary_run_marker INTEGER' : ''});

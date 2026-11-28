@@ -253,6 +253,12 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
     if (this.db.dbType === 'noop') throw new CompensationError('DATABASE_UNAVAILABLE', 503);
     await this.repo.recover(this.environmentKey, this.now());
     const rows = await this.repo.work(this.environmentKey);
+    const auditFailures: unknown[] = [];
+    const auditItem = async (row: ItemRow, frozen: FrozenItem): Promise<void> => {
+      // Only audit repair is isolated: claim/authority/outcome persistence errors remain fatal.
+      try { await this.audit(row, frozen); }
+      catch (error) { auditFailures.push(error); }
+    };
     for (const row of rows) {
       if (this.closed) break;
       const batch = await this.repo.batch(row.batch_id);
@@ -262,7 +268,7 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
       if (hash([f.environment, f.workflowId, f.actorId]) !== batch.scope_key || f.environment !== this.options.environment
         || f.itemId !== row.item_id || f.flowId !== row.flow_id || f.deliveryKey !== row.delivery_key)
         throw new CompensationError('FROZEN_OWNERSHIP_INVALID', 409);
-      if (row.audit_pending === 1) { await this.audit(row, f); continue; }
+      if (row.audit_pending === 1) { await auditItem(row, f); continue; }
       const claimUntil = this.now() + 60_000;
       if (!await this.repo.claim(row.item_id, claimUntil)) continue;
       const checked = await this.checkFrozen(f);
@@ -301,11 +307,14 @@ export class CallbackCompensationService implements CallbackCompensationServiceA
       // Do not catch persistence failure and then POST again. Lease recovery handles unknown.
       await this.repo.settle(row.item_id, received ? 'received' : 'unknown',
         received ? 'HTTP_RECEIVED_NOT_BUSINESS_CONFIRMATION' : 'HTTP_OUTCOME_UNKNOWN', status, true);
-      await this.audit(row, f);
+      await auditItem(row, f);
     }
+    // Report failures to the host after healthy work in this selected window has progressed.
+    if (auditFailures.length === 1) throw auditFailures[0];
+    if (auditFailures.length > 1) throw new AggregateError(auditFailures, 'Compensation audit repairs failed');
   }
   private async audit(row: ItemRow, f: FrozenItem): Promise<void> {
-    // Failure deliberately propagates to bootstrap; auditPending remains durable for next tick.
+    // Failure leaves auditPending durable; runTick reports it after other selected work finishes.
     await repairAudit(this.db, row.item_id, { workflowId: f.workflowId, flowId: f.flowId,
       configId: f.configId, configName: f.configName, url: f.evidence.url });
   }

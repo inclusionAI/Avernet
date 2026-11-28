@@ -63,9 +63,15 @@ export class CallbackCompensationRepository {
     [this.db.dialect.now(), environmentKey, now]);
   }
   async work(environmentKey: string): Promise<ItemRow[]> {
-    return this.db.query<ItemRow>(`SELECT i.* FROM ${itemTable} i JOIN ${batchTable} b ON b.batch_id = i.batch_id
-      WHERE i.environment_key = ? AND ((i.state = 'queued' AND b.stopped = 0) OR i.audit_pending = 1)
+    // Independent budgets prevent persistent audit failures from exhausting dispatch capacity.
+    const queued = await this.db.query<ItemRow>(`SELECT i.* FROM ${itemTable} i JOIN ${batchTable} b ON b.batch_id = i.batch_id
+      WHERE i.environment_key = ? AND i.state = 'queued' AND b.stopped = 0
       ORDER BY i.id LIMIT 100`, [environmentKey]);
+    const audits = await this.db.query<ItemRow>(`SELECT i.* FROM ${itemTable} i JOIN ${batchTable} b ON b.batch_id = i.batch_id
+      WHERE i.environment_key = ? AND i.audit_pending = 1
+      ORDER BY i.id LIMIT 100`, [environmentKey]);
+    // Dispatch first; stopped batches still retain audit-only repair, never another POST.
+    return [...queued, ...audits];
   }
   async claim(itemId: string, until: number): Promise<boolean> {
     const r = await this.db.exec(`UPDATE ${itemTable} SET state = 'sending', sending_until_ms = ?, gmt_modified = ?

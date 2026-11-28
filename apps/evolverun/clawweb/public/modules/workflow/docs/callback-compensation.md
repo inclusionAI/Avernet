@@ -132,7 +132,7 @@ idempotency remains required.
 
 ## Persistence, concurrency and restart
 
-Migration **v159** adds preview, batch and item tables. SHA-256 delivery identities
+Migration **v160**, after the existing approval-consumption v159, adds preview, batch and item tables. SHA-256 delivery identities
 cover environment/workflow/run/trusted generation/event/logical receiver, not
 configuration versions. Batch request keys and delivery identities have unique
 constraints. Queued items enter `sending` through an atomic compare-and-set;
@@ -151,6 +151,28 @@ body, config fingerprint and reviewed evidence before sending.
 - `auditPending`: result was saved but legacy audit append needs repair; repair
   only the audit, never POST again.
 
+Legacy audit append/repair failures are isolated per selected item, including
+immediately after an outcome is saved. The durable `auditPending` flag remains
+set and other selected items in the same or another batch continue. After that
+work finishes, the tick rejects with the audit error (or an aggregate for several
+failures), so the host still observes failure without logging sensitive details.
+Only audit repair is deferred this way: claim, final-authorization and outcome
+persistence failures still abort the tick immediately, even after an earlier
+audit failure, rather than being treated as successful delivery.
+
+Each tick independently selects up to 100 queued items from non-stopped batches
+and up to 100 pending-audit items in the worker's environment (at most 200 selected
+records). Each selection is oldest-first; queued work is processed before the
+audit-only selection. An audit backlog cannot consume the queued-work budget.
+Stopped batches still permit audit-only repair, and sending leases retain the
+existing recovery and final-authorization checks.
+
+The audit-only budget has no cursor or fairness guarantee: 100 older, persistently
+failing audit rows can delay repair of newer audit-only rows until the underlying
+failure is resolved. This does not block queued dispatch or permit resending an
+already attempted notification, clearing pending records or releasing delivery
+reservations. Repair the audit store rather than resetting those outcomes.
+
 Stop cannot cancel an already-sent request. Shutdown drains work before closing
 the DB. Queued work survives restarts; interrupted sending becomes unknown, not
 newly eligible. Keep the protection key available while any frozen records need
@@ -161,15 +183,17 @@ management and receiver contract review remain deployment responsibilities.
 ## Rollout and validation
 
 Managed databases must provision
-[`callback-compensation-v159.mysql.sql`](../../../../scripts/sql/callback-compensation-v159.mysql.sql)
+[`callback-compensation-v160.mysql.sql`](../../../../scripts/sql/callback-compensation-v160.mysql.sql)
 through normal DDL review before enabling this feature. Runtime database failures
 remain visible as unavailable; no production DDL or delivery is performed by
 opening the UI. SQLite local migrations use the same canonical schema.
 
 Verify payload/signature compatibility, same-receiver alias suppression, missing
 proof, null phase, trials, overflow, configuration/run drift, duplicate requests,
-concurrent claims, restart/unknown handling, audit-only repair, stop, CSRF,
-unverified identities and cross-scope access. Frontend tests must additionally
+concurrent claims, restart/unknown handling, audit-only repair and per-item failure
+isolation across repeated ticks with more than 100 pending audits, fail-closed
+claim/authorization/outcome persistence, stop, CSRF, unverified identities and
+cross-scope access. Frontend tests must additionally
 cover workflow/identity switches, uncertain create responses and reopening the
 same batch. Passing local tests does not establish production receiver guarantees
 or prove a deployed version. Public and enterprise host integration must be

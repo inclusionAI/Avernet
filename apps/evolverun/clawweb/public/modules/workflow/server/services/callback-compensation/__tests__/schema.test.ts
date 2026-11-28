@@ -9,13 +9,17 @@ import { fixture, NOW } from './fixture.js';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { callbackCompensationDdl, callbackCompensationMigrations } from '@avernet/clawweb-shared/server/schema-callback-compensation';
+import { approvalConsumptionMigrations } from '@avernet/clawweb-shared/server/schema-approval-consumption';
 import { collectMigrations } from '@avernet/clawweb-shared/server/db/migrations-registry';
 import { mysqlDialect, sqliteDialect, zdasDialect } from '@avernet/clawweb-shared/server/db/dialect';
 
-it('v159 registered exactly once after distributed locks v158; no existing version collision',()=>{
+it('v160 registered once after deployed approval v159 and distributed locks v158 without collision',()=>{
   const migrations=collectMigrations();const versions=migrations.map(m=>m.version);
-  expect(versions.filter(v=>v===159)).toHaveLength(1);expect(versions).toContain(158);
-  expect(callbackCompensationMigrations[0].version).toBe(159);expect(Math.max(...versions)).toBe(159);expect(versions.filter(v=>v===158)).toHaveLength(1);
+  expect(migrations.filter(m=>m.version===160)).toEqual([callbackCompensationMigrations[0]]);
+  expect(callbackCompensationMigrations[0].version).toBe(160);expect(Math.max(...versions)).toBe(160);
+  expect(migrations.filter(m=>m.version===159)).toEqual([approvalConsumptionMigrations[0]]);
+  expect(versions.filter(v=>v===158)).toHaveLength(1);
+  expect(versions).toEqual([...versions].sort((a,b)=>a-b));
 });
 it('canonical schema is SQLite-idempotent and all delivery/request uniqueness is actually enforced',()=>{
   const raw=new Database(':memory:');
@@ -46,7 +50,7 @@ it.each([mysqlDialect,zdasDialect])('$name rendering uses short full unique keys
   expect(sql).not.toMatch(/UNIQUE\([^)]*(?:config|url|generation|receiver)/);
 });
 it('managed MySQL SQL exactly matches normal migration rendering, with InnoDB',()=>{
-  const path=fileURLToPath(new URL('../../../../../../../scripts/sql/callback-compensation-v159.mysql.sql',import.meta.url));
+  const path=fileURLToPath(new URL('../../../../../../../scripts/sql/callback-compensation-v160.mysql.sql',import.meta.url));
   const supplied=readFileSync(path,'utf8').split('\n').filter(line=>!line.startsWith('--')).join('\n').trim();
   const generated=callbackCompensationDdl.map(d=>mysqlDialect.renderDdl(d)+' ENGINE=InnoDB;').join('\n\n');
   expect(supplied).toBe(generated);

@@ -43,7 +43,7 @@ it('does not advance v158 after a storage failure and safely retries after provi
   const db = new SqliteDatabase(new Database(':memory:')); databases.push(db);
   await runMigrations(db, 'sqlite');
   await db.exec('DROP TABLE clawweb_distributed_locks');
-  // Simulate a pre-v158 ledger even when fresh boot also applied later migrations.
+  // Rewind the MAX(version) cursor before v158, including all later fresh-boot migrations.
   await db.exec('DELETE FROM schema_version WHERE version >= 158');
   const exec = db.exec.bind(db), failure = new Error('lock table create denied');
   const spy = vi.spyOn(db, 'exec').mockImplementation((sql, params) => sql.includes('CREATE TABLE IF NOT EXISTS clawweb_distributed_locks')

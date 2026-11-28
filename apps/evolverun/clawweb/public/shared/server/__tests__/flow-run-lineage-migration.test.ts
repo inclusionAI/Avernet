@@ -1,3 +1,4 @@
+import { seedLegacyApprovalCards } from './legacy-approval-cards-fixture.js';
 import Database from 'better-sqlite3';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +27,7 @@ async function withSqlite(test: (raw: Database.Database, db: SqliteDatabase) => 
 }
 
 function previousSchema(raw: Database.Database) {
+  seedLegacyApprovalCards(raw);
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, version INTEGER, description TEXT,
     gmt_create INTEGER DEFAULT (unixepoch()), gmt_modified INTEGER DEFAULT (unixepoch()));
     INSERT INTO schema_version (version, description) VALUES (156, 'previous');

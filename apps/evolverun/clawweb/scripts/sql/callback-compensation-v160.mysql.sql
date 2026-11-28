@@ -1,4 +1,4 @@
--- ClawWeb migration v159: success callback compensation.
+-- ClawWeb migration v160: success callback compensation.
 -- Provision with the managed schema account before enabling execution.
 -- Runtime is fail-closed; this DDL does not approve any receiver or authorize delivery.
 -- SHA-256 single-column identities keep unique indexes within MySQL/OceanBase limits.

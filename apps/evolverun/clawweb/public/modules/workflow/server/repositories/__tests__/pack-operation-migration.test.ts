@@ -4,10 +4,13 @@ import { runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db
 import { packOperationDdl, packOperationMigrations, renderPackOperationDdl } from '@avernet/clawweb-shared/server/schema-pack-operations';
 import { dialectFor, mysqlDialect, zdasDialect } from '@avernet/clawweb-shared/server/db/dialect';
 
-vi.mock('@avernet/clawweb-shared/server/schema', async original => ({
-  ...await original<typeof import('@avernet/clawweb-shared/server/schema')>(),
-  migrations: [], sqliteTriggers: [],
-}));
+vi.mock('@avernet/clawweb-shared/server/schema', async original => {
+  const { callbackCompensationMigrations } = await vi.importActual<typeof import('@avernet/clawweb-shared/server/schema-callback-compensation')>('@avernet/clawweb-shared/server/schema-callback-compensation');
+  return {
+    ...await original<typeof import('@avernet/clawweb-shared/server/schema')>(),
+    migrations: callbackCompensationMigrations, sqliteTriggers: [],
+  };
+});
 vi.mock('@avernet/clawweb-shared/server/schema-workflow-snapshot', () => ({ workflowSnapshotMigrations: [] }));
 vi.mock('@avernet/clawweb-shared/server/schema-aistudio-train', () => ({ aistudioTrainMigrations: [] }));
 vi.mock('@avernet/clawweb-shared/server/schema-distributed-lock', () => ({ distributedLockMigrations: [] }));
@@ -79,7 +82,8 @@ describe('retired ClawWeb operation migration 149', () => {
           expect([...exec.mock.calls, ...query.mock.calls].some(([sql]) => sql.includes('clawweb_pack_operations'))).toBe(false);
           expect(exec.mock.calls.some(([sql, params]) => sql.includes('INSERT INTO schema_version') && params?.[0] === 149)).toBe(false);
           const recorded = exec.mock.calls.filter(([sql]) => sql.includes('INSERT INTO schema_version')).map(([, params]) => params?.[0]);
-          expect(recorded).toEqual(canDdl && current < 150 && dbType !== 'zdas' ? [150, 151] : []);
+          const activeVersions = dbType === 'zdas' ? [159, 160] : [150, 151, 159, 160];
+          expect(recorded).toEqual(canDdl ? activeVersions.filter(version => version > current) : []);
         }
       }
     },
