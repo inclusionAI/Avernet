@@ -194,6 +194,7 @@ def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
         path=entry.get("path", ""),
         name=entry.get("name", ""),
         type=ResourceType.FOLDER if is_dir else ResourceType.FILE,
+        is_symlink=bool(entry.get("is_symlink", False)),
         size=entry.get("size") if not is_dir else None,
     )
 

@@ -324,7 +324,7 @@ def test_the_file_entry_schema_carries_no_record_id():
     absence except by comparing against a magic value. The same rule the router
     already applied to the timestamps.
     """
-    assert set(FileEntry.model_fields) == {"path", "name", "type", "size"}
+    assert set(FileEntry.model_fields) == {"path", "name", "type", "is_symlink", "size"}
 
 
 def test_the_resource_type_enum_is_files_and_folders_only():

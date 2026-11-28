@@ -435,6 +435,7 @@ class ResourceFileService(ResourceFilePort):
                     e.get("absolute_path") or e.get("path") or self._logical(rel)
                 ),
                 "is_dir": is_dir,
+                "is_symlink": bool(e.get("is_symlink", False)),
                 "readonly": is_readonly(rel),
                 "size": e.get("size") if not is_dir else None,
                 "size_human": e.get("size_human") if not is_dir else None,
@@ -913,6 +914,7 @@ class ResourceFileService(ResourceFilePort):
             "path": rel,
             "absolute_path": self._logical(rel),
             "is_dir": False,
+            "is_symlink": False,
             "size": size,
             "size_human": FileNode._human_readable_size(size),
             "modified_at": datetime.now().isoformat(),

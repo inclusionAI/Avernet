@@ -56,6 +56,7 @@ export interface ResourceDto extends BackendUnknownRecord {
   name: string;
   type: 'file' | 'folder';
   size?: number | null;
+  is_symlink?: boolean;
 }
 export interface RoutineDto extends BackendUnknownRecord {
   routine_id: string;

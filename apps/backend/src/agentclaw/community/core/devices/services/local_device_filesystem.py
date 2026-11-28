@@ -278,6 +278,7 @@ class LocalDeviceFileSystem(DeviceFileSystem):
                 "name": entry.name,
                 "path": str(entry),
                 "is_dir": entry.is_dir(),
+                "is_symlink": entry.is_symlink(),
                 "relative_path": str(entry.relative_to(p)),
             })
         return result
