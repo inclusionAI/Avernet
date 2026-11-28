@@ -1,0 +1,21 @@
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_f10384ddb33869::t_2d792f1bca3c0a 329-369
+apps/backend/src/agentclaw/community/adapters/http/expert_chat/router.py
+  s_f10384ddb33869::t_36a87152aa7998 95-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c88adc8a5b8bcf72e9af093eb523aa543299029",
+  "prompts": {},
+  "sessions": {
+    "s_f10384ddb33869": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21b96-4656-7be3-8613-3495e50c0c34",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/delivery.md
+  h_059e888e5e4e82 165-178
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/spec.md
+  h_059e888e5e4e82 132-136,141-142,148,178-181,191-193,196-200,218-227,229,231-232,254-255,549
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md
+  h_059e888e5e4e82 21-22
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_27_product_relational_storage.sql
+  h_059e888e5e4e82 13-17,22-23,29-32,36-38,41-45,57-66,68,70-71,77-78
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_evidence_and_schema.py
+  h_059e888e5e4e82 108-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d952317fab262148327959df5e5d564b0d98c8f5",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

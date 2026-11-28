@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-approval-consumption-auth.test.ts
+  h_bb3ca6fb13c5df 38,129,152,167-230,238,251,254-267,305
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-consumption-contract.md
+  h_bb3ca6fb13c5df 7-17,20-21,39-40,55-57,92-93,95-108,110-154,164-174,180-183,185-187,190-196,198,203-205,211-218,227
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-card-persistence.test.ts
+  h_bb3ca6fb13c5df 87,103
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-card-routing.test.ts
+  h_bb3ca6fb13c5df 145,151,160,172,181,191,200,209,218,226,229-300
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-card-repository.ts
+  h_bb3ca6fb13c5df 350-354,356-363
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/approval-card-legacy-restart.test.ts
+  h_bb3ca6fb13c5df 1-169
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-approval-cards.test.ts
+  h_bb3ca6fb13c5df 106,108,304-308,353,363,410-414,424,434,457,474,481,492,508,543,551-688
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/approval-cards.ts
+  h_bb3ca6fb13c5df 188-200,205-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "42da9ed9b8092de764f2deafc6dd67f080729a7b",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

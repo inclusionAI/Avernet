@@ -1,0 +1,21 @@
+apps/frontend-nextgen/assets/task-panel/package.json
+  s_885ffb973587a3::t_b4d186fec636e6 3
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  s_885ffb973587a3::t_3fc67172564462 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d67746bc847ca2a4b65554b32666bb5409ca38a",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

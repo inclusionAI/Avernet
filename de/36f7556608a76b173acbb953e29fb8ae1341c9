@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-logger.test.ts
+  h_bb3ca6fb13c5df 5-6,8-10,12,14-21,23-25,265-279,281-282,288-289,291-292,298,300-313,315-335,338,340-384
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal-logger.ts
+  h_bb3ca6fb13c5df 7-8,22,26,104-105,113
+apps/evolverun/clawweb/public/shared/server/logging/README.md
+  h_bb3ca6fb13c5df 1-13,17-30,33-56
+apps/evolverun/clawweb/public/shared/server/logging/__tests__/bounded-file-log-sink.rotation.test.ts
+  h_bb3ca6fb13c5df 1-23
+apps/evolverun/clawweb/public/shared/server/logging/__tests__/bounded-file-log-sink.test.ts
+  h_bb3ca6fb13c5df 1-55,57,59-121,125-129,131-139,145,147,170-185
+apps/evolverun/clawweb/public/shared/server/logging/__tests__/bounded-log-value.test.ts
+  h_bb3ca6fb13c5df 1-142
+apps/evolverun/clawweb/public/shared/server/logging/bounded-file-log-sink.ts
+  h_bb3ca6fb13c5df 1-44,48-91,94-97,108-112,121-150,152-157
+apps/evolverun/clawweb/public/shared/server/logging/bounded-log-value.ts
+  h_bb3ca6fb13c5df 2-9,11-56,59-108,111-116,118-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de36f7556608a76b173acbb953e29fb8ae1341c9",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

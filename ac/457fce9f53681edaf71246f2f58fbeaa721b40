@@ -1,0 +1,47 @@
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_07828166bbe91d::t_83646e81229503 44
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/assembly.rs
+  s_07828166bbe91d::t_83646e81229503 80,96-104,183,189,204-216,219-233,247,303-304
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/tests/a2a.rs
+  s_07828166bbe91d::t_eda85c8c9d1d54 522,526-551
+  s_07828166bbe91d::t_3bdad7d2c81acf 552-553
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/commands.rs
+  s_07828166bbe91d::t_83646e81229503 38
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/src/request.rs
+  s_07828166bbe91d::t_efe2eedba329ce 1-57
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/runner.rs
+  s_07828166bbe91d::t_83646e81229503 12,23-24,29
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/src/lib.rs
+  s_07828166bbe91d::t_efe2eedba329ce 24
+apps/bcs/scripts/e2e-test/direct_worker_story.py
+  s_07828166bbe91d::t_d8dd9f0bee96d1 1-130
+apps/bcs/scripts/e2e-test/worker_runtime_story.py
+  s_07828166bbe91d::t_d8dd9f0bee96d1 19-20,148,234-243
+apps/bcs/scripts/ci/validate_worker_e2e.py
+  s_07828166bbe91d::t_d8dd9f0bee96d1 8-9
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/direct.rs
+  s_07828166bbe91d::t_95698850f4b279 1-103
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/src/rpc.rs
+  s_07828166bbe91d::t_efe2eedba329ce 5,8,53,82,148-157,159-164,184,212,242,252,292,319
+  s_07828166bbe91d::t_f5de361d965af7 158
+apps/bcs/crates/service-api/bcs-service-api/tests/distributed_contracts.rs
+  s_07828166bbe91d::t_85230ce4349aed 9-10
+apps/bcs/scripts/e2e-test/worker_runtime_dispatch_story.py
+  s_07828166bbe91d::t_d0d2229cfe4d8a 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac457fce9f53681edaf71246f2f58fbeaa721b40",
+  "prompts": {},
+  "sessions": {
+    "s_07828166bbe91d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21896-cfa8-7e12-b50b-b3dfac264e6f",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

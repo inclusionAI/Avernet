@@ -1,0 +1,68 @@
+apps/evolverun/clawweb/README.md
+  h_bb3ca6fb13c5df 19
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-approval-consumption-auth.test.ts
+  h_bb3ca6fb13c5df 1-229
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  h_bb3ca6fb13c5df 263-267,277
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-consumption-contract.md
+  h_bb3ca6fb13c5df 1-165
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-consumption-ob-ddl.sql
+  h_bb3ca6fb13c5df 1-19
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-card-persistence.test.ts
+  h_bb3ca6fb13c5df 1-112
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-card-routing.test.ts
+  h_bb3ca6fb13c5df 3,18-19,21,47,54-231
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-run-request-migration.integration.test.ts
+  h_bb3ca6fb13c5df 6,9-13,16,46,76
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/pack-operation-migration.test.ts
+  h_bb3ca6fb13c5df 82-83
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-card-repository.ts
+  h_bb3ca6fb13c5df 11,47-48,319-321,325,329-336,338-346,350-366,368
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-approval-cards.test.ts
+  h_bb3ca6fb13c5df 1-4,11,15,21,43,87,231,239-240,262-545
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/approval-cards.ts
+  h_bb3ca6fb13c5df 17-18,26,30,149-150,159,162-165,182-184,188-193
+apps/evolverun/clawweb/public/shared/server/__tests__/approval-consumption-migration.test.ts
+  h_bb3ca6fb13c5df 1-206
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  h_bb3ca6fb13c5df 36
+apps/evolverun/clawweb/public/shared/server/__tests__/distributed-lock-schema.test.ts
+  h_bb3ca6fb13c5df 46-47
+apps/evolverun/clawweb/public/shared/server/__tests__/evolve-merge-migrations.test.ts
+  h_bb3ca6fb13c5df 45-49
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-lineage-migration.test.ts
+  h_bb3ca6fb13c5df 1,30
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  h_bb3ca6fb13c5df 1,25,53,120
+apps/evolverun/clawweb/public/shared/server/__tests__/legacy-approval-cards-fixture.ts
+  h_bb3ca6fb13c5df 1-10
+apps/evolverun/clawweb/public/shared/server/__tests__/managed-migrations.test.ts
+  h_bb3ca6fb13c5df 9,69,180,200-229,329,347,452
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-concurrent-defer.test.ts
+  h_bb3ca6fb13c5df 1,22
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-run-request-migration.test.ts
+  h_bb3ca6fb13c5df 1,21,34,72,275,299,391,438,483,521,555,571,600,719
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train.test.ts
+  h_bb3ca6fb13c5df 1,5,39-40,71-72
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-incompatible-init.test.ts
+  h_bb3ca6fb13c5df 1,16
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-trigger-lock.test.ts
+  h_bb3ca6fb13c5df 1,19,53,67,106,147,161,176,190
+apps/evolverun/clawweb/public/shared/server/__tests__/workflow-snapshot.test.ts
+  h_bb3ca6fb13c5df 2,100-103,120-123
+apps/evolverun/clawweb/public/shared/server/db/migrations-registry.ts
+  h_bb3ca6fb13c5df 4,11
+apps/evolverun/clawweb/public/shared/server/schema-approval-consumption.ts
+  h_bb3ca6fb13c5df 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a11a883270f8eb8bb7fa7edb13bd3e252d0b372c",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

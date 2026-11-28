@@ -1,0 +1,57 @@
+apps/backend/src/agentclaw/community/api/service_publication_facade.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 106-107
+apps/backend/tests/community/endpoints/test_openapi_routine_targets.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 110-141
+apps/backend/src/agentclaw/community/core/cron/services/cron_runtime_operations.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 546-551
+apps/backend/tests/community/core/cron/services/test_cron_targeted_operations.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 781-806
+apps/backend/src/agentclaw/community/core/cron/README.md
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 54-57
+apps/backend/tests/community/adapters/http/openapi_v1/test_container_endpoints.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 198-208
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 3-10,52-53
+apps/frontend-nextgen/test/services/botScheduledTasks/targets.test.ts
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 174,455-477
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/assembly.rs
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 314,352-358,375
+apps/frontend-nextgen/test/services/botScheduledTasks/metadata.test.ts
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 2,34,70-97
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 23-29
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/containers/router.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 5,7,84-86,95
+apps/frontend-nextgen/README.md
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 30-43
+apps/backend/src/agentclaw/community/core/devices/services/device_instance_service.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 53-56,132
+apps/frontend-nextgen/test/pages/BotWorkshop/ScheduledTasks/RoutineDetail.history.test.tsx
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 1-81
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 40,393-394,403-406
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 2560,2588
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 35-36,1200-1229
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 14-18
+apps/backend/tests/community/core/devices/services/test_multi_instance.py
+  s_c3ece772cfb1b0::t_2020a5c4eef93c 369,371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a2507fd792070a32b0a8f2336dff144fb154fe7",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

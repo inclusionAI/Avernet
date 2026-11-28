@@ -1,0 +1,19 @@
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_6b3e246c5191ff::t_27022e9383026d 596,1464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "646acc78529f7775a38bc4e396a8531225f3a3d0",
+  "prompts": {},
+  "sessions": {
+    "s_6b3e246c5191ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21295-201e-75a2-ac30-2669a890ae14",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

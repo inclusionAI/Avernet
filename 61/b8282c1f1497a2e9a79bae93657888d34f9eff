@@ -1,0 +1,34 @@
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/delivery.md
+  h_059e888e5e4e82 5-6,100-145
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/spec.md
+  h_059e888e5e4e82 51,85,112,114,136,143,147-148,181,204,208,211,235,240,259,262,266-276,367,397,399,436-437,499,550,552,558,562,577-578
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py
+  h_059e888e5e4e82 84-85
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md
+  h_059e888e5e4e82 12-14,20-21,40-43,61-76,86-98
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/product_relational_models.py
+  h_059e888e5e4e82 3-4,50,56
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/profile_config_yaml.py
+  h_059e888e5e4e82 20
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_27_product_relational_storage.sql
+  h_059e888e5e4e82 10,18,25,33,50,54,75,83
+apps/backend/tests/community/repository/task/context_collab/product_relational/conftest.py
+  h_059e888e5e4e82 1
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_business_history.py
+  h_059e888e5e4e82 8,18,25,146-149,153-161,164-165,169-179,182-183,187-233,236-244,246
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_evidence_and_schema.py
+  h_059e888e5e4e82 2-3,6,19-21,23,58-66,85-144
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_profile_storage.py
+  h_059e888e5e4e82 32,48-51,195,199-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61b8282c1f1497a2e9a79bae93657888d34f9eff",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

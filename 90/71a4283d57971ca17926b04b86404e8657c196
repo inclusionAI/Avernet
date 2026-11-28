@@ -1,0 +1,46 @@
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/delivery.md
+  h_059e888e5e4e82 219-274
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/spec.md
+  h_059e888e5e4e82 150,161-162,170,352,354-361,364,380,424,436,448,451,458,484,494,554-555,586
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab/README.md
+  h_059e888e5e4e82 62-66
+apps/backend/src/agentclaw/community/adapters/http/task/product_profiles.py
+  h_059e888e5e4e82 1,4,6,25-27,30,73,82-114,158-186
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 9
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md
+  h_059e888e5e4e82 47-55,57-59
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/product_business_repository_adapter.py
+  h_059e888e5e4e82 34-37,61-81
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/product_relational_repository.py
+  h_059e888e5e4e82 166-231
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md
+  h_059e888e5e4e82 3-4,15,19,48,98-110,139-141,284-286
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/contracts.py
+  h_059e888e5e4e82 17,20-22,47-49,65-74
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/ports.py
+  h_059e888e5e4e82 18-21,39-49
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/profile_config_yaml.py
+  h_059e888e5e4e82 1,15,17,19-20,24-46,53,62,69-87,90-91
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/service.py
+  h_059e888e5e4e82 1,43,46-48,157-278,380,392-394,398
+apps/backend/tests/community/adapters/http/task/test_context_collab_products.py
+  h_059e888e5e4e82 28,55-58,87-103,106,176-246,356,370,377-378
+apps/backend/tests/community/core/task/context_collab/product_profile_service/test_actor_scope.py
+  h_059e888e5e4e82 31-38,86-89
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_profile_storage.py
+  h_059e888e5e4e82 4-5,28,35,71-76,130-232,296-298,302-308,311,313,321-335,338-374,376-402,405
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_service_adapter.py
+  h_059e888e5e4e82 1,3,17,40-42,149-150,165-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9071a4283d57971ca17926b04b86404e8657c196",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
