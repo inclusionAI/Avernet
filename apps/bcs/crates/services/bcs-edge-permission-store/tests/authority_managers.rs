@@ -182,3 +182,242 @@ async fn sync_rejects_stock_over_10000() {
         .expect("page after rejection");
     assert_eq!(page.total, 10_101, "no truncation, whole request rejected");
 }
+
+/// When a pending-add member already has a non-manager edge
+/// (grant_kind <> 'manager', grant_ref_id = 0), the sync must
+/// skip that member instead of failing with a duplicate-key
+/// INSERT. Regression test for the CDO NEW ONLINE_ERROR
+/// "manager sync kept conflicting; retry budget exhausted"
+/// (Dima 2026111300120603225).
+#[tokio::test]
+async fn sync_skips_pending_add_with_existing_non_manager_edge() {
+    let fixture = new_fixture().await;
+    let db = fixture.db.clone();
+
+    fixture.seed_bot(ENV, "bot_skip", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "x").await;
+    fixture
+        .grant_edge(ENV, "bot_skip", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    // Insert a non-manager edge for human_x — it sits at the
+    // same (from_id, to_id, env, grant_ref_id = 0) key space
+    // and would block a manager INSERT due to the unique
+    // constraint uk_edge_from_to_env_ref.
+    execute(
+        db.as_ref(),
+        "INSERT INTO edge_grants \
+         (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+          originator_policy_type, originator_policy_data) \
+         VALUES (?, ?, ?, 'custom_type', 0, NULL, 'approved', 'same_as_from', NULL)",
+        vec![
+            DbValue::from(ENV),
+            DbValue::from("human_x"),
+            DbValue::from("bot_skip"),
+        ],
+    )
+    .await;
+
+    // Include human_x in the sync input — the owner-excluded
+    // filter keeps it because human_x ≠ human_own, but
+    // pre_read_existing_edges should filter it out because a
+    // non-manager edge already exists at grant_ref_id = 0.
+    let sync = ManagerSync {
+        bot_id: "bot_skip".to_string(),
+        user_ids: vec!["human_x".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-skip".to_string(),
+            actor: AuthorityActor::Service {
+                app_id: 42,
+            },
+        },
+    };
+    let result = fixture
+        .authority_repo()
+        .sync_managers(sync)
+        .await;
+
+    // The sync must succeed — human_x is skipped, not inserted.
+    assert!(
+        result.is_ok(),
+        "sync must succeed when pending add has existing non-manager edge; got {result:?}"
+    );
+    let change = result.unwrap();
+    assert_eq!(change.added, 0, "human_x must be skipped, not added");
+    assert_eq!(change.removed, 0);
+    assert_eq!(change.total, 0, "valid remainder is empty after skipping");
+
+    // Verify no manager edge was created for human_x.
+    let role = fixture
+        .authority_repo()
+        .role("human_x", "bot_skip")
+        .await
+        .unwrap();
+    assert!(
+        role != Some(BotAccessRelation::Manager),
+        "human_x must not have a manager edge after sync"
+    );
+}
+
+/// Mixed case: some pending-add members have existing non-manager
+/// edges and must be skipped, while others are clean inserts.
+/// Exercises both branches of the pre_read_existing_edges filter.
+#[tokio::test]
+async fn sync_mixed_skip_existing_and_insert_clean() {
+    let fixture = new_fixture().await;
+    let db = fixture.db.clone();
+
+    fixture.seed_bot(ENV, "bot_mixed", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "clean").await;
+    fixture.seed_human(ENV, "dirty").await;
+    fixture
+        .grant_edge(ENV, "bot_mixed", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    // "dirty" has a non-manager edge → must be skipped.
+    execute(
+        db.as_ref(),
+        "INSERT INTO edge_grants \
+         (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+          originator_policy_type, originator_policy_data) \
+         VALUES (?, ?, ?, 'custom_type', 0, NULL, 'approved', 'same_as_from', NULL)",
+        vec![
+            DbValue::from(ENV),
+            DbValue::from("human_dirty"),
+            DbValue::from("bot_mixed"),
+        ],
+    )
+    .await;
+
+    // "clean" has no edge at all → must be inserted as a manager.
+    let sync = ManagerSync {
+        bot_id: "bot_mixed".to_string(),
+        user_ids: vec!["human_clean".to_string(), "human_dirty".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-mixed".to_string(),
+            actor: AuthorityActor::Service { app_id: 42 },
+        },
+    };
+    let result = fixture.authority_repo().sync_managers(sync).await;
+    assert!(
+        result.is_ok(),
+        "sync must succeed; got {result:?}"
+    );
+    let change = result.unwrap();
+    assert_eq!(change.added, 1, "only clean is added");
+    assert_eq!(change.removed, 0);
+    assert_eq!(change.total, 1, "valid remainder = 1 (clean)");
+}
+
+/// Baseline: sync inserts a clean member (no existing edge).
+#[tokio::test]
+async fn sync_inserts_clean_member() {
+    let fixture = new_fixture().await;
+    fixture.seed_bot(ENV, "bot_clean2", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "member").await;
+    fixture
+        .grant_edge(ENV, "bot_clean2", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    let sync = ManagerSync {
+        bot_id: "bot_clean2".to_string(),
+        user_ids: vec!["human_member".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-clean2".to_string(),
+            actor: AuthorityActor::Service { app_id: 42 },
+        },
+    };
+    let result = fixture.authority_repo().sync_managers(sync).await;
+    assert!(result.is_ok(), "sync must succeed; got {result:?}");
+    let change = result.unwrap();
+    assert_eq!(change.added, 1);
+}
+
+/// No-op: sync input already equals the current manager set.
+/// Exercises the `pending_adds.is_empty()` path where no
+/// classification or write happens.
+#[tokio::test]
+async fn sync_noop_when_set_unchanged() {
+    let fixture = new_fixture().await;
+    fixture.seed_bot(ENV, "bot_noop", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "mgr").await;
+    fixture
+        .grant_edge(ENV, "bot_noop", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    // First sync: insert mgr as manager.
+    let sync1 = ManagerSync {
+        bot_id: "bot_noop".to_string(),
+        user_ids: vec!["human_mgr".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-noop-1".to_string(),
+            actor: AuthorityActor::Service { app_id: 42 },
+        },
+    };
+    let r1 = fixture.authority_repo().sync_managers(sync1).await.unwrap();
+    assert_eq!(r1.added, 1);
+    assert_eq!(r1.total, 1);
+
+    // Second sync: same input — no pending adds, no change.
+    let sync2 = ManagerSync {
+        bot_id: "bot_noop".to_string(),
+        user_ids: vec!["human_mgr".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-noop-2".to_string(),
+            actor: AuthorityActor::Service { app_id: 42 },
+        },
+    };
+    let r2 = fixture.authority_repo().sync_managers(sync2).await.unwrap();
+    assert_eq!(r2.added, 0, "no new additions");
+    assert_eq!(r2.removed, 0);
+    assert_eq!(r2.total, 1, "set unchanged");
+}
+
+/// Restore path: a member with a revoked manager edge is restored
+/// (not freshly inserted) by the sync.
+#[tokio::test]
+async fn sync_restores_revoked_manager() {
+    let fixture = new_fixture().await;
+    let db = fixture.db.clone();
+
+    fixture.seed_bot(ENV, "bot_restore", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "rev").await;
+    fixture
+        .grant_edge(ENV, "bot_restore", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    // Insert a revoked manager edge for human_rev.
+    execute(
+        db.as_ref(),
+        "INSERT INTO edge_grants \
+         (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+          originator_policy_type, originator_policy_data) \
+         VALUES (?, ?, ?, 'manager', 0, NULL, 'revoked', 'same_as_from', NULL)",
+        vec![
+            DbValue::from(ENV),
+            DbValue::from("human_rev"),
+            DbValue::from("bot_restore"),
+        ],
+    )
+    .await;
+
+    let sync = ManagerSync {
+        bot_id: "bot_restore".to_string(),
+        user_ids: vec!["human_rev".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-restore".to_string(),
+            actor: AuthorityActor::Service { app_id: 42 },
+        },
+    };
+    let result = fixture.authority_repo().sync_managers(sync).await;
+    assert!(result.is_ok(), "sync must succeed; got {result:?}");
+    let change = result.unwrap();
+    assert_eq!(change.added, 1, "restored member counts as added");
+    assert_eq!(change.removed, 0);
+    assert_eq!(change.total, 1);
+}

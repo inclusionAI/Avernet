@@ -72,7 +72,7 @@
 //! the valid remainder (spec §5.2); the strict
 //! single-item edit keeps whole-request rejection.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use bcs_db_api::{
@@ -539,6 +539,58 @@ impl DbBotAuthorityStore {
         }
         Ok(states)
     }
+
+    /// Pre-read which members already have ANY edge (regardless
+    /// of grant_kind) to this bot with grant_ref_id = 0 and
+    /// rules IS NULL — the same key space covered by the unique
+    /// constraint `uk_edge_from_to_env_ref`. Members that already
+    /// carry a non-manager edge (e.g. owner) are returned here
+    /// so the sync can skip them instead of failing on a
+    /// duplicate-key INSERT.
+    async fn pre_read_existing_edges(
+        &self,
+        bot_id: &str,
+        members: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        // Returns members that already have a non-manager edge —
+        // the unique constraint uk_edge_from_to_env_ref spans ALL
+        // grant_kinds, so a pre-existing owner (etc.) edge blocks
+        // a manager INSERT even though the manager pre-read does
+        // not see it. Manager edges (approved or revoked) are NOT
+        // returned here — they are handled by pre_read_member_states
+        // and the normal sync diff path.
+        let mut existing = HashSet::new();
+        for chunk in members.chunks(MANAGER_CHUNK) {
+            let mut params = vec![self.env_param(), DbValue::from(bot_id)];
+            params.extend(
+                chunk.iter().map(|member| DbValue::from(member.as_str())),
+            );
+            let rows = self
+                .query(
+                    "authority_existing_edges_chunk",
+                    DbStatement::with_params(
+                        format!(
+                            "SELECT from_id FROM edge_grants \
+                             WHERE env = ? AND {} \
+                               AND grant_kind <> 'manager' \
+                               AND grant_ref_id = 0 AND rules IS NULL \
+                               AND {}",
+                            self.to_id_eq(),
+                            self.from_id_in(chunk.len())
+                        )
+                        .as_str(),
+                        params,
+                    ),
+                )
+                .await?;
+            for row in &rows {
+                let from_id = crate::required_string(row, "from_id")?;
+                existing.insert(from_id);
+            }
+        }
+        Ok(existing)
+    }
+
 
     /// Final manager count (owner excluded) for a
     /// committed `edit_manager` result.
@@ -1577,6 +1629,42 @@ impl DbBotAuthorityStore {
             // remainder (already registry-filtered); they
             // only classify into restores (revoked row)
             // and fresh inserts.
+            //
+            // Before classifying, filter out members who
+            // already have ANY edge (not just manager) —
+            // the unique constraint uk_edge_from_to_env_ref
+            // spans all grant_kinds and a non-manager row
+            // would cause a duplicate-key INSERT.
+            let (pending_adds, skipped_pending) = if !pending_adds.is_empty() {
+                let existing = self
+                    .pre_read_existing_edges(
+                        &command.bot_id,
+                        &pending_adds,
+                    )
+                    .await?;
+                let mut filtered: Vec<String> = Vec::new();
+                let mut skipped: Vec<String> = Vec::new();
+                for actor in pending_adds {
+                    if existing.contains(&actor) {
+                        skipped.push(actor);
+                    } else {
+                        filtered.push(actor);
+                    }
+                }
+                if !skipped.is_empty() {
+                    warn!(
+                        operation = op,
+                        env = %self.env(),
+                        bot_id = %command.bot_id,
+                        mutation_id = %command.mutation.mutation_id,
+                        skipped = ?skipped,
+                        "manager sync skipped members with existing non-manager edge"
+                    );
+                }
+                (filtered, skipped)
+            } else {
+                (pending_adds, Vec::new())
+            };
             if !pending_adds.is_empty() {
                 let states = self
                     .pre_read_member_states(
@@ -1594,10 +1682,11 @@ impl DbBotAuthorityStore {
                     }
                 }
             }
+            let final_count = valid_input.len() - skipped_pending.len();
             let change = ManagerSetChange {
                 added: added.len() as u64,
                 removed: removed.len() as u64,
-                total: valid_input.len() as u64,
+                total: final_count as u64,
             };
             let sequences = assign_sequences(&removed, &added);
 
@@ -1675,7 +1764,7 @@ impl DbBotAuthorityStore {
             // with exactly that set (possibly empty).
             self.post_state_guard_step(
                 &mut builder,
-                valid_input.len() as u64,
+                final_count as u64,
             );
             let steps = builder.finish();
 
