@@ -100,7 +100,9 @@ class TestExpertChatPermissionCheck:
         conn = svc._get_connection(bot, user_id="owner1")  # caller == owner
 
         assert conn["url"] == "http://localhost:8080"
-        resolver.resolve_for_binding.assert_called_once_with(123, "owner1", bot_id="bot1")
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "owner1", bot_id="bot1", connection_identity="owner1"
+        )
         # owner 路径下不应问 collaborator
         collab.check_collaborator_permission.assert_not_called()
 
@@ -119,7 +121,9 @@ class TestExpertChatPermissionCheck:
 
         assert conn["url"] == "http://localhost:8080"
         # binding_id 路径：resolver 使用 binding_id 调用 resolve_for_binding
-        resolver.resolve_for_binding.assert_called_once_with(123, "visitor1", bot_id="bot1")
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "visitor1", bot_id="bot1", connection_identity="visitor1"
+        )
         # public 短路 — 不应问 collaborator
         collab.check_collaborator_permission.assert_not_called()
 
@@ -134,7 +138,9 @@ class TestExpertChatPermissionCheck:
 
         assert conn["url"] == "http://localhost:8080"
         # binding_id 路径：resolver 使用 binding_id 调用 resolve_for_binding
-        resolver.resolve_for_binding.assert_called_once_with(123, "collab1", bot_id="bot1")
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "collab1", bot_id="bot1", connection_identity="collab1"
+        )
         collab.check_collaborator_permission.assert_called_once()
         # 校验入参与旧 device_service.py:831-836 等价
         call_kwargs = collab.check_collaborator_permission.call_args.kwargs
@@ -229,7 +235,7 @@ class TestExpertChatPermissionCheck:
         assert connection["url"] == "http://localhost:8080"
         collab.check_collaborator_permission.assert_not_called()
         resolver.resolve_for_binding.assert_called_once_with(
-            123, "friend1", bot_id="bot1"
+            123, "friend1", bot_id="bot1", connection_identity="owner1"
         )
 
     @pytest.mark.asyncio

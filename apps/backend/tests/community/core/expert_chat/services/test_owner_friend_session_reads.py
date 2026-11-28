@@ -39,7 +39,12 @@ async def test_owner_reads_friend_index_using_owner_connection_identity():
     svc._repo.list_owned_sessions.assert_called_once_with(
         user_id="friend", bot_id="b1", owner_id="owner", session_key=None,
     )
-    resolver.resolve_for_binding.assert_called_once_with(123, "owner", bot_id="b1")
+    resolver.resolve_for_binding.assert_called_once_with(
+        123,
+        "owner",
+        bot_id="b1",
+        connection_identity="owner",
+    )
 
 
 @pytest.mark.asyncio
@@ -61,7 +66,50 @@ async def test_ordinary_friend_is_not_silently_elevated_to_owner():
         await svc.list_chat_sessions(
             "friend", "b1", "owner", bcn_friend_authorized=True, actor_user_id="friend",
         )
-    resolver.resolve_for_binding.assert_called_once_with(123, "friend", bot_id="b1")
+    resolver.resolve_for_binding.assert_called_once_with(
+        123,
+        "friend",
+        bot_id="b1",
+        connection_identity="owner",
+    )
+
+
+@pytest.mark.asyncio
+async def test_bcn_friend_session_subject_is_not_device_operator():
+    """An admitted friend keeps its session identity, while
+    the shared private device connection uses the Bot owner."""
+    svc, resolver, bot = service()
+    assert bot is not None
+
+    result = await svc.list_chat_sessions(
+        "friend",
+        "b1",
+        "owner",
+        bcn_friend_authorized=True,
+        actor_user_id="friend",
+    )
+
+    assert result["items"][0]["id"] == "friend-session"
+    assert resolver.resolve_for_binding.call_args.args == (123, "friend")
+    assert resolver.resolve_for_binding.call_args.kwargs == {
+        "bot_id": "b1",
+        "connection_identity": "owner",
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_friend_keeps_the_original_device_operator():
+    """Before BCN friend authorization, existing operator checks
+    remain the same at ExpertChat and legacy device services."""
+    svc, resolver, _ = service()
+    svc._get_authorized_chat_bot = Mock(
+        side_effect=ChatPermissionError("not an operator")
+    )
+
+    with pytest.raises(ChatPermissionError):
+        await svc.list_chat_sessions("friend", "b1", "owner")
+
+    resolver.resolve_for_binding.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -75,4 +123,9 @@ async def test_caller_mode_keeps_the_friends_instance_and_connection_identity():
         "friend", "b1", "owner", bcn_friend_authorized=True, actor_user_id="owner",
     )
     assert svc._instance_service.get_caller_connection.await_args.kwargs["user_id"] == "friend"
-    resolver.resolve_for_binding.assert_called_once_with(456, "friend", bot_id="b1")
+    resolver.resolve_for_binding.assert_called_once_with(
+        456,
+        "friend",
+        bot_id="b1",
+        connection_identity="owner",
+    )

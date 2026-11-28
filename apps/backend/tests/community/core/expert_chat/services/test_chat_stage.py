@@ -57,7 +57,12 @@ def test_personal_friend_keeps_draft_and_has_no_published_stage():
 async def test_shared_chat_connects_online_binding_not_workspace():
     svc, resolver, bot = service(records=[release(online=71)])
     await svc._prepare_chat_connection(bot, "friend", "owner", None, bcn_friend_authorized=True)
-    resolver.resolve_for_binding.assert_called_once_with(71, "friend", bot_id="b1")
+    resolver.resolve_for_binding.assert_called_once_with(
+        71,
+        "friend",
+        bot_id="b1",
+        connection_identity="owner",
+    )
 
 
 @pytest.mark.asyncio
@@ -67,7 +72,12 @@ async def test_caller_chat_checks_publication_before_using_friends_instance():
         "instance": {"ext": {"binding_id": 81}},
     })
     await svc._prepare_chat_connection(bot, "friend", "owner", None, bcn_friend_authorized=True)
-    resolver.resolve_for_binding.assert_called_once_with(81, "friend", bot_id="b1")
+    resolver.resolve_for_binding.assert_called_once_with(
+        81,
+        "friend",
+        bot_id="b1",
+        connection_identity="owner",
+    )
     svc._publish_repository.list_by_source_bot.return_value = [release("draft")]
     svc._instance_service.get_caller_connection.reset_mock()
     with pytest.raises(EngineStageNotLiveError):
