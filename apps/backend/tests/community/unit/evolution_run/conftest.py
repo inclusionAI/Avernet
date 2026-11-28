@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.evolution_run import (
+from avernet_evolution.core.evolution_run import (
     BindingsService,
     BudgetService,
     EvolutionStore,

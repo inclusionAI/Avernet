@@ -124,7 +124,11 @@ app 不挂载内部 Worker 路由。原 DI 模块移到显式 `di/evolution_acce
 
 平台 GenomePort 适配在 `plugins/evolution/genome_registry.py`；纯领域/Worker 测试
 和只读 monitor 在 `apps/evolution`。这些目录变化不改变系统用户身份、Bot 权限或现有
-控制接口的对外路径。旧 core import 兼容层不得继续增长业务逻辑。
+控制接口的对外路径。Backend 的 `core/evolution_{run,strategy,ledger,verify,promote}`
+及旧 `di/evolution_acceptance/runtime.py` 已删除，调用者直接导入 `avernet_evolution`，
+生命周期测试使用正式 `compose()`。显式验收仅保留平台 Registry/Engine 与 Worker 接线。
+Bot Genome/平台 Promotion、Apply Engine、人工授权和独立 Apply 不属于此次删除范围；
+源码清理不迁移、不重建已有 Run、Binding、候选或 Bot 基线。
 
 ## 分层接线验收
 
@@ -246,6 +250,9 @@ a separate integration, not provided or simulated by this human authorization.
   previous authorization remains immutable and only recovers its own failure.
 
 ## Fresh-Bot Local Skill checklist
+
+For a step-by-step operator walkthrough covering Local Skill and Persona, see
+the [fresh-Bot acceptance guide](bot-rsi-acceptance.zh-CN.md).
 
 This sequence is generic; it must not depend on a particular Bot/Skill name or
 synthetic acceptance prompt. The cold-start path is covered by the

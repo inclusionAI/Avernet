@@ -1,13 +1,12 @@
 """RSI ownership: Backend ingress only, one canonical runtime implementation."""
 
 import ast
-import importlib
 from pathlib import Path
 
 import pytest
-
-from tests.community.framework.fixtures import app_with_testing_modules  # noqa: F401, F811
-
+from tests.community.framework.fixtures import (
+    app_with_testing_modules,  # noqa: F401, F811
+)
 
 COMMUNITY = Path(__file__).resolve().parents[4] / "src/agentclaw/community"
 
@@ -29,6 +28,13 @@ def test_default_backend_keeps_bot_ingress_but_not_worker(request):
         ("POST", "/runs/{run_id}:cancel"),
         ("GET", "/runs/{run_id}/candidates"),
         ("GET", "/runs/{run_id}/evidence"),
+        ("GET", "/runs/{run_id}/strategy-output"),
+        ("GET", "/candidates/{candidate_id}"),
+        ("GET", "/review-queue"),
+        ("POST", "/candidates/{candidate_id}:approve"),
+        ("POST", "/candidates/{candidate_id}:reject"),
+        ("POST", "/candidates/{candidate_id}:authorize-promotion"),
+        ("POST", "/candidates/{candidate_id}:apply"),
     }
     assert {(method, prefix + path) for method, path in expected} <= routes
     assert not any(path.startswith("/openapi/v1/evolution/jobs") for _, path in routes)
@@ -55,34 +61,48 @@ def test_default_composition_does_not_import_acceptance_runtime():
         ), relative
 
 
-def test_legacy_modules_are_aliases_not_second_implementations():
-    for domain, modules in {
-        "evolution_run": (
-            "store",
-            "worker",
-            "bindings_service",
-            "job_service",
-            "events",
-        ),
-        "evolution_strategy": ("models", "registration"),
-        "evolution_ledger": ("ledger", "models"),
-        "evolution_verify": ("service", "models"),
-    }.items():
-        for module in modules:
-            old = importlib.import_module(f"agentclaw.community.core.{domain}.{module}")
-            canonical = importlib.import_module(
-                f"avernet_evolution.core.{domain}.{module}"
-            )
-            assert old is canonical, (domain, module)
+RETIRED_DOMAINS = (
+    "evolution_run",
+    "evolution_strategy",
+    "evolution_ledger",
+    "evolution_verify",
+    "evolution_promote",
+)
 
 
-def test_legacy_builder_points_to_explicit_acceptance_composition():
-    from agentclaw.community.core.evolution_run import build_evolution_runtime
-    from agentclaw.community.core.evolution_run.app import (
-        build_evolution_runtime as legacy,
+def test_backend_no_longer_contains_retired_domains_or_composite_builder():
+    for domain in RETIRED_DOMAINS:
+        assert not list((COMMUNITY / "core" / domain).rglob("*.py")), domain
+    assert not (COMMUNITY / "di/evolution_acceptance/runtime.py").exists()
+
+
+def test_sources_and_tests_do_not_import_retired_backend_domains():
+    backend = COMMUNITY.parents[2]
+    repository = backend.parents[1]
+    roots = (
+        backend / "src",
+        backend / "tests",
+        backend / "scripts",
+        repository / "apps/evolution/src",
+        repository / "apps/evolution/tests",
     )
-    from agentclaw.community.di.evolution_acceptance.runtime import (
-        build_evolution_runtime as explicit,
+    retired = tuple(f"agentclaw.community.core.{name}" for name in RETIRED_DOMAINS) + (
+        "agentclaw.community.di.evolution_acceptance.runtime",
     )
-
-    assert build_evolution_runtime is legacy is explicit
+    violations = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                imports = []
+                if isinstance(node, ast.Import):
+                    imports = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    imports = [f"{node.module}.{alias.name}" for alias in node.names]
+                for name in imports:
+                    if any(
+                        name == old or name.startswith(old + ".") for old in retired
+                    ):
+                        violations.append(
+                            f"{path.relative_to(repository)}:{node.lineno}: {name}"
+                        )
+    assert not violations, "\n".join(violations)

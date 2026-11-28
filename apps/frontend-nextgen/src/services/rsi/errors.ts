@@ -8,6 +8,12 @@ export function rsiDomainCode(error: unknown): string | null {
   );
 }
 
+/** Only this exact pre-Run rejection makes it safe to release a submission key. */
+export function isRsiBindingCheckRejected(error: unknown): boolean {
+  return error instanceof Error && 'status' in error && error.status === 422
+    && rsiDomainCode(error) === 'binding_check_failed';
+}
+
 export function rsiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof RsiRequestKeyError) return error.message;
   if (error instanceof Error && error.message.startsWith('当前会话未解析出用户身份')) {
@@ -18,6 +24,9 @@ export function rsiErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error && 'status' in error && error.status === 403) {
     return '当前身份无权操作此 Bot（403）。请核对登录账号与 Bot 归属，不要反复提交。';
+  }
+  if (isRsiBindingCheckRejected(error)) {
+    return '绑定校验失败（422）。请核对已注册策略及版本、允许修改范围、参数和预算后重新读取并保存配置；本次提交未创建任务。';
   }
   const domainCode = rsiDomainCode(error);
   if (domainCode === 'evolution_app_not_granted') {

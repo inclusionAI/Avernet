@@ -5,10 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from agentclaw.community.core.bot_genome.models import BotRef
-from agentclaw.community.core.evolution_run import (
+from avernet_evolution.core.evolution_run import (
     Binding, ManualTrigger, Budget,
 )
-from agentclaw.community.core.evolution_strategy import (
+from avernet_evolution.core.evolution_strategy import (
     ConformanceState,
     ConformanceStatus,
     Runtime,
@@ -37,12 +37,13 @@ def registration(needs: dict | None = None) -> StrategyRegistration:
 class FakeRegistry:
     def __init__(self, registration: StrategyRegistration) -> None:
         self.registration = registration
+        self.definitions = ()
         self.conformance = ConformanceStatus(ConformanceState.PASSED, "1.0.0")
         self.enabled = True
         self.problems_by_engine: dict[str, list[str]] = {}
 
     async def get(self, sid: str, ver: str):
-        from agentclaw.community.core.evolution_strategy import StrategyNotFound
+        from avernet_evolution.core.evolution_strategy import StrategyNotFound
 
         if (sid, ver) != (self.registration.id, self.registration.version):
             raise StrategyNotFound(f"{sid}@{ver}")

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from agentclaw.community.core.evolution_run.sandbox import JobWorkerSpec
+from avernet_evolution.core.evolution_run.sandbox import JobWorkerSpec
 from agentclaw.community.kernel.device_dto import (
     CommandResult,
     OutBoundOperationRule,

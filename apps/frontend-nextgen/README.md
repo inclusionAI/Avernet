@@ -577,3 +577,18 @@ is not full acceptance. This intervention does not implement sandbox benchmark
 quality evaluation. Record-only risk-review approval remains separate.
 See [ADR 0027](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
 and `test/components/rsi/RsiManualPromotion.test.tsx`.
+
+
+## RSI submission recovery
+
+Run submission keeps the same idempotency key and binding after an uncertain
+reply, including network failures, 5xx and unclassified 422 responses. Reopening
+or refreshing the panel does not abandon that request. Only HTTP 422 with the
+exact domain code `binding_check_failed` releases the matching pending submission:
+this validation rejection precedes Run creation. The UI shows a safe instruction
+to check registered strategy versions and binding configuration, then allows
+editing again. It does not automatically migrate bindings or change the baseline.
+An existing pending request can be retried with its original key to receive this
+definite rejection; a late response cannot clear a different pending key.
+See [`RsiPanel.test.tsx`](test/components/rsi/RsiPanel.test.tsx) and
+[`errors.test.ts`](test/services/rsi/errors.test.ts).

@@ -15,8 +15,8 @@ from injector import Injector, InstanceProvider, Module
 
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.core.bot_genome.models import RefMover, RefUpdate
-from agentclaw.community.core.evolution_ledger import LocalExperimentLedger
-from agentclaw.community.core.evolution_run import (
+from avernet_evolution.core.evolution_ledger import LocalExperimentLedger
+from avernet_evolution.core.evolution_run import (
     BindingsService,
     BudgetService,
     EvolutionStore,
@@ -29,12 +29,12 @@ from agentclaw.community.core.evolution_run import (
     TriggerRecord,
     Worker,
 )
-from agentclaw.community.core.evolution_run.ports import (
+from avernet_evolution.core.evolution_run.ports import (
     GovernancePort,
     KillSwitchesPort,
     StrategyRegistryPort,
 )
-from agentclaw.community.core.evolution_strategy import Candidate, RunSummary
+from avernet_evolution.core.evolution_strategy import Candidate, RunSummary
 from agentclaw.community.di.evolution_acceptance.jobs_module import EvolutionJobsModule
 from agentclaw.community.di.evolution_acceptance.runtime_module import (
     EvolutionRuntimeModule,
@@ -270,8 +270,8 @@ async def test_interrupted_submission_resumes_after_reopen(setup, monkeypatch, f
 
 @pytest.mark.asyncio
 async def test_di_capability_providers_share_the_run_budget(setup):
-    from agentclaw.community.core.evolution_strategy import Completion
-    from agentclaw.community.core.evolution_strategy.protocols import (
+    from avernet_evolution.core.evolution_strategy import Completion
+    from avernet_evolution.core.evolution_strategy.protocols import (
         Models,
     )
 
@@ -289,7 +289,7 @@ async def test_di_capability_providers_share_the_run_budget(setup):
         async def feedback(self, *, days, kinds=None, limit=500):
             return []
 
-    from agentclaw.community.core.evolution_run.ports import ExperienceQueryFactory
+    from avernet_evolution.core.evolution_run.ports import ExperienceQueryFactory
 
     class Factory:
         def __init__(self):

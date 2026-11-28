@@ -1,11 +1,14 @@
-# Explicit legacy RSI acceptance composition
+# Explicit RSI platform acceptance assembly
 
-This directory is **not installed by Backend startup**. It keeps the platform
-Registry/Engine integration fixtures and historical composite builder callable
-for explicit tests and the separate smoke CLI, without hosting a second service.
+This directory is **not installed by Backend startup**. It retains only the
+platform Registry/Engine wiring required by explicit integration tests and the
+separate 01–06 smoke CLI; it is not a second runtime implementation.
 
-- `runtime.py`: legacy composite builder, including optional 07/08 ports for
-  existing tests. It reuses canonical Evolution classes, not duplicated logic.
+The obsolete `runtime.py` composite builder and Backend `core/evolution_*`
+domains have been removed. Full lifecycle tests use the production
+`avernet_evolution.composition.compose` directly, including verifier persistence
+and gate/review behavior. Review alone never moves the active baseline;
+manual authorization and Apply remain separate production operations.
 - `jobs_module.py`, `runtime_module.py`: explicit Injector assembly only. Their
   process-random keys, `:memory:` default and permissive governance/kill-switch
   fallbacks are **not production configuration**. Even setting legacy

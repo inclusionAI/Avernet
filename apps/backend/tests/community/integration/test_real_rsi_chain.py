@@ -1,24 +1,10 @@
-"""端到端验证 RSI 核心链路（01-06）：用真实 bot 数据跑一次 binding→run→strategy→candidate。
+"""Opt-in HTTP Genome → canonical RSI composition acceptance (no evaluation/Apply).
 
-前提（在你内网环境里设置环境变量）：
-  BOT_GENOME_BASE_URL   例如 https://teamclawgw-pre.alipay.com/openapi/v1
-  BOT_GENOME_USER_ID    479275
-  BOT_GENOME_AUTH_TOKEN 平台调用凭证（IAM token，走 Cookie: IAM_TOKEN）
-
-Bot（二选一）：
-  BOT_ID=20261103_2g5uinv3   OWNER_ID=479275   （persona/CLAUDE.md）
-  BOT_ID=20261103_0bpkqwlt   OWNER_ID=479275   （persona/SOUL.md）
-
-运行：
-  BOT_GENOME_BASE_URL=https://teamclawgw-pre.alipay.com/openapi/v1 \
-  BOT_GENOME_USER_ID=479275 \
-  BOT_GENOME_AUTH_TOKEN="$(cat /Users/hanzhou/project_code/iamToken)" \
-  BOT_ID=20261103_0bpkqwlt OWNER_ID=479275 \
-    uv run pytest tests/community/integration/test_real_rsi_chain.py -v
-
-这条链路不涉及评测与晋升（后续 07/08 的工作），只验证：
-  genome 读取（real capture/content） → 绑定检查 → 运行提交 → 策略执行 run(ctx)
-  → 候选提交（本地内容寻址）→ 运行完成。
+Set BOT_GENOME_BASE_URL, BOT_GENOME_USER_ID, BOT_GENOME_AUTH_TOKEN, BOT_ID and
+OWNER_ID only for an explicitly authorized disposable Bot with an active baseline.
+Credentials and deployment endpoints must stay outside Git. The HTTP adapter
+records candidates locally; this is NOT proof of remote candidate persistence.
+Run explicitly with pytest tests/community/integration/test_real_rsi_chain.py.
 """
 
 from __future__ import annotations
@@ -29,32 +15,31 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from agentclaw.community.adapters.bot_genome.real_bot_genome import RealBotGenome
 from agentclaw.community.core.bot_genome.models import BotRef
-from agentclaw.community.core.evolution_run import (
+from avernet_evolution.composition import compose
+from avernet_evolution.config import Settings
+from avernet_evolution.core.evolution_run import (
     Binding,
     Budget,
-    InProcessHost,
     ManualTrigger,
     RunStatus,
     TriggerKind,
     TriggerRecord,
-    build_evolution_runtime,
-    build_run_context,
 )
-from agentclaw.community.core.evolution_strategy import (
+from avernet_evolution.core.evolution_strategy import (
     InMemoryStrategyRegistry,
     Runtime,
     RuntimeKind,
     StrategyRegistration,
 )
-from agentclaw.community.core.evolution_strategy.strategies import IdentityHardening
+from avernet_evolution.core.evolution_strategy.strategies import IdentityHardening
+from avernet_evolution.plugin_api import Platform
 
 
 class _PassThroughGovernance:
     def __init__(self) -> None:
-        self._ceiling = Budget(max_usd=float("inf"), max_wall_clock_s=10 ** 9)
+        self._ceiling = Budget(max_usd=float("inf"), max_wall_clock_s=10**9)
 
     async def engine(self, bot: Any) -> str:
         return getattr(bot, "engine_type", "") or "openclaw"
@@ -88,6 +73,9 @@ class _PermissiveKills:
 class _EmptyExperience:
     """空会话即可让 IdentityHardening 走完（读取→判断→补丁→候选→判定）。"""
 
+    def for_bot(self, bot):
+        return self
+
     async def sessions(
         self, *, days: int, limit: int = 500, revision: str | None = None
     ) -> list[Any]:
@@ -104,7 +92,7 @@ def _env(name: str) -> str | None:
 
 
 @pytest.mark.asyncio
-async def test_real_rsi_chain_end_to_end() -> None:
+async def test_real_rsi_chain_end_to_end(tmp_path) -> None:
     base_url = _env("BOT_GENOME_BASE_URL")
     user_id = _env("BOT_GENOME_USER_ID")
     auth_token = os.environ.get("BOT_GENOME_AUTH_TOKEN")
@@ -142,62 +130,60 @@ async def test_real_rsi_chain_end_to_end() -> None:
     await registry.register(registration, definitions={})
     strategies = {"acme/identity-hardening@1.0.0": IdentityHardening}
 
-    runtime = build_evolution_runtime(
-        genome=genome,
-        registry=registry,
-        governance=_PassThroughGovernance(),
-        kills=_PermissiveKills(),
-        strategies=strategies,
-        models=None,
-        experience=_EmptyExperience(),
-        agents_provider=None,
-        evaluation_provider=None,
-        apply=None,
-        sandbox_worker=None,
-        strategy_images=None,
-        database=":memory:",
+    key = tmp_path / "signing-key"
+    key.write_text(secrets.token_hex(32))
+    token = tmp_path / "local-token"
+    token.write_text(secrets.token_hex(32))
+    settings = Settings(
+        database=tmp_path / "runs.db",
+        signing_key_file=key,
+        local_token_file=token,
+        consumer=False,
     )
-
-    binding = Binding(
-        id="bind_real_01",
-        strategy="acme/identity-hardening@1.0.0",
-        trigger=ManualTrigger(),
-        parent="active",
-        allowed_genes=["persona"],
-        verification_profile="default@1",
-        budget=Budget(max_usd=5.0, max_wall_clock_s=3600),
-        params={},
-    )
-    await runtime.bindings.put_bindings(bot, [binding], expected_etag=None, actor="owner")
-
-    run_id = await runtime.runs.submit(
-        bot,
-        "bind_real_01",
-        idempotency_key="rsi_real_" + secrets.token_hex(4),
-        trigger=TriggerRecord(kind=TriggerKind.MANUAL, requested_by=owner_id),
-    )
-
-    host = InProcessHost(
-        strategies=strategies,
-        store=runtime.store,
-        jobs=runtime.jobs,
-        operations=runtime.operations,
-        budget=runtime.budget,
-        genome=genome,
-        ctx_factory=lambda run, **kwargs: build_run_context(
-            run,
-            store=runtime.store,
+    runtime = await compose(
+        settings,
+        Platform(
+            access=None,
             genome=genome,
-            budget=runtime.budget,
-            operations=runtime.operations,
-            **kwargs,
+            registry=registry,
+            governance=_PassThroughGovernance(),
+            kills=_PermissiveKills(),
+            strategies=strategies,
+            experience=_EmptyExperience(),
         ),
-        models_provider=None,
-        experience_provider=_EmptyExperience(),
-        heartbeat_s=3600,
     )
-    assert await host.run_once("worker-real-1") is True, host.last_error
 
-    run = await runtime.runs.get(bot, run_id)
-    assert run.status is RunStatus.COMPLETED, (run.status, host.last_error)
-    assert run.candidate_count == 1
+    try:
+        binding = Binding(
+            id="bind_real_01",
+            strategy="acme/identity-hardening@1.0.0",
+            trigger=ManualTrigger(),
+            parent="active",
+            allowed_genes=["persona"],
+            verification_profile="default@1",
+            budget=Budget(max_usd=5.0, max_wall_clock_s=3600),
+            params={},
+        )
+        await runtime.api.bindings.put_bindings(
+            bot, [binding], expected_etag=None, actor="owner"
+        )
+
+        run_id = await runtime.api.runs.submit(
+            bot,
+            "bind_real_01",
+            idempotency_key="rsi_real_" + secrets.token_hex(4),
+            trigger=TriggerRecord(kind=TriggerKind.MANUAL, requested_by=owner_id),
+        )
+
+        host = runtime.runner.host
+        assert await host.run_once("worker-real-1") is True, host.last_error
+
+        run = await runtime.api.runs.get(bot, run_id)
+        assert run.status is RunStatus.COMPLETED, (run.status, host.last_error)
+        assert run.candidate_count == 1
+        assert runtime.api.promotion is None and runtime.verifier is None
+        assert (
+            await genome.resolve_revision(bot, "active")
+        ).revision.id == active.revision.id
+    finally:
+        await runtime.close()

@@ -6,7 +6,7 @@ import pytest
 from injector import Injector, Module
 
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
-from agentclaw.community.core.evolution_run import (
+from avernet_evolution.core.evolution_run import (
     ContainerHost,
     EvolutionRunner,
     EvolutionStore,
@@ -131,7 +131,7 @@ async def test_discovered_runner_hooks_are_safe(monkeypatch) -> None:
 
 
 def test_explicit_provider_failure_is_not_hidden_by_fallback() -> None:
-    from agentclaw.community.core.evolution_run.ports import StrategyRegistryPort
+    from avernet_evolution.core.evolution_run.ports import StrategyRegistryPort
     from agentclaw.community.di.evolution_acceptance.runtime_module import _resolve
 
     injector = Injector()
@@ -147,7 +147,7 @@ def test_explicit_provider_failure_is_not_hidden_by_fallback() -> None:
 def test_optional_port_uses_explicit_parent_binding() -> None:
     from injector import InstanceProvider
 
-    from agentclaw.community.core.evolution_run.ports import StrategyRegistryPort
+    from avernet_evolution.core.evolution_run.ports import StrategyRegistryPort
     from agentclaw.community.di.evolution_acceptance.runtime_module import _resolve
 
     parent = Injector()

@@ -19,7 +19,7 @@ Strategy execution belongs in the isolated worker, not the backend process.
 Keep credentials out of the worker environment beyond the narrowly scoped job
 credentials, and keep platform SDK dependencies behind these adapters.
 
-See [`core/evolution_run/README.md`](../../core/evolution_run/README.md) for the
+See the independent [Evolution guide](../../../../../../evolution/README.md) for the
 host/worker lifecycle and [`docs/bot-evolution/README.zh-CN.md`](../../../../../docs/bot-evolution/README.zh-CN.md)
 for the current overall status and known verification gaps.
 
@@ -69,7 +69,8 @@ source failures, write failures, stages, scope, redaction, immutable snapshots
 and restart/idempotence. The real-provider HTTP Worker/Registry/Ledger integration
 is in `tests/community/core/bot_genome/test_evolution_run_integration.py`.
 Those tests use fixture Engine responses; they are **not live simulator proof**.
-See the linked runtime README for the explicit live-session CLI and preconditions.
+See the [platform acceptance guide](../../di/evolution_acceptance/README.md) for the
+explicit live-session CLI and preconditions.
 
 ## Explicit Kubernetes acceptance worker
 

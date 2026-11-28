@@ -4,7 +4,7 @@
 Build the deployment injector once in this standalone process; never import the
 HTTP app or create an extra application injector inside a running Backend.
 Experience defaults to a fixture; --session-id reads a real Engine snapshot.
-Candidate records are retained, but nothing is applied or promoted. See core/evolution_run/README.md for preconditions and limitations.
+Candidate records are retained, but nothing is applied or promoted. See src/agentclaw/community/di/evolution_acceptance/README.md for preconditions and limitations.
 """
 
 from __future__ import annotations

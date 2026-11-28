@@ -1,5 +1,5 @@
 import { RsiRequestKeyError } from '@/utils/rsiRequestKey';
-import { rsiErrorMessage } from '@/services/rsi/errors';
+import { isRsiBindingCheckRejected, rsiErrorMessage } from '@/services/rsi/errors';
 
 test('503 explains the deployment gap without claiming an unknown submission failed', () => {
   const cause = Object.assign(new Error('private upstream detail'), { status: 503 });
@@ -48,4 +48,26 @@ test('Genome errors do not promise an idempotent retry or misattribute a Backend
 test('only a typed pre-request failure is reported as unsent', () => {
   expect(rsiErrorMessage(new RsiRequestKeyError(), 'unknown')).toContain('本次操作尚未发送');
   expect(rsiErrorMessage(new TypeError('crypto.randomUUID is not a function'), 'unknown')).toBe('unknown');
+});
+
+
+test('exact binding rejection has an actionable safe message, without upstream details', () => {
+  const cause = Object.assign(new Error('private upstream detail'), {
+    status: 422,
+    data: { error: { code: 'binding_check_failed', details: ['private binding details'] } },
+  });
+  expect(isRsiBindingCheckRejected(cause)).toBe(true);
+  const message = rsiErrorMessage(cause, 'unknown');
+  expect(message).toContain('绑定校验失败');
+  expect(message).toContain('本次提交未创建任务');
+  expect(message).not.toContain('private');
+});
+
+test.each([
+  [422, undefined], [422, 'other_error'], [500, 'binding_check_failed'],
+  [503, 'binding_check_failed'], [409, 'binding_check_failed'],
+])('HTTP %s / %s is not a definite pre-Run binding rejection', (status, code) => {
+  const cause = Object.assign(new Error('private'), { status, data: { error: { code } } });
+  expect(isRsiBindingCheckRejected(cause)).toBe(false);
+  expect(rsiErrorMessage(cause, 'unknown')).not.toContain('本次提交未创建任务');
 });

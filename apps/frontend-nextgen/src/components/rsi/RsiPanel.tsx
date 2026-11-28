@@ -3,7 +3,7 @@ import { RsiReviewQueue, RsiRunList } from '@/components/rsi/RsiRunNavigation';
 import { RsiRunDetails } from '@/components/rsi/RsiRunDetails';
 import { Button } from '@/components/ui/Button';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { rsiDomainCode, rsiErrorMessage } from '@/services/rsi/errors';
+import { isRsiBindingCheckRejected, rsiDomainCode, rsiErrorMessage } from '@/services/rsi/errors';
 import {
   getRsiBindings,
   getRsiCandidates,
@@ -153,10 +153,18 @@ function RsiPanelBody({ scope }: { scope: RsiScope }) {
     const attempt = useRsiPanelStore.getState().beginAttempt(scope, bindingId);
     // 幂等键在重试间保持不变：建基线前后是同一次提交。
     await withBaselineRetry(async () => {
-      const result = await submitRsiRun(scope, attempt.bindingId, attempt.key);
-      useRsiPanelStore.getState().confirmAttempt(scope, attempt.key);
-      if (!alive.current) return;
-      setRunId(result.run);
+      try {
+        const result = await submitRsiRun(scope, attempt.bindingId, attempt.key);
+        useRsiPanelStore.getState().confirmAttempt(scope, attempt.key);
+        if (!alive.current) return;
+        setRunId(result.run);
+      } catch (cause) {
+        // 仅明确的提交前绑定拒绝可解锁；未知结果仍须使用原键确认。
+        if (isRsiBindingCheckRejected(cause)) {
+          useRsiPanelStore.getState().confirmAttempt(scope, attempt.key);
+        }
+        throw cause;
+      }
     });
   }
   const selected = runs.find((item) => item.id === runId);

@@ -1,7 +1,7 @@
 """真实 Bot 基因组注册表适配器：通过 HTTP 调用平台 OpenAPI，实现 06 需要的 `genome` 端口。
 
 把用户提供的 bot genome OpenAPI 接入 06 的
-`build_evolution_runtime(..., genome=RealBotGenome(...))`，
+`compose(settings, Platform(..., genome=RealBotGenome(...)))`，
 供 01-06 核心链路（提交→运行→策略执行→候选提交）使用真实 bot 数据跑通。
 
 实现的方法（06 核心链路真正需要的）：

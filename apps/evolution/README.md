@@ -52,8 +52,9 @@ internal_dependencies: []
 
 策略作者依赖 SDK 和 Worker 协议；前端依赖 Backend 的 Bot 控制 API；
 Backend 复用系统登录和 Bot 权限，Evolution 验证内部授权回执；平台提供者实现
-Genome、经验及沙箱端口。变更这些边界必须更新兼容性/消费方测试。Backend 原导入
-路径暂保留同一模块对象的兼容别名；它们不是第二份 Evolution 实现。
+Genome、经验及沙箱端口。变更这些边界必须更新兼容性/消费方测试。Backend 的
+`core/evolution_{run,strategy,ledger,verify,promote}` 已退役；仓内调用者直接导入
+`avernet_evolution`。Backend 保留的平台适配器不是第二份 Evolution 实现。
 
 ## 归属与执行链路
 
@@ -421,10 +422,14 @@ Backend 默认组装不再安装历史 Evolution Runtime/Jobs 模块，也不挂
 
 Backend 保留 Bot 权限入口、Genome/Promotion 和真正依赖平台内部契约的适配器；
 [显式验收组合](../backend/src/agentclaw/community/di/evolution_acceptance/README.md)
-只为旧版跨平台测试保留，不是第二份生产 runtime。旧 core/Worker import 别名用于
-兼容，新增实现和测试只能写 canonical 包。旧 `core/evolution_run/genome_registry_port`
-与 Backend Worker router/旧 DI module 路径已移除，仓内调用者均已迁移；外部显式验收
-调用者须按上述目录更新，不应重新挂回 Backend 默认启动。
+只保留 01–06 Registry/Engine 与 HTTP Worker 的显式接线，不是第二份生产 runtime。
+旧 Backend `core/evolution_*` 和 `di/evolution_acceptance/runtime.py` 已删除；全生命周期
+验收直接使用本包 `compose()`，涵盖候选、评测持久化和门禁，评审本身不执行 Apply。
+Backend `plugins/evolution` 中部分 Worker import 别名仍为显式验收兼容保留；新增领域
+实现和测试使用 canonical 包。旧 GenomeRegistry port、Worker router/旧 DI module
+路径也已移除；外部显式验收调用者须更新导入，不应重新挂回 Backend 默认启动。
+Backend 的 Bot 权限入口、Genome/平台 Promotion、Apply Engine、人工授权及独立 Apply
+接口保留，既有 Run/Binding/候选持久化数据不因源码路径清理而删除或重建。
 
 只读事件观察（数据库路径由部署提供，内容可能受限）：
 
