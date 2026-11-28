@@ -20,7 +20,14 @@ class BotServiceProtocol(Protocol):
     # ── Queries ────────────────────────────────────────────────────────
     def get_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def get_bot_by_address(self, bot_id: str, user_id: str, *, source_bot_pk: int | None = None) -> Any:
+    def get_bot_by_address(
+        self,
+        bot_id: str,
+        user_id: str | None = None,
+        *,
+        source_bot_pk: int | None = None,
+        allow_unique_bot_id: bool = False,
+    ) -> Any:
         """Resource lookup; publications supply their source PK. Does not authorize an actor."""
         ...
 
