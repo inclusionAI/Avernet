@@ -116,3 +116,4 @@ openspec
 
 scripts/undercover-game.sh
 scripts/.dependencies
+.venv-test/

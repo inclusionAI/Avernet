@@ -41,6 +41,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+import httpx
+
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.apply_engine.cli_tools.store import (
     BOT_DATA_STORE,
@@ -154,7 +156,23 @@ class TeclawFilePromotion:
         skipped_unreadable = 0
 
         for ns in self.NAMESPACES:
-            entries = await device_fs.list_dir(ns, recursive=True)
+            entries: list[dict] | None = None
+            try:
+                entries = await device_fs.list_dir(
+                    ns, recursive=True, preserve_errors=True,
+                )
+            except httpx.HTTPStatusError as exc:
+                raise TeclawFilePromotionError(
+                    f"teclaw promotion: list_dir failed for namespace {ns!r} "
+                    f"(HTTP {exc.response.status_code}) — "
+                    "refusing to ship an incomplete snapshot",
+                ) from exc
+            except Exception as exc:
+                raise TeclawFilePromotionError(
+                    f"teclaw promotion: list_dir failed for namespace {ns!r} "
+                    f"({type(exc).__name__}) — "
+                    "refusing to ship an incomplete snapshot",
+                ) from exc
             # ``list_dir`` returns None on a failed listing (engine unreachable /
             # 5xx) and [] for a genuinely empty namespace. They must NOT be
             # conflated: a swallowed listing error would ship an artifact missing
@@ -190,7 +208,21 @@ class TeclawFilePromotion:
                 if _has_excluded_segment(engine_path):
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
-                content = await device_fs.read_file(logical)
+                content: bytes | None = None
+                try:
+                    content = await device_fs.read_file(
+                        logical, preserve_read_errors=True,
+                    )
+                except httpx.HTTPStatusError as exc:
+                    raise TeclawFilePromotionError(
+                        "teclaw promotion: source file unreadable: "
+                        f"{engine_path} (HTTP {exc.response.status_code})",
+                    ) from exc
+                except Exception as exc:
+                    raise TeclawFilePromotionError(
+                        "teclaw promotion: source file unreadable: "
+                        f"{engine_path} ({type(exc).__name__})",
+                    ) from exc
                 if content is None:
                     logger.warning(
                         "[TeclawFilePromotion] skipping unreadable file: %s",
