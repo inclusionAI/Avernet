@@ -83,7 +83,13 @@ async def approval_callback(
 
     global_unique_id = data.get("globalUniqueId") or ""
     last_operate = (data.get("lastOperate") or "").upper()
-    bot_friend_id = int(data.get("bot_friend_id") or 0)
+    # The callback is untrusted form input: a missing or unparsable
+    # bot_friend_id must fall back to 0 so the service can attempt puid
+    # recovery instead of the route raising a 500.
+    try:
+        bot_friend_id = int(data.get("bot_friend_id") or 0)
+    except (TypeError, ValueError):
+        bot_friend_id = 0
 
     return service.handle_friend_request_approval_callback(
         puid=global_unique_id,
