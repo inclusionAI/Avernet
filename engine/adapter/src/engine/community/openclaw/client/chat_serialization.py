@@ -11,7 +11,9 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
-from engine.community.openclaw.client.chat_dispatch import ChatDispatch, supports_dispatch_wait
+from engine.community.openclaw.client.chat_dispatch import (
+    QUERY_TIMEOUT, ChatDispatch, completion_status, supports_dispatch_wait,
+)
 from engine.community.openclaw.client.chat_stream import chat_stream_events
 from engine.community.openclaw.protocol import ResponseFrame
 
@@ -25,6 +27,16 @@ MAX_BUFFER_BYTES = 1_572_864
 DEFAULT_TIMEOUT = 20 * 60
 ACK_DELIVERY_TIMEOUT = 5
 COMPLETION_CACHE_SECONDS = 5 * 60
+RECOVERY_PROBE_INTERVAL = 2.0
+RECOVERY_WINDOW_SECONDS = 5 * 60
+
+
+@dataclass(frozen=True)
+class UnconfirmedDispatch:
+    run: str
+    started: bool
+    command_reply: bool
+    unresolved_children: bool
 
 
 @dataclass
@@ -32,6 +44,8 @@ class SessionSlot:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     users: int = 0
     blocked: bool = False
+    unconfirmed: UnconfirmedDispatch | None = None
+    next_probe_at: float = 0
 
 
 _slots: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -47,6 +61,31 @@ def _error(code: str, message: str) -> dict[str, Any]:
 
 def _session_key(client: OpenClawGatewayClient, session: str) -> tuple[str, str]:
     return client._config.gateway_url, session.strip().lower().removeprefix("agent:main:")
+
+
+async def _recover_slot(client: OpenClawGatewayClient, slot: SessionSlot, budget: float) -> bool:
+    """Called under the session lock; never resend or synthesize an old reply."""
+    previous = slot.unconfirmed
+    loop = asyncio.get_running_loop()
+    if previous is None or previous.unresolved_children or loop.time() < slot.next_probe_at:
+        return False
+    slot.next_probe_at = loop.time() + RECOVERY_PROBE_INTERVAL
+    try:
+        async with asyncio.timeout(min(budget, QUERY_TIMEOUT)):
+            response = await client.send_request(
+                "agent.wait", {"runId": previous.run, "timeoutMs": 0}, timeout=min(budget, QUERY_TIMEOUT),
+            )
+        status = completion_status(response, previous.run)
+        if status is None or (status == "ok" and not (previous.started or previous.command_reply)):
+            return False
+    except Exception as exc:
+        log.warning("[chat_stream][recovery_unconfirmed] runId=%s reason=%s", previous.run, type(exc).__name__)
+        return False
+    slot.blocked = False
+    slot.unconfirmed = None
+    slot.next_probe_at = 0
+    log.info("[chat_stream][dispatch_recovered] runId=%s status=%s", previous.run, status)
+    return True
 
 
 async def cancel_pending(client: OpenClawGatewayClient, session: str, run: str | None) -> list[str]:
@@ -121,6 +160,35 @@ async def serialized_chat(
     buffered = 0
     budget = timeout_ms / 1000 if timeout_ms else DEFAULT_TIMEOUT
 
+    def remember_completed(run: str) -> None:
+        completed[(*key, run)] = loop.time()
+        completed.move_to_end((*key, run))
+        while len(completed) > MAX_SESSIONS:
+            completed.popitem(last=False)
+
+    async def reconcile(previous: UnconfirmedDispatch) -> None:
+        # Preserve late completion proof before Gateway's short-lived cache expires.
+        # This stays in the worker so token-client retirement keeps its socket alive.
+        try:
+            async with asyncio.timeout(RECOVERY_WINDOW_SECONDS):
+                while slot.blocked and slot.unconfirmed is previous:
+                    await asyncio.sleep(RECOVERY_PROBE_INTERVAL)
+                    if not slot.blocked or slot.unconfirmed is not previous:
+                        return
+                    if slot.lock.locked():
+                        continue
+                    async with slot.lock:
+                        if not slot.blocked or slot.unconfirmed is not previous:
+                            return
+                        if await _recover_slot(client, slot, QUERY_TIMEOUT):
+                            if previous.started:
+                                remember_completed(previous.run)
+                            if not slot.users:
+                                slots.pop(key, None)
+                            return
+        except TimeoutError:
+            log.warning("[chat_stream][recovery_expired] runId=%s", previous.run)
+
     def publish(event: dict[str, Any]) -> None:
         nonlocal attached, buffered
         if not attached:
@@ -183,8 +251,12 @@ async def serialized_chat(
             await asyncio.wait_for(slot.lock.acquire(), timeout=budget)
             acquired = True
             if slot.blocked:
-                publish(_error("DISPATCH_UNCONFIRMED", "Previous execution is unconfirmed; do not automatically retry"))
-                return
+                previous = slot.unconfirmed
+                if not await _recover_slot(client, slot, budget):
+                    publish(_error("DISPATCH_UNCONFIRMED", "Previous execution is unconfirmed; do not automatically retry"))
+                    return
+                if previous is not None and previous.started:
+                    remember_completed(previous.run)
             async with aclosing(chat_stream_events(
                 client, session_key, message, timeout_ms, completion.run, attachments,
                 acknowledge, completion=completion, max_pre_ack_bytes=max_pre_ack_bytes,
@@ -207,17 +279,29 @@ async def serialized_chat(
             publish(_error("DISPATCH_UNCONFIRMED", "Chat execution could not be confirmed; do not automatically retry"))
         finally:
             if acquired:
-                slot.blocked = slot.blocked or (completion.sent and not completion.confirmed)
+                if completion.sent and not completion.confirmed:
+                    slot.blocked = True
+                    # Keep only proof metadata, not the old client, prompt or answer.
+                    slot.unconfirmed = UnconfirmedDispatch(
+                        completion.run, completion.started,
+                        bool(completion.message.lstrip().startswith("/")
+                             and completion.terminal is not None and completion.answer),
+                        completion.unresolved_children,
+                    )
+                    slot.next_probe_at = 0
                 if completion.started and completion.confirmed:
-                    completed[(*key, completion.run)] = loop.time()
-                    completed.move_to_end((*key, completion.run))
-                    while len(completed) > MAX_SESSIONS:
-                        completed.popitem(last=False)
+                    remember_completed(completion.run)
                 slot.lock.release()
             slot.users -= 1
             if not slot.users and not slot.blocked:
                 slots.pop(key, None)
             output.put_nowait((None, 0))
+            previous = slot.unconfirmed
+            if (completion.sent and not completion.confirmed and previous is not None
+                    and previous.run == completion.run and not previous.unresolved_children
+                    and (previous.started or previous.command_reply)
+                    and not asyncio.current_task().cancelling()):
+                await reconcile(previous)
 
     worker = asyncio.create_task(run())
     _workers[worker] = client

@@ -784,6 +784,7 @@ async def chat_stream_events(
     finally:
         done = True
         if completion is not None:
+            completion.unresolved_children = bool(children.pending_count or children.unannounced_count)
             await completion.close()
         if retry_check is not None:
             retry_check.cancel()
