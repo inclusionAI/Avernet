@@ -1036,3 +1036,204 @@ def test_a_collaborator_lookup_failure_refuses():
 
     with pytest.raises(BotNotFoundError):
         _relay(collaborators=_Broken()).resolve_bot(BOT, OWNER, "u2")
+
+
+# ── Retry tests ──────────────────────────────────────────────────────────
+
+
+class _RetryTransport:
+    """A transport that raises for the first *n* calls, then succeeds."""
+
+    def __init__(
+        self,
+        failures: int,
+        exc: Exception,
+        result: dict | None = None,
+    ) -> None:
+        self._failures = failures
+        self._exc = exc
+        self._result = result or {"success": True, "data": {"ok": True}}
+        self._attempt = 0
+        self.calls: list[tuple[str, str]] = []
+
+    async def invoke(self, conn_info, method, path, body=None, params=None, *, timeout=None):
+        self.calls.append((method, path))
+        self._attempt += 1
+        if self._attempt <= self._failures:
+            raise self._exc
+        return self._result
+
+
+async def _make_relay_for_retry_test(transport: _RetryTransport):
+    """Build a minimal relay wired for retry-scenario tests."""
+    bot_service = _BotService({(BOT, OWNER): {"bot_id": BOT}})
+    resolver = _Resolver()
+    relay = EngineRuntimeRelay(
+        bot_service=bot_service,
+        resolver=resolver,
+        transport=transport,
+        publish_repo=_PublishRepo(),
+        collaborators=_Collaborators(),
+        binding_repo=_BindingStatusRepo(),
+    )
+    return relay, bot_service
+
+
+@pytest.mark.anyio
+async def test_retry_on_503_succeeds():
+    """GET with one 503 then 200 should succeed after one retry."""
+    exc = DeviceAdapterHTTPStatusError(503, "Service Unavailable")
+    transport = _RetryTransport(failures=1, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    result = await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        stage="draft",
+    )
+
+    assert result.data == {"ok": True}
+    assert len(transport.calls) == 2  # original + 1 retry
+
+
+@pytest.mark.anyio
+async def test_retry_on_transport_failure_succeeds():
+    """GET with one ValueError then 200 should succeed after one retry."""
+    exc = ValueError("Server disconnected")
+    transport = _RetryTransport(failures=1, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    result = await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        stage="draft",
+    )
+
+    assert result.data == {"ok": True}
+    assert len(transport.calls) == 2  # original + 1 retry
+
+
+@pytest.mark.anyio
+async def test_retry_exhausted_raises_upstream_error():
+    """GET with 503 for all 3 attempts should raise EngineUpstreamError."""
+    exc = DeviceAdapterHTTPStatusError(503, "Service Unavailable")
+    transport = _RetryTransport(failures=3, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    with pytest.raises(EngineUpstreamError, match="engine returned HTTP 503"):
+        await relay.call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+            stage="draft",
+        )
+
+    assert len(transport.calls) == 3  # original + 2 retries = 3 total
+
+
+@pytest.mark.anyio
+async def test_post_does_not_retry():
+    """POST with 503 should NOT retry and should raise immediately."""
+    exc = DeviceAdapterHTTPStatusError(503, "Service Unavailable")
+    transport = _RetryTransport(failures=3, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    with pytest.raises(EngineUpstreamError, match="engine returned HTTP 503"):
+        await relay.call(
+            bot_id=BOT, owner_id=OWNER, method="POST", path="/api/sessions",
+            body={"title": "test"}, stage="draft",
+        )
+
+    assert len(transport.calls) == 1  # no retry for POST
+
+
+@pytest.mark.anyio
+async def test_404_does_not_retry():
+    """GET with 404 should NOT retry."""
+    exc = DeviceAdapterEndpointNotFoundError("Not Found")
+    transport = _RetryTransport(failures=3, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    with pytest.raises(EngineResourceNotFoundError):
+        await relay.call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+            stage="draft",
+        )
+
+    assert len(transport.calls) == 1  # 404 never retried
+
+
+@pytest.mark.anyio
+async def test_501_does_not_retry():
+    """GET with 501 should NOT retry."""
+    exc = DeviceAdapterHTTPStatusError(501, "Not Implemented")
+    transport = _RetryTransport(failures=3, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    with pytest.raises(EngineCapabilityUnsupportedError):
+        await relay.call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+            stage="draft",
+        )
+
+    assert len(transport.calls) == 1  # 501 never retried
+
+
+@pytest.mark.anyio
+async def test_retry_on_two_503_then_success():
+    """GET with two 503s then 200 should exhaust retries then succeed."""
+    exc = DeviceAdapterHTTPStatusError(503, "Service Unavailable")
+    transport = _RetryTransport(failures=2, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    result = await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        stage="draft",
+    )
+
+    assert result.data == {"ok": True}
+    assert len(transport.calls) == 3  # original + 2 retries → 3rd succeeds
+
+
+@pytest.mark.anyio
+async def test_retry_on_two_transport_failures_then_success():
+    """GET with two ValueErrors then 200 should succeed."""
+    exc = ValueError("Connection reset")
+    transport = _RetryTransport(failures=2, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    result = await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        stage="draft",
+    )
+
+    assert result.data == {"ok": True}
+    assert len(transport.calls) == 3
+
+
+@pytest.mark.anyio
+async def test_retry_exhausted_on_transport_failure():
+    """GET with ValueError for all 3 attempts should raise EngineUpstreamError."""
+    exc = ValueError("Connection reset")
+    transport = _RetryTransport(failures=3, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    with pytest.raises(EngineUpstreamError, match="engine transport failed"):
+        await relay.call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+            stage="draft",
+        )
+
+    assert len(transport.calls) == 3
+
+
+@pytest.mark.anyio
+async def test_head_retries_on_503():
+    """HEAD with 503 should retry (idempotent)."""
+    exc = DeviceAdapterHTTPStatusError(503, "Service Unavailable")
+    transport = _RetryTransport(failures=1, exc=exc)
+    relay, _ = await _make_relay_for_retry_test(transport)
+
+    result = await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="HEAD", path="/api/sessions",
+        stage="draft",
+    )
+
+    assert result.data == {"ok": True}
+    assert len(transport.calls) == 2  # original + 1 retry
