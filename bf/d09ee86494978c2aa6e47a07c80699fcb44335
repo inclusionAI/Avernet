@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/internal-version-contract.md
+  h_bb3ca6fb13c5df 71-126
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-completion.ts
+  h_bb3ca6fb13c5df 6,8,10-11
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 113
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-run-completion.test.ts
+  h_bb3ca6fb13c5df 1-368
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_bb3ca6fb13c5df 309,313,331-335,350-352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfd09ee86494978c2aa6e47a07c80699fcb44335",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
