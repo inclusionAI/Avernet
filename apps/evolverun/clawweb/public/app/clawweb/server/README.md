@@ -45,3 +45,14 @@ The [Shared database lease service](../../../shared/README.md) owns reusable
 cross-instance background-work coordination and its independent v158 lock table.
 Session recovery adopts it through public assembly; deployment must provision
 the table before rolling out consumers.
+
+## Success callback compensation
+
+The optional `callbackCompensation` trusted host for `createClawWebBootstrap`
+provides verified administrator identity, exact trusted browser origins, a
+server-only evidence provider and a stable payload-protection key. Missing
+identity denies access; missing evidence/key denies delivery. See the
+[Service API and rollout contract](../../../modules/workflow/docs/callback-compensation.md).
+The runtime mounts its security guard before parsing/CORS, starts a low-concurrency
+persistent worker only with delivery prerequisites, and drains it before closing
+the database. It does not call a workflow engine.

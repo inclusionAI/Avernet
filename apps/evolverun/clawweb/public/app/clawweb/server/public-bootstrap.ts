@@ -1,3 +1,4 @@
+import { createCallbackCompensationRuntime, type CallbackCompensationHost } from './callback-compensation-runtime.js';
 import express, { type RequestHandler } from "express";
 import { withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import compression from "compression";
@@ -107,7 +108,7 @@ export type UnifiedSaveHost = Readonly<{
 
 /** Server-only ACL for complete Editor deployment candidates; omission denies
  * Editor deployment. It never supplies identity or grants Pack file writes. */
-export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime; unifiedSave?: UnifiedSaveHost; authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy; aistudioTrain?: AIStudioTrainPublicAuth } = {}): ClawWebBootstrap {
+export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime; unifiedSave?: UnifiedSaveHost; authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy; aistudioTrain?: AIStudioTrainPublicAuth; callbackCompensation?: CallbackCompensationHost } = {}): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -134,6 +135,8 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         adminConfig = fallbackAdminConfig;
       }
       const app = express();
+      const callbackCompensation = createCallbackCompensationRuntime(db, context.environment, options.callbackCompensation);
+      callbackCompensation.mountSecurity(app);
       app.use(compression());
       // This adapter consumes the raw body itself. Mount before *any* body parser;
       // parsing here first would defeat its duplicate-key and bounded-body checks.
@@ -346,6 +349,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         gitConfig: autoHealGitConfig,
         gitAuthor: autoHealAuthor,
       })));
+      callbackCompensation.mountRoutes(app);
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
@@ -398,6 +402,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
 
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");
       mountStaticFrontend(app, staticDir);
+      callbackCompensation.start();
       const server = app.listen(port, "127.0.0.1", () => {
         console.info(`[clawweb] Public runner listening on http://127.0.0.1:${port}`);
       });
@@ -405,6 +410,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
           await closeHttpServer(server);
+          await callbackCompensation.stop();
           await clawevolve.stop();
           await closeDatabase();
         },

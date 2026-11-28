@@ -35,7 +35,8 @@ function previousSchema(raw: Database.Database) {
 it('registers v157 exactly once after snapshots, ordinary migrations and retired v155/v156', () => {
   const assembled = [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations, ...aistudioTrainMigrations];
   expect(migration.version).toBe(157);
-  expect(Math.max(...assembled.filter(m => m !== migration).map(m => m.version))).toBe(156);
+  // Verify the predecessor, not the latest migration: later registrations must remain valid.
+  expect(Math.max(...assembled.filter(m => m.version < migration.version).map(m => m.version))).toBe(156);
   expect(assembled.filter(m => m.version === 157)).toEqual([migration]);
   expect(collectMigrations().filter(m => m.version === 157)).toEqual([migration]);
   expect(allMigrations.filter(m => m.version === 157)).toEqual([migration]);
