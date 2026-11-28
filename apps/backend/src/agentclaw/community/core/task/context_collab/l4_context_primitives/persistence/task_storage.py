@@ -13,6 +13,9 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.vie
     CurrentSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    parse_collet_context_spec,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabEventModel,
     ContextCollabTaskModel,
@@ -53,7 +56,8 @@ def load_tasks(db, row) -> tuple[Task | None, tuple[Task, ...]]:
         raise ContextCollabValidationError(
             "product Collet cannot own legacy Task state"
         )
-    if row.root_task_ref is None:
+    spec = parse_collet_context_spec(row)
+    if spec.root_task_ref is None:
         orphan = (
             db.query(ContextCollabTaskModel.id)
             .filter(
@@ -96,7 +100,7 @@ def load_tasks(db, row) -> tuple[Task | None, tuple[Task, ...]]:
         ):
             raise ContextCollabValidationError("Task storage identity/version mismatch")
         tasks.append(task)
-    root = next((task for task in tasks if task.task_id == row.root_task_ref), None)
+    root = next((task for task in tasks if task.task_id == spec.root_task_ref), None)
     if root is None or root.parent_task_ref is not None:
         raise ContextCollabValidationError("missing or invalid root Task")
     ids = {task.task_id for task in tasks}

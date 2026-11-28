@@ -27,6 +27,11 @@ routes, receipts or MultiRollout controller facts, and refuses to save such stat
   This is not evidence that a target deployment has applied the migration or
   retired historical `ac_product_*` tables. Current product service DI binds this
   business repository adapter, not the legacy `SqlProductRuntimeRepository`.
+- The shared L4 Collet model matches the deployed physical schema exactly. Its
+  one non-null JSON `context_spec` column is the versioned envelope for scope,
+  audit metadata, resource bindings, creation facts and the root-Task pointer;
+  no separate physical columns exist for those values. Product creation writes
+  an empty version-2 envelope and never relies on `ac_product_*` storage.
 - [SqlProductBusinessRepository](product_relational_repository.py) provides
   independent Profile creation/read, atomic Collet + initial rollout + static
   stages + creation audit, and authorized consistent business-history reads.

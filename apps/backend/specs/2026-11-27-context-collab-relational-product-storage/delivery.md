@@ -304,3 +304,32 @@ DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/architecture
 Ruff format/check 与 `git diff --check` 通过，新增/修改 source 均低于 1000 行。这些依旧是 SQLite、DI 替身和架构门禁证据；本段尚未目标库执行真实 OpenAPI Bot、通知通道或 MySQL/OceanBase/生产部署验证。
 
 **仍未改变的边界**：本变更解决 Collet 创建前的 runtime capability admission；五表 adapter 对 `save`、late delivery、intent claim/finish 等执行修改路径仍 fail closed。因此完整 worker 派发、签名进度落库、交互后继 rollout 和 MultiRollout 控制流还没有在五表上交付，不能用本段冒充完整 runtime 上线。
+
+## Schema correction (2026-11-28)
+
+- `ContextCollabColletModel` now matches the deployed `ac_context_collab_collet` schema exactly. The model and fresh-install DDL use one non-null JSON `context_spec` column and remove the never-deployed physical `scope`, `collet_metadata`, `resources`, `creation_facts` and `root_task_ref` columns.
+- L4 persistence encodes and decodes those semantic fields through the typed `StoredColletContextSpec` codec. New product Collets write an empty version-2 envelope; Taskless L4 rows and product selection rows mutate only that envelope. No fake ORM properties or hidden compatibility columns are introduced.
+
+- Fresh-install SQL now mirrors the deployed table: `2026_11_11_context_collab.sql` recreates `context_spec`; the Task migration no longer adds `root_task_ref`; and obsolete split-column migrations are removed. The five-table migration still adds only `content`/`status`/`product_profile_id`/`current_rollout_id` and the documented rollout IDs/indexes.
+
+验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/repository/task/context_collab
+```
+
+结果：**361 passed，19 warnings**。
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/core/task/context_collab
+```
+
+结果：**1152 passed，19 warnings**。
+
+```bash
+DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/architecture
+```
+
+结果：**470 passed，44 warnings**。变更文件 `ruff format`/局部 `ruff check` 与 `git diff --check` 通过，新增/修改 source 均低于 1000 行。该验证仍是 SQLite、DI 与架构门禁证据，未执行目标 MySQL/OceanBase DDL 或生产部署。

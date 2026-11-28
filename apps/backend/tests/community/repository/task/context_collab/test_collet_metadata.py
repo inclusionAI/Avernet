@@ -1,6 +1,5 @@
 """Real L4 SQL persistence of Collet description/audit, CAS and legacy history."""
 
-import json
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -15,6 +14,10 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
+)
+from tests.community.repository.task.context_collab.context_spec_test_support import (  # noqa: I001
+    store_context_value,
+    stored_context_value,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
@@ -82,9 +85,11 @@ def test_creation_persists_complete_metadata_separate_from_task_and_product_fact
     assert not hasattr(collet, "objective") and not hasattr(collet, "executor_refs")
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert json.loads(row.collet_metadata) == collet.metadata.to_dict()
-        assert json.loads(row.creation_facts) == {}
-        assert row.root_task_ref is None
+        assert stored_context_value(row, "collet_metadata") == (
+            collet.metadata.to_dict()
+        )
+        assert stored_context_value(row, "creation_facts") == {}
+        assert stored_context_value(row, "root_task_ref") is None
         assert row.current_snapshot is None
 
 
@@ -109,7 +114,9 @@ def test_append_updates_audit_atomically_but_preserves_creation_and_task(
     )
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert json.loads(row.collet_metadata) == current.metadata.to_dict()
+        assert (
+            stored_context_value(row, "collet_metadata") == current.metadata.to_dict()
+        )
     with pytest.raises(ContextCollabVersionConflict):
         repository.append_event(original.collet_id, message())
     assert repository.get_current_status(original.collet_id).collet == current
@@ -170,7 +177,10 @@ def test_append_failure_rolls_back_metadata_head_and_event(
     assert repository.get_current_status(cid) == before
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert json.loads(row.collet_metadata) == before.collet.metadata.to_dict()
+        assert (
+            stored_context_value(row, "collet_metadata")
+            == before.collet.metadata.to_dict()
+        )
 
 
 def test_legacy_null_metadata_reads_and_appends_without_inventing_history(
@@ -179,7 +189,9 @@ def test_legacy_null_metadata_reads_and_appends_without_inventing_history(
     record = create(repository)
     cid = record.collet.collet_id
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = None
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata", None
+        )
     legacy = repository.get_current_status(cid).collet
     assert legacy.metadata is None
     assert legacy.created_at is None and legacy.created_by is None
@@ -199,7 +211,12 @@ def test_legacy_null_metadata_reads_and_appends_without_inventing_history(
     )
     assert repository.get_current_status(cid).collet == saved.collet
     with db.orm_session() as session:
-        assert session.query(ContextCollabColletModel).one().collet_metadata is None
+        assert (
+            stored_context_value(
+                session.query(ContextCollabColletModel).one(), "collet_metadata"
+            )
+            is None
+        )
 
 
 @pytest.mark.parametrize(
@@ -213,39 +230,50 @@ def test_corrupt_or_partial_metadata_fails_read_and_append_without_writes(
     record = create(repository)
     cid = record.collet.collet_id
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = bad
-    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata", bad
+        )
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.get_current_status(cid)
-    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.append_event(cid, message())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert row.context_version == 1 and row.root_task_ref is None
-        assert row.collet_metadata == bad
+        assert (
+            row.context_version == 1
+            and stored_context_value(row, "root_task_ref") is None
+        )
+        assert stored_context_value(row, "collet_metadata") == bad
 
 
 def test_retired_schema_marker_reads_without_rewrite_and_is_removed_on_append(
     repository, db
 ):
     original = create(repository).collet
-    legacy_metadata = {**original.metadata.to_dict(), "schema_version": "1.1"}
-    stored = json.dumps(legacy_metadata)
+    stored = {**original.metadata.to_dict(), "schema_version": "1.1"}
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = stored
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata", stored
+        )
 
     current = repository.get_current_status(original.collet_id).collet
     assert current == original
     assert "schema_version" not in current.to_dict()
     with db.orm_session() as session:
-        assert session.query(ContextCollabColletModel).one().collet_metadata == stored
+        assert (
+            stored_context_value(
+                session.query(ContextCollabColletModel).one(), "collet_metadata"
+            )
+            == stored
+        )
 
     saved = repository.append_event(original.collet_id, message()).collet
     assert saved.created_at == original.created_at
     assert saved.created_by == original.created_by
     assert saved.version == original.version + 1
     with db.orm_session() as session:
-        metadata = json.loads(
-            session.query(ContextCollabColletModel).one().collet_metadata
+        metadata = stored_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata"
         )
         assert metadata == saved.metadata.to_dict()
         assert "schema_version" not in metadata
@@ -256,16 +284,18 @@ def test_unknown_retired_schema_marker_still_fails_without_writes(
     repository, db, value
 ):
     original = create(repository).collet
-    stored = json.dumps({**original.metadata.to_dict(), "schema_version": value})
+    stored = {**original.metadata.to_dict(), "schema_version": value}
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = stored
-    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata", stored
+        )
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.get_current_status(original.collet_id)
-    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+    with pytest.raises(ContextCollabValidationError, match="context_spec"):
         repository.append_event(original.collet_id, message())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert row.collet_metadata == stored
+        assert stored_context_value(row, "collet_metadata") == stored
         assert row.context_version == original.version
 
 
@@ -280,8 +310,8 @@ def test_collaboration_intent_persists_through_read_and_audit_append(repository,
     assert metadata.objective == command.objective
     assert metadata.acceptance_criteria == command.acceptance_criteria
     with db.orm_session() as session:
-        stored = json.loads(
-            session.query(ContextCollabColletModel).one().collet_metadata
+        stored = stored_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata"
         )
         assert stored == metadata.to_dict()
     current = repository.get_current_status(original.collet_id).collet
@@ -292,8 +322,8 @@ def test_collaboration_intent_persists_through_read_and_audit_append(repository,
     assert saved.created_at == original.created_at
     assert saved.updated_by == REPORTER
     with db.orm_session() as session:
-        stored = json.loads(
-            session.query(ContextCollabColletModel).one().collet_metadata
+        stored = stored_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata"
         )
         assert stored == saved.metadata.to_dict()
 
@@ -302,11 +332,18 @@ def test_stored_metadata_without_collaboration_intent_remains_readable(repositor
     original = create(repository).collet
     legacy = original.metadata.to_dict()
     del legacy["objective"], legacy["acceptance_criteria"]
-    stored = json.dumps(legacy)
+    stored = legacy
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = stored
+        store_context_value(
+            session.query(ContextCollabColletModel).one(), "collet_metadata", stored
+        )
     current = repository.get_current_status(original.collet_id).collet
     assert current.metadata.objective == current.metadata.acceptance_criteria == ""
     assert current.created_at == original.created_at
     with db.orm_session() as session:
-        assert session.query(ContextCollabColletModel).one().collet_metadata == stored
+        assert (
+            stored_context_value(
+                session.query(ContextCollabColletModel).one(), "collet_metadata"
+            )
+            == stored
+        )

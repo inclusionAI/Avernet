@@ -8,6 +8,9 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError as Missing,
     ContextCollabValidationError as Invalid,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    parse_collet_context_spec,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
     _collet_from_row,
 )
@@ -44,9 +47,10 @@ def test_create_chain_atomic_physical_ids_and_pure_consistent_reads(online):
     with h.db.orm_session() as session:
         root = session.get(ColletRow, cid)
         assert root.collab_context_id == f"product-v2:{cid}"
-        assert root.current_rollout_id == rid and root.scope == "null"
-        assert root.current_snapshot is root.root_task_ref is None
-        assert root.creation_facts == "{}" and root.context_version == 1
+        spec = parse_collet_context_spec(root)
+        assert root.current_rollout_id == rid and spec.scope is None
+        assert root.current_snapshot is spec.root_task_ref is None
+        assert spec.creation_facts == {} and root.context_version == 1
         audit = session.query(EventRow).one()
         assert audit.collet_rollout_id == rid and audit.collet_stage_rollout_id is None
         assert (

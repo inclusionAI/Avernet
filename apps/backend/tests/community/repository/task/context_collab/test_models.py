@@ -1,4 +1,4 @@
-"""L4 storage matches baseline plus Task/metadata/business-column migrations.
+"""L4 storage matches the deployed Collet plus Task/business-column migrations.
 
 Build real SQLite tables and verify columns, indexes and tenant registration.
 """
@@ -32,12 +32,8 @@ def test_collet_columns_match_ddl(engine):
         "env",
         "collab_context_id",
         "actor_ref",
-        "scope",
-        "collet_metadata",
-        "resources",
-        "creation_facts",
+        "context_spec",
         "current_snapshot",
-        "root_task_ref",
         "current_event_id",
         "context_version",
         "content",

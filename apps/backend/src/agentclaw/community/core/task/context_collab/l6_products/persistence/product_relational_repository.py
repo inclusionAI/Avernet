@@ -50,6 +50,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.collet_rollout impo
 from agentclaw.community.core.task.context_collab.l5_methods.product_business_storage import (
     ProductBusinessHistory,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.context_spec_codec import (
+    encode_collet_context_spec,
+    parse_collet_context_spec,
+    stored_collet_context_spec,
+)
 from ..product_profile import ProductProfileStatus
 from ..profile_record import ProductProfileRecord
 from ..product_profile_service.configuration import compile_configuration, multi_policy
@@ -252,10 +257,16 @@ class SqlProductBusinessRepository:
                 **axes,
                 collab_context_id=f"pending-product:{uuid4().hex}",
                 actor_ref=canonical(context.actor.to_dict()),
-                scope="null",
-                creation_facts="{}",
+                context_spec=encode_collet_context_spec(
+                    stored_collet_context_spec(
+                        scope=None,
+                        collet_metadata=None,
+                        resources=(),
+                        creation_facts={},
+                        root_task_ref=None,
+                    )
+                ),
                 current_snapshot=None,
-                root_task_ref=None,
                 content=content,
                 status=S.CREATE.value,
                 product_profile_id=profile.id,
@@ -312,7 +323,7 @@ class SqlProductBusinessRepository:
             or row.current_rollout_id is None
             or row.actor_ref is None
             or row.collab_context_id != f"product-v2:{row.id}"
-            or row.root_task_ref is not None
+            or parse_collet_context_spec(row).root_task_ref is not None
             or row.current_snapshot is not None
         ):
             raise Invalid("incomplete or conflicting product Collet")

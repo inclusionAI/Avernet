@@ -54,7 +54,6 @@ def _spec(product_kind: str, objective: str = "整理评审结论") -> dict:
 
 def _create(db, product_kind: str, objective: str = "整理评审结论"):
     from agentclaw.community.core.task.context_collab.persistence.repository import (
-        CreateColletRecordRequest,
         InitialEventDraft,
     )
 
@@ -118,8 +117,7 @@ class TestListColletsByProduct:
             bad = ContextCollabColletModel(
                 collab_context_id="collet_partial_row_1",
                 actor_ref=None,
-                scope=json.dumps({"space_id": "s_x", "environment": "prod"}),
-                creation_facts=json.dumps(
+                context_spec=json.dumps(
                     {
                         "objective": "外部行",
                         "resource_refs": [],
